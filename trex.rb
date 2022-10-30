@@ -86,7 +86,7 @@ module TRex
             unless t.state.allbits?(Ripper::EXPR_LABEL)
               opens << [t, :in_while_until_condition]
             end
-          when 'ensure'
+          when 'ensure', 'rescue'
             unless t.state.allbits?(Ripper::EXPR_LABEL)
               opens.pop
               opens << t
@@ -135,25 +135,29 @@ module TRex
     opens + pending_heredocs.reverse
   end
 
-  def self.each_line(tokens)
+  def self.parse_line(tokens)
     line_tokens = []
     prev_opens = []
     min_depth = 0
+    output = []
     last_opens = TRex.parse(tokens) do |t, _index, opens|
-      min_depth = opens.size if opens.size < min_depth
+      depth = t == opens.last ? opens.size - 1 : opens.size
+      min_depth = depth if depth < min_depth
       if t.tok.include? "\n"
-        line_tokens << t
-        next_opens = opens.dup
-        yield line_tokens, prev_opens, next_opens, min_depth
-        prev_opens = next_opens
-        min_depth = prev_opens.size
-        line_tokens = []
+        t.tok.each_line do |line|
+          line_tokens << [t, line]
+          next if line[-1] != "\n"
+          next_opens = opens.dup
+          output << [line_tokens, prev_opens, next_opens, min_depth]
+          prev_opens = next_opens
+          min_depth = prev_opens.size
+          line_tokens = []
+        end
       else
-        line_tokens << t
+        line_tokens << [t, t.tok]
       end
     end
-    yield line_tokens, prev_opens, last_opens, min_depth
-    raise 'eee' unless min_depth.is_a? Integer
-    [line_tokens, prev_opens, last_opens, min_depth]
+    output << [line_tokens, prev_opens, last_opens, min_depth]
+    output
   end
 end
