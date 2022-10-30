@@ -134,4 +134,26 @@ module TRex
     end
     opens + pending_heredocs.reverse
   end
+
+  def self.each_line(tokens)
+    line_tokens = []
+    prev_opens = []
+    min_depth = 0
+    last_opens = TRex.parse(tokens) do |t, _index, opens|
+      min_depth = opens.size if opens.size < min_depth
+      if t.tok.include? "\n"
+        line_tokens << t
+        next_opens = opens.dup
+        yield line_tokens, prev_opens, next_opens, min_depth
+        prev_opens = next_opens
+        min_depth = prev_opens.size
+        line_tokens = []
+      else
+        line_tokens << t
+      end
+    end
+    yield line_tokens, prev_opens, last_opens, min_depth
+    raise 'eee' unless min_depth.is_a? Integer
+    [line_tokens, prev_opens, last_opens, min_depth]
+  end
 end

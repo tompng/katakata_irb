@@ -1,31 +1,20 @@
 require 'irb'
 require_relative './trex'
 
-code = File.read __FILE__
+code = File.read('./trex.rb') + File.read(__FILE__)
 tokens = RubyLex.ripper_lex_without_warning code
 
-code = []
-nl = true
-TRex.parse(tokens){|t,i,opens|
-  p [t,i,opens]
-  indent_level = opens.size
-  if t.tok.include? "\n"
-    code << t.tok.sub(/ *\z/, '')
-    nl = true
-  elsif nl
-    if t.tok !~ /\A *\z/
-      ot, = opens.last
-      indent_level = opens.size - (ot == t ? 1 : 0)
-      code << '  '*indent_level if nl
-      nl = false
-      code << t.tok
-    end
+code = ''
+TRex.each_line tokens do |ltokens, prev_opens, next_opens, min_depths|
+  if ltokens.first&.event == :on_sp
+    level = prev_opens.take(min_depths).size
+    code << ('  ' * level) + ltokens.drop(1).map(&:tok).join
   else
-    code << t.tok
+    code << ltokens.map(&:tok).join
   end
-}
+end
 
-puts IRB::Color.colorize_code code.join
+puts IRB::Color.colorize_code code
 
 if false
   def hoge()=1
