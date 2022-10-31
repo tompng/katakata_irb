@@ -73,6 +73,10 @@ module RubyLexPatch
     end
   end
 
+  def process_continue(tokens)
+    tokens.last&.event == :on_sp && tokens.last.tok == "\\\n"
+  end
+
   def check_termination_in_prev_line(code, context: nil)
     tokens = self.class.ripper_lex_without_warning(code, context: context)
     lines, = TRex.parse_line(tokens)
