@@ -152,7 +152,7 @@ module TRex
     min_depth = 0
     output = []
     last_opens, unclosed_heredocs = TRex.parse(tokens) do |t, _index, opens|
-      depth = t == opens.last ? opens.size - 1 : opens.size
+      depth = t == opens.last&.first ? opens.size - 1 : opens.size
       min_depth = depth if depth < min_depth
       if t.tok.include? "\n"
         t.tok.each_line do |line|
