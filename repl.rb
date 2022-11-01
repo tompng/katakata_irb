@@ -12,5 +12,7 @@ end
 
 require 'irb'
 require_relative './ruby_lex_patch'
+require_relative './completion'
 RubyLex.prepend RubyLexPatch
+Completion.patch_to_completor
 IRB.start(__FILE__)

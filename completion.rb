@@ -65,7 +65,8 @@ module Completion
 
   using LexerElemMatcher
 
-  def self.analyze(tokens)
+  def self.analyze(tokens, binding = Kernel.binding)
+    tokens = tokens.reject { _1 in { event: :on_sp | :on_ignored_nl | :on_comment | [{ event: :on_heredoc_beg }, *] }}
     stack, opens = stree tokens
     tree = stack.last
     return if tree.empty?
@@ -74,8 +75,7 @@ module Completion
       if (
           tree in [{ event: :on_tstring_beg }, { event: :on_tstring_content, tok: target }]
         ) && (
-          (stack[-2] in [*, { event: :on_ident, tok: 'require' | 'require_relative' => method }, { event: :on_sp }, Array]) ||
-          (stack[-2] in [*, { event: :on_ident, tok: 'require' | 'require_relative' => method }, Array])
+          stack[-2] in [*, { event: :on_ident, tok: 'require' | 'require_relative' => method }, Array]
         )
         return [:require, method, target]
       end
@@ -89,11 +89,9 @@ module Completion
     end
     case tree
     in [*prev, { event: :on_period } | { event: :on_op, tok: '::' } => dot, { event: :on_ident, tok: name }]
-      [:method_call_or_const_accessor, dot, name, receiver(prev)]
-    in [*prev, { event: :on_period } | { event: :on_op, tok: '::' } => dot, { event: :on_sp | :on_ignored_nl }, { event: :on_ident, tok: name }]
-      [:method_call_or_const_accessor, dot, name, receiver(prev)]
+      [:method_call_or_const_accessor, dot.tok, name, receiver(prev, binding)]
     in [*prev, { event: :on_period } | { event: :on_op, tok: '::' } => dot]
-      [:method_call_or_const_accessor, dot, receiver(prev)]
+      [:method_call_or_const_accessor, dot.tok, '', receiver(prev, binding)]
     in [*prev, [{ event: :on_symbeg }, { event: :on_kw | :on_ident | :on_const | :on_gvar, tok: name }]]
       [:symbol, name]
     in [*prev, { event: :on_int }]
@@ -103,12 +101,12 @@ module Completion
     end
   end
 
-  def self.receiver(tree, binding = Kernel.binding)
+  def self.receiver(tree, binding)
     receiver_type receiver_tree(tree), binding
   end
 
   def self.receiver_type(tree, binding)
-    return unless tree
+    return [] unless tree
     tree = tree.dup
     first_token = tree.shift
     receiver = case first_token
@@ -128,10 +126,9 @@ module Completion
       binding.local_variables.include?(tok.to_sym) ? binding.eval(tok).class : nil
     in { event: :on_const, tok: }
       begin
-        const = binding.const_get(tok)
+        const = Object.const_get(tok)
         const.is_a?(Module) ? { class: const } : const.class
       rescue
-        nil
       end
     in { event: :on_ivar | :on_gvar, tok: }
       binding.eval(tok).class rescue nil
@@ -146,8 +143,8 @@ module Completion
     in [{ event: :on_lbrace }, *]
       Hash
     else
-      nil
     end
+    return [] unless receiver
     receiver_types = [receiver]
     tree.each do |t|
       if t in [{ event: :on_lbracket }, *]
@@ -156,11 +153,9 @@ module Completion
         method = tok.to_sym
       end
       if method
-        receiver_types2 = receiver_types.flat_map do |klass|
+        receiver_types = receiver_types.flat_map do |klass|
           method_response klass, method
         end.uniq
-        # Kernel.binding.irb
-        receiver_types = receiver_types2
       end
     end
     receiver_types
@@ -194,6 +189,40 @@ module Completion
       end
     end
     receiver
+  end
+
+  def self.patch_to_completor
+    completion_proc = ->(target, preposing = nil, postposing = nil) do
+      code = "#{preposing}#{target}"
+      tokens = RubyLex.ripper_lex_without_warning code
+      result = analyze tokens, IRB.conf[:MAIN_CONTEXT].workspace.binding
+      data = case result
+      in [:int_or_int_method_call]
+        if target.end_with? '.'
+          Integer.instance_methods.sort.map do
+            target + _1.to_s
+          end
+        else
+          []
+        end
+      in [:symbol, name]
+        ['hoge', 'fuga']
+      in [:method_call_or_const_accessor, dot, name, classes]
+        candidates = classes.flat_map do |k|
+          if k in { class: klass }
+            klass.methods
+          else
+            k.instance_methods
+          end
+        end
+        candidates.select { _1.start_with? name }.uniq.sort.map do
+          target + _1[name.size..]
+        end
+      else
+        []
+      end
+    end
+    IRB::InputCompletor.const_set :CompletionProc, completion_proc
   end
 end
 
