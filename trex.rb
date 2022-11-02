@@ -15,7 +15,7 @@ module TRex
           body = nil
           if args.include? :receiver
             case t.event
-            when :on_lparen, :on_ivar, :on_gvar
+            when :on_lparen, :on_ivar, :on_gvar, :on_cvar
               next_args << :dot
             when :on_op, :on_kw
               skip = true
