@@ -25,7 +25,6 @@ module Completion
   end
 
   def self.method_response(klass, method)
-    return [OBJECT_METHODS[method]] if OBJECT_METHODS.has_key? method
     singleton = false
     singleton = true if klass in { class: klass }
     return [klass] if singleton && method == :new
@@ -37,24 +36,12 @@ module Completion
     return [] unless method
     names = method.method_types.filter_map { |method_type| method_type.type.return_type.name.name rescue nil }.uniq
     names.filter_map { Object.const_get _1 rescue nil }
+  rescue => e
+    p ERROR: klass
+    STDOUT.cooked{puts e.backtrace}
+    exit
   end
 
-  def self.stree(tokens)
-    stack = [[]]
-    last_opens, _unclosed_heredocs = TRex.parse tokens do |t, _index, opens|
-      if stack.size > opens.size + 1
-        stack.last << t
-        stack.pop
-      elsif stack.size < opens.size + 1
-        a = [t]
-        stack.last << a
-        stack << a
-      else
-        stack.last << t
-      end
-    end
-    [stack, last_opens]
-  end
 
   module LexerElemMatcher
     refine Ripper::Lexer::Elem do
@@ -69,278 +56,229 @@ module Completion
       end
     end
   end
-
   using LexerElemMatcher
-
-  def self.analyze(tokens, binding = Kernel.binding)
-    tokens = tokens.reject { _1 in { event: :on_ignored_nl | :on_comment | [{ event: :on_heredoc_beg | :on_embdoc_beg }, *] }}
-    stack, opens = stree tokens
-    tree = stack.last
-    return if tree.empty?
-    case opens.last&.first&.event
-    when :on_tstring_beg
-      if (
-          tree in [{ event: :on_tstring_beg }, { event: :on_tstring_content, tok: target }]
-        ) && (
-          stack[-2].reject {|t| t in { event: :on_sp }} in [*, { event: :on_ident, tok: 'require' | 'require_relative' => method }, Array]
-        )
-        return [:require, method, target]
-      end
-    when :on_symbeg
-      # unclosed `:"symbol"`, `%s[symbol]`
-      if tree in [{ event: :on_symbeg }, { event: :on_tstring_content } => t]
-        return [:symbol, t.tok]
-      else
-        return
-      end
-    end
-    case tree
-    in [*prev, { event: :on_sp }, { event: :on_op, tok: '::' } => dot, { event: :on_const, tok: name }]
-      [:cosnt, name] # TODO (::Const) (exp;::Const)
-    in [*prev, { event: :on_op, tok: '::' } => dot, { event: :on_const | :on_ident | :on_kw | :on_op, tok: name }]
-      [:cosnt, name]
-    in [*prev, { event: :on_period } | { event: :on_op, tok: '::' } => dot, { event: :on_ident, tok: name }]
-      [:method_call_or_const_accessor, dot.tok, name, receiver(prev, binding)]
-    in [*prev, { event: :on_period } | { event: :on_op, tok: '::' } => dot]
-      [:method_call_or_const_accessor, dot.tok, '', receiver(prev, binding)]
-    in [*prev, [{ event: :on_symbeg }, { event: :on_kw | :on_ident | :on_const | :on_gvar, tok: name }]]
-      [:symbol, name]
-    in [*prev, { event: :on_int }]
-      [:int_or_int_method_call]
-    else
-      return
-    end
-  end
-
-  def self.receiver(tree, binding)
-    receiver, method_chains = get_receiver_method_chains tree
-    type = receiver_type receiver, binding
-    types = type ? [type] : []
-    method_chains.each do |_dot, method, _args, _block, bracket|
-      if method
-        # Kernel.binding.irb
-        types = types.flat_map do |klass|
-          method_response klass, method.tok.to_sym
-        end.uniq
-      end
-      if bracket
-        types = types.flat_map do |klass|
-          method_response klass, :[]
-        end.uniq
-      end
-    end
-    types
-  end
-
-  def self.receiver_type(receiver, binding)
-    case receiver
-    in [{ event: :on_tlambeg | :on_tstring_beg | :on_symbeg | :on_backtick | :on_regexp_beg | :on_words_beg | :on_qwords_beg | :on_symbols_beg | :on_qsymbols_beg } => t, *]
-      { on_tlambeg: Proc, on_tstring_beg: String, on_symbeg: Symbol, on_backtick: String, on_regexp_beg: Regexp, on_words_beg: Array, on_qwords_beg: Array, on_symbols_beg: Array, on_qsymbols_beg: Array }[t.event]
-    in { event: :on_CHAR | :on_int | :on_float | :on_rational | :on_imaginary | :on_heredoc_beg }
-      { on_CHAR: String, on_int: Integer, on_float: Float, on_rational: Rational, on_imaginary: Complex, on_herdoc_beg: String }[receiver.event]
-    in { event: :on_kw, tok: 'nil' | 'true' | 'false' }
-      { 'nil' => NilClass, 'true' => TrueClass, 'false' => FalseClass }[receiver.tok]
-    in { event: :on_cvar | :on_ivar | :on_gvar | :on_ident, tok: }
-      binding.eval(tok).class rescue nil
-    in { event: :on_ident, tok: }
-      binding.eval(tok).class if binding.local_variables.include? tok
-    in [{ event: :on_kw }, *] |
-      nil
-    in [{ event: :on_lbracket, label: true }, *] |
-      Hash
-    in [{ event: :on_lparen }, *]
-      nil # not implemented
-    else
-      nil
-    end
-  end
-
-  def self.parse(tree)
-    # if tree.
-    # p tree
-    # case tree
-    # in [{ event: :lparen}, *inner, {}]
-    #   parse inner
-    # in [receiver, { event: :period }, { tok: method }, *rest]
-    #   { receive: parse(receiver), method:, parse
-  end
-
-  def self.hoge(tree, binding)
-    return [] unless tree
-    tree = tree.dup
-    first_token = tree.shift
-    receiver = case first_token
-    in { event: :on_int }
-      Integer
-    in { event: :on_float }
-      Float
-    in { event: :on_rational }
-      Rational
-    in { event: :on_imaginary }
-      Complex
-    in { event: :on_CHAR | :on_heredoc_beg } | [{ event: :on_tstring_beg | :on_backtick }, *]
-      String
-    in { event: :on_ident, tok: 'proc' | 'lambda' }
-      Proc # or localvar?
-    in { event: :on_ident, tok: }
-      binding.local_variables.include?(tok.to_sym) ? binding.eval(tok).class : nil
-    in { event: :on_const, tok: }
-      begin
-        const = Object.const_get(tok)
-        const.is_a?(Module) ? { class: const } : const.class
-      rescue
-      end
-    in { event: :on_ivar | :on_gvar, tok: }
-      binding.eval(tok).class rescue nil
-    in [{ event: :on_tlambeg }, *]
-      Proc
-    in [{ event: :on_regexp_beg }, *]
-      Regexp
-    in [{ event: :on_symbeg }, *]
-      Symbol
-    in [{ event: :on_lbracket | :on_words_beg | :on_qwords_beg | :on_symbols_beg | :on_qsymbols_beg }, *]
-      Array
-    in [{ event: :on_lbrace }, *]
-      Hash
-    else
-    end
-    return [] unless receiver
-    receiver_types = [receiver]
-    tree.each do |t|
-      if t in [{ event: :on_lbracket }, *]
-        method = :[]
-      elsif t in { event: :on_ident | :on_op | :on_kw, tok: }
-        method = tok.to_sym
-      end
-      if method
-        receiver_types = receiver_types.flat_map do |klass|
-          method_response klass, method
-        end.uniq
-      end
-    end
-    receiver_types
-  end
-
-  DOT = -> { _1 in { event: :on_period, dot: true } | { event: :on_op, top: '::', dot: true } }
-  METHOD = -> { _1 in { event: :on_kw | :on_ident | :on_const | :on_op } }
-  BLOCK = -> { _1 in [{ event: :on_lbrace, label: false }, *] | [{ event: :on_kw, tok: 'do' }, *] }
-  PAREN = -> { _1 in [{ event: :on_lparen }, *] }
-  BRACKET = -> { _1 in [{ event: :on_lbracket }, *] }
-
-  def self.tail_match(tree, matchers)
-    idx = tree.size - 1
-    matched = matchers.reverse_each.map do |m|
-      idx -= 1 while idx >= 0 && tree[idx] in { event: :on_sp }
-      return nil unless idx >= 0 && (m.nil? || m.call(tree[idx]))
-      if m
-        idx -= 1
-        tree[idx + 1]
-      end
-    end
-    [matched.reverse, tree.size - idx - 1]
-  end
-
-  def self.get_receiver_method_chains(tree)
-    end_idx = tree.rindex { _1 in { event: :on_semicolon | :on_nl } | { event: :on_kw, tok: 'if' | 'while' | 'unless' | 'until' | 'rescue', label: true } }
-    tree = end_idx ? tree[end_idx + 1..] : tree.dup
-
-    receiver_pattern = -> do
-      _1 in [{ event: :on_tlambeg | :on_tstring_beg | :on_symbeg | :on_backtick | :on_regexp_beg | :on_words_beg | :on_qwords_beg | :on_symbols_beg | :on_qsymbols_beg }, *] |
-            { event: :on_CHAR | :on_int | :on_float | :on_rational | :on_imaginary | :on_heredoc_beg } |
-            { event: :on_kw, tok: 'nil' | 'true' | 'false' } |
-            { event: :on_cvar | :on_ivar | :on_gvar } |
-            [{ event: :on_kw }, *] |
-            [{ event: :on_lbracket, label: true }, *] |
-            [{ event: :on_lparen }, *]
-    end
-
-    method_chain = []
-    while true
-      matched, size =
-        tail_match(tree, [DOT, METHOD, PAREN, BLOCK, BRACKET]) ||
-        tail_match(tree, [DOT, METHOD, PAREN, nil, BRACKET]) ||
-        tail_match(tree, [DOT, METHOD, nil, nil, BRACKET]) ||
-        tail_match(tree, [DOT, METHOD, PAREN, BLOCK, nil]) ||
-        tail_match(tree, [DOT, METHOD, nil, BLOCK, nil]) ||
-        tail_match(tree, [DOT, METHOD, PAREN, nil, nil]) ||
-        tail_match(tree, [DOT, METHOD, nil, nil, nil])
-      if matched
-        method_chain.unshift matched
-        tree = tree[0...-size]
-      elsif (matched, = tail_match tree, [receiver_pattern])
-        return [matched[0], method_chain]
-      else
-        return [nil, method_chain] # unknown receiver
-      end
-    end
-  end
 
   def self.patch_to_completor
     completion_proc = ->(target, preposing = nil, postposing = nil) do
       code = "#{preposing}#{target}"
       tokens = RubyLex.ripper_lex_without_warning code
-      result = analyze tokens, IRB.conf[:MAIN_CONTEXT].workspace.binding
-      case result
-      in [:int_or_int_method_call]
-        if target.end_with? '.'
-          Integer.instance_methods.sort.map do
-            target + _1.to_s
-          end
-        else
-          []
-        end
+      binding = IRB.conf[:MAIN_CONTEXT].workspace.binding
+      suffix = code.end_with?('.') && tokens.last&.tok != '.' ? '.' : ''
+      result = analyze tokens, binding, suffix
+      candidates = case result
       in [:require, method, lib]
         ['irb', 'reline']
+      in [:const, classes, name]
+        classes.flat_map do |k|
+          (k in { class: klass }) ? klass.constants : []
+        end
+      in [:gvar, name]
+        global_variables
       in [:symbol, name]
-        ['hoge', 'fuga']
-      in [:method_call_or_const_accessor, dot, name, classes]
-        candidates = classes.flat_map do |k|
+        Symbol.all_symbols
+      in [:call, classes, name]
+        classes.flat_map do |k|
           if k in { class: klass }
             klass.methods
           else
             k.instance_methods
           end
         end
-        candidates.select { _1.start_with? name }.uniq.sort.map do
-          target + _1[name.size..]
-        end
+      in [:lvar_or_method, name]
+        Kernel.methods | binding.local_variables
       else
         []
+      end
+      candidates.select { _1.start_with? name }.uniq.sort.map do
+        target + _1.to_s[name.size..]
       end
     end
     IRB::InputCompletor.const_set :CompletionProc, completion_proc
   end
 
-  def self.analyze2(tokens)
+  def self.analyze(tokens, binding = Kernel.binding, suffix = '')
+    return if tokens.last&.tok =~ /(\?|\!)\z/
     last_opens, unclosed_heredocs = TRex.parse(tokens){ }
     closing_heredocs = unclosed_heredocs.map {|t|
-      "\n#{t.tok.match(/\A<<(?:"(?<s>.+)"|'(?<s>.+)'|(?<s>.+))/)[:s]}\n"
+      t.tok.match(/\A<<(?:"(?<s>.+)"|'(?<s>.+)'|(?<s>.+))/)[:s]
     }
     closings = last_opens.map do |t,|
       case t.tok
-      when /[{}]/
+      when /\A%.[<>]\z/
+        '>'
+      when '{', /\A%.[{}]\z/
         '}'
-      when /[()]/
+      when '(', /\A%.[()]\z/
         ')'
-      when /[\[\]]/
+      when '[', /\A%.[\[\]]\z/
         ']'
-      when /\A%.*(.)/
+      when /\A%.?(.)\z/
         $1
       else
-        ';end;'
+        'end'
       end
     end
-    code = tokens.map(&:tok).join + 'xxxxxx' + closing_heredocs.reverse.join + closings.reverse.join
-    puts code
+    ivar_cvar_available = !last_opens.any? {|t,| t in { event: :on_kw, tok: 'class' | 'module' } }
+    lvar_available = !last_opens.any? {|t,| t in { event: :on_kw, tok: 'class' | 'module' | 'def' } }
+    alphabet = ('a'..'z').to_a
+    mark = "_completion_#{8.times.map { alphabet.sample }.join}x"
+    code = tokens.map(&:tok).join + suffix + mark + $/ + closing_heredocs.reverse.join($/) + $/ + closings.reverse.join($/)
     sexp = Ripper.sexp code
-    binding.irb
+    *, expression, target, _token = find_pattern sexp, mark
+    return unless expression && (target in [type, String => name_with_mark, [Integer, Integer]])
+    name = name_with_mark.sub mark, ''
+    case expression
+    in [:vcall, [:@ident,]]
+      if lvar_available
+        [:lvar_or_method, name]
+      else
+        [:call, [{ class: Kernel }], name]
+      end
+    in [:symbol, [:@ident,]]
+      [:symbol, name]
+    in [:var_ref | :const_ref, [:@const,]]
+      [:const, [{ class: Object }], name]
+    in [:var_ref, [:@gvar,]]
+      [:gvar, name]
+    in [:var_ref, [:@ivar,]]
+      [:ivar, name] if ivar_cvar_available
+    in [:var_ref, [:@cvar,]]
+      [:cvar, name] if ivar_cvar_available
+    in [:call, receiver, [:@period,] | :'::', [:@ident | :@const, ^name_with_mark,]]
+      [:call, simulate_evaluate(receiver), name]
+    in [:const_path_ref, receiver, [:@const,]]
+      [:const, simulate_evaluate(receiver), name]
+    else
+      STDOUT.cooked{
+        10.times { puts }
+        p [:ERROR, expression]
+      }
+      binding.irb
+      exit
+    end
+  end
+
+  def self.simulate_evaluate(sexp)
+    result = case sexp
+    in [:def,]
+      [Symbol]
+    in [:@int,]
+      [Integer]
+    in [:@float,]
+      [Float]
+    in [:@rational,]
+      [Rational]
+    in [:@imaginary,]
+      [Complex]
+    in [:symbol_literal | :dyna_symbol,]
+      [Symbol]
+    in [:string_literal | :@CHAR, ]
+      [String]
+    in [:regexp_literal,]
+      [Regexp]
+    in [:array,]
+      [Array]
+    in [:hash,]
+      [Hash]
+    in [:paren, statements]
+      simulate_evaluate statements.last
+    in [:const_path_ref, receiver, [:@const, name,]]
+      simulate_evaluate(receiver).filter_map do |k|
+        begin
+          if k in { class: klass }
+            value = klass.const_get name
+            value.is_a?(Module) ? { class: value } : value.class
+          end
+        rescue
+        end
+      end
+    in [:var_ref, [:@kw, name,]]
+      klass = { 'true' => TrueClass, 'false' => FalseClass, 'nil' => NilClass }[name]
+      [*klass]
+    in [:var_ref, [:@const, name,]]
+      begin
+        value = Object.const_get name
+        value.is_a?(Module) ? [{ class: value }] : [value.class]
+      rescue
+        []
+      end
+    in [:call | :vcall | :command | :command_call | :method_add_arg | :method_add_block,]
+      receiver, method, args, kwargs, block = retrieve_method_call sexp
+      receiver_type = simulate_evaluate receiver if receiver
+      args_type = args&.map { simulate_evaluate _1 }
+      kwargs_type = kwargs&.transform_values { simulate_evaluate _1 }
+      simulate_call receiver_type, method, args_type, kwargs_type, block
+    in [:binary, a, Symbol => op, b]
+      simulate_call simulate_evaluate(a), op, [simulate_evaluate(b)], {}, false
+    in [:unary, op, receiver]
+      simulate_call simulate_evaluate(receiver), op, [], {}, false
+    end
+    result
+  end
+
+  def self.retrieve_method_call(sexp)
+    case sexp
+    in [:fcall | :vcall, [:@ident | :@const | :@kw | :@op, method,]] # hoge
+      [nil, method, [], {}, false]
+    in [:call, receiver, [:@period,] | :'::', [:@ident | :@const | :@kw | :@op, method,]] # a.hoge
+      [receiver, method, [], {}, false]
+    in [:command, [:@ident | :@const | :@kw | :@op, method,], args] # hoge 1, 2
+      args, kwargs, block = retrieve_method_args args
+      [nil, method, args, kwargs, block]
+    in [:command_call, receiver, [:@period,] | :'::', [:@ident | :@const | :@kw | :@op, method,], args] # a.hoge 1; a.hoge 1, 2;
+      args, kwargs, block = retrieve_method_args args
+      [receiver, method, args, kwargs, block]
+    in [:method_add_arg, call, args]
+      receiver, method = retrieve_method_call call
+      args, kwargs, block = retrieve_method_args args
+      [receiver, method, args, kwargs, block]
+    in [:method_add_block, call, block]
+      receiver, method, args, kwargs = retrieve_method_call(call)
+      [receiver, method, args, kwargs, true]
+    end
+  end
+
+  def self.retrieve_method_args(sexp)
+    # case sexp
+    # in [:args_add_block, [:args_add_star]]
+    # in [:arg_paren, args]
+    # end
+    # unimplemented
+    [[], {}, false]
+  end
+
+  def self.simulate_call(receiver, method, _args, _kwargs, _has_block)
+    receiver ||= [{ class: Kernel }]
+    result = receiver.flat_map do |klass|
+      method_response klass, method.to_sym
+    end.uniq
+    result |= [OBJECT_METHODS[method.to_sym]] if OBJECT_METHODS.has_key? method.to_sym
+    result
+  end
+
+  def self.find_pattern(sexp, pattern, stack = [sexp])
+    return unless sexp.is_a? Array
+    sexp.each do |child|
+      if child.is_a?(String) && child.include?(pattern)
+        stack << child
+        return stack
+      else
+        stack << child
+        result = find_pattern(child, pattern, stack)
+        return result if result
+        stack.pop
+      end
+    end
+    nil
   end
 
 end
 
 if $0 == __FILE__
   code = <<~'RUBY'.chomp
-    if true
+    a = 1
+    def geso()
+      p 1
       10.times do |i|
         ([1, 2, ((3+(i.times.map{}.size+4)*5.to_i).itself
         hoge
@@ -350,9 +288,9 @@ if $0 == __FILE__
         end[0].a(1).b{2}.c[3].d{4}[5].e
         123.to_f.hoge
         %[].aa
-        '$hello'.to_s.size.times.map.to_a.hoge
+        '$hello'.to_s.size.times.map.to_a.hoge.to_a.hoge
+        hoge.to_i.hoge
   RUBY
   tokens = RubyLex.ripper_lex_without_warning(code)
-  # p Completion.stree tokens
   p Completion.analyze tokens
 end
