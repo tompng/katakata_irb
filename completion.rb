@@ -61,10 +61,12 @@ module Completion
   def self.patch_to_completor
     completion_proc = ->(target, preposing = nil, postposing = nil) do
       code = "#{preposing}#{target}"
-      tokens = RubyLex.ripper_lex_without_warning code
-      binding = IRB.conf[:MAIN_CONTEXT].workspace.binding
+      irb_context = IRB.conf[:MAIN_CONTEXT]
+      binding = irb_context.workspace.binding
+      lvars_code = RubyLex.generate_local_variables_assign_code binding.local_variables
+      tokens = RubyLex.ripper_lex_without_warning lvars_code + code, context: irb_context
       suffix = code.end_with?('.') && tokens.last&.tok != '.' ? '.' : ''
-      result = analyze tokens, binding, suffix
+      result = analyze(tokens, binding, suffix:)
       candidates = case result
       in [:require, method, lib]
         ['irb', 'reline']
@@ -75,7 +77,7 @@ module Completion
       in [:gvar, name]
         global_variables
       in [:symbol, name]
-        Symbol.all_symbols
+        Symbol.all_symbols.reject { _1.match? '_trex_completion_' }
       in [:call, classes, name]
         classes.flat_map do |k|
           if k in { class: klass }
@@ -96,7 +98,7 @@ module Completion
     IRB::InputCompletor.const_set :CompletionProc, completion_proc
   end
 
-  def self.analyze(tokens, binding = Kernel.binding, suffix = '')
+  def self.analyze(tokens, binding = Kernel.binding, suffix: '')
     return if tokens.last&.tok =~ /(\?|\!)\z/
     last_opens, unclosed_heredocs = TRex.parse(tokens){ }
     closing_heredocs = unclosed_heredocs.map {|t|
@@ -118,36 +120,37 @@ module Completion
         'end'
       end
     end
-    ivar_cvar_available = !last_opens.any? {|t,| t in { event: :on_kw, tok: 'class' | 'module' } }
+    icvar_available = !last_opens.any? {|t,| t in { event: :on_kw, tok: 'class' | 'module' } }
     lvar_available = !last_opens.any? {|t,| t in { event: :on_kw, tok: 'class' | 'module' | 'def' } }
     alphabet = ('a'..'z').to_a
-    mark = "_completion_#{8.times.map { alphabet.sample }.join}x"
+    mark = "_trex_completion_#{8.times.map { alphabet.sample }.join}x"
     code = tokens.map(&:tok).join + suffix + mark + $/ + closing_heredocs.reverse.join($/) + $/ + closings.reverse.join($/)
     sexp = Ripper.sexp code
     *, expression, target, _token = find_pattern sexp, mark
     return unless expression && (target in [type, String => name_with_mark, [Integer, Integer]])
     name = name_with_mark.sub mark, ''
     case expression
-    in [:vcall, [:@ident,]]
+    in [:vcall | :var_ref, [:@ident,]]
       if lvar_available
         [:lvar_or_method, name]
       else
         [:call, [{ class: Kernel }], name]
       end
-    in [:symbol, [:@ident,]]
+    in [:symbol, [:@ident | :@const | :@op | :@kw,]]
       [:symbol, name]
     in [:var_ref | :const_ref, [:@const,]]
       [:const, [{ class: Object }], name]
     in [:var_ref, [:@gvar,]]
       [:gvar, name]
     in [:var_ref, [:@ivar,]]
-      [:ivar, name] if ivar_cvar_available
+      [:ivar, name] if icvar_available
     in [:var_ref, [:@cvar,]]
-      [:cvar, name] if ivar_cvar_available
+      [:cvar, name] if icvar_available
     in [:call, receiver, [:@period,] | :'::', [:@ident | :@const, ^name_with_mark,]]
-      [:call, simulate_evaluate(receiver), name]
+      [:call, simulate_evaluate(receiver, binding, lvar_available, icvar_available), name]
     in [:const_path_ref, receiver, [:@const,]]
-      [:const, simulate_evaluate(receiver), name]
+      [:const, simulate_evaluate(receiver, binding, lvar_available, icvar_available), name]
+    in [:def,]
     else
       STDOUT.cooked{
         10.times { puts }
@@ -158,8 +161,8 @@ module Completion
     end
   end
 
-  def self.simulate_evaluate(sexp)
-    result = case sexp
+  def self.simulate_evaluate(sexp, binding, lvar_available, icvar_available)
+    case sexp
     in [:def,]
       [Symbol]
     in [:@int,]
@@ -181,39 +184,51 @@ module Completion
     in [:hash,]
       [Hash]
     in [:paren, statements]
-      simulate_evaluate statements.last
+      simulate_evaluate statements.last, binding, lvar_available, icvar_available
     in [:const_path_ref, receiver, [:@const, name,]]
-      simulate_evaluate(receiver).filter_map do |k|
-        begin
-          if k in { class: klass }
-            value = klass.const_get name
-            value.is_a?(Module) ? { class: value } : value.class
-          end
-        rescue
-        end
+      simulate_evaluate(receiver, binding, lvar_available, icvar_available).flat_map do |k|
+        (k in { class: klass }) ? type_of { klass.const_get name } : []
       end
     in [:var_ref, [:@kw, name,]]
       klass = { 'true' => TrueClass, 'false' => FalseClass, 'nil' => NilClass }[name]
       [*klass]
     in [:var_ref, [:@const, name,]]
-      begin
-        value = Object.const_get name
-        value.is_a?(Module) ? [{ class: value }] : [value.class]
-      rescue
-        []
-      end
+      type_of { Object.const_get name }
+    in [:var_ref, [:@ivar | :@cvar, name,]]
+      icvar_available ? type_of { binding.eval name } : []
+    in [:var_ref, [:@ident, name,]]
+      lvar_available ? type_of { binding.eval name } : []
+    in [:aref, receiver, args]
+      receiver_type = simulate_evaluate receiver, binding, lvar_available, icvar_available if receiver
+      args, kwargs, block = retrieve_method_args args
+      simulate_call receiver_type, :[], args, kwargs, block
     in [:call | :vcall | :command | :command_call | :method_add_arg | :method_add_block,]
       receiver, method, args, kwargs, block = retrieve_method_call sexp
-      receiver_type = simulate_evaluate receiver if receiver
-      args_type = args&.map { simulate_evaluate _1 }
-      kwargs_type = kwargs&.transform_values { simulate_evaluate _1 }
+      receiver_type = simulate_evaluate receiver, binding, lvar_available, icvar_available if receiver
+      args_type = args&.map { simulate_evaluate _1, binding, lvar_available, icvar_available }
+      kwargs_type = kwargs&.transform_values { simulate_evaluate _1, binding, lvar_available, icvar_available }
       simulate_call receiver_type, method, args_type, kwargs_type, block
     in [:binary, a, Symbol => op, b]
-      simulate_call simulate_evaluate(a), op, [simulate_evaluate(b)], {}, false
+      simulate_call simulate_evaluate(a, binding, lvar_available, icvar_available), op, [simulate_evaluate(b, binding, lvar_available, icvar_available)], {}, false
     in [:unary, op, receiver]
-      simulate_call simulate_evaluate(receiver), op, [], {}, false
+      simulate_call simulate_evaluate(receiver, binding, lvar_available, icvar_available), op, [], {}, false
+    else
+      STDOUT.cooked{
+      10.times{puts}
+      p :NOMATCH, sexp
+      puts caller_locations
+      }
+      exit
     end
-    result
+  end
+
+  def self.type_of
+    begin
+      value = yield
+      value.is_a?(Module) ? [{ class: value }] : [value.class]
+    rescue
+      []
+    end
   end
 
   def self.retrieve_method_call(sexp)
