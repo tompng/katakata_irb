@@ -36,10 +36,6 @@ module Completion
     return [] unless method
     names = method.method_types.filter_map { |method_type| method_type.type.return_type.name.name rescue nil }.uniq
     names.filter_map { Object.const_get _1 rescue nil }
-  rescue => e
-    p ERROR: klass
-    STDOUT.cooked{puts e.backtrace}
-    exit
   end
 
 
@@ -223,6 +219,8 @@ module Completion
       simulate_call simulate_evaluate(receiver, binding, lvar_available, icvar_available), op, [], {}, false
     in [:lambda,]
       [Proc]
+    in [:if | :unless | :while | :until | :case | :begin | :for | :class | :module,]
+      []
     else
       STDOUT.cooked{
       10.times{puts}
