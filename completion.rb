@@ -155,18 +155,18 @@ module Completion
       [:ivar, name] if icvar_available
     in [:var_ref, [:@cvar,]]
       [:cvar, name] if icvar_available
-    in [:call, receiver, [:@period,] | :'::', [:@ident | :@const, ^name_with_mark,]]
+    in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::', [:@ident | :@const, ^name_with_mark,]]
       [:call, simulate_evaluate(receiver, binding, lvar_available, icvar_available), name]
     in [:const_path_ref, receiver, [:@const,]]
       [:const, simulate_evaluate(receiver, binding, lvar_available, icvar_available), name]
     in [:def,]
     else
-      STDOUT.cooked{
-        10.times { puts }
-        p [:ERROR, expression]
-      }
-      binding.irb
-      exit
+      # STDOUT.cooked{
+      #   10.times { puts }
+      #   p [:ERROR, expression]
+      # }
+      # binding.irb
+      # exit
     end
   end
 
@@ -221,6 +221,8 @@ module Completion
       simulate_call simulate_evaluate(a, binding, lvar_available, icvar_available), op, [simulate_evaluate(b, binding, lvar_available, icvar_available)], {}, false
     in [:unary, op, receiver]
       simulate_call simulate_evaluate(receiver, binding, lvar_available, icvar_available), op, [], {}, false
+    in [:lambda,]
+      [Proc]
     else
       STDOUT.cooked{
       10.times{puts}
@@ -244,12 +246,12 @@ module Completion
     case sexp
     in [:fcall | :vcall, [:@ident | :@const | :@kw | :@op, method,]] # hoge
       [nil, method, [], {}, false]
-    in [:call, receiver, [:@period,] | :'::', [:@ident | :@const | :@kw | :@op, method,]] # a.hoge
+    in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::', [:@ident | :@const | :@kw | :@op, method,]] # a.hoge
       [receiver, method, [], {}, false]
     in [:command, [:@ident | :@const | :@kw | :@op, method,], args] # hoge 1, 2
       args, kwargs, block = retrieve_method_args args
       [nil, method, args, kwargs, block]
-    in [:command_call, receiver, [:@period,] | :'::', [:@ident | :@const | :@kw | :@op, method,], args] # a.hoge 1; a.hoge 1, 2;
+    in [:command_call, receiver, [:@period,] | [:@op, '&.',] | :'::', [:@ident | :@const | :@kw | :@op, method,], args] # a.hoge 1; a.hoge 1, 2;
       args, kwargs, block = retrieve_method_args args
       [receiver, method, args, kwargs, block]
     in [:method_add_arg, call, args]
