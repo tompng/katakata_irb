@@ -95,7 +95,9 @@ module Completion
         target + _1[name.size..]
       end
     end
-    IRB::InputCompletor.const_set :CompletionProc, completion_proc
+    IRB::InputCompletor::CompletionProc.define_singleton_method :call do |*args|
+      completion_proc.call(*args)
+    end
   end
 
   def self.analyze(tokens, binding = Kernel.binding, suffix: '')
