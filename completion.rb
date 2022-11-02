@@ -68,8 +68,12 @@ module Completion
       suffix = code.end_with?('.') && tokens.last&.tok != '.' ? '.' : ''
       result = analyze(tokens, binding, suffix:)
       candidates = case result
-      in [:require, method, lib]
-        ['irb', 'reline']
+      in [:require | :require_relative => method, name]
+        if method == :require
+          IRB::InputCompletor.retrieve_files_to_require_from_load_path
+        else
+          IRB::InputCompletor.retrieve_files_to_require_relative_from_current_dir
+        end
       in [:const, classes, name]
         classes.flat_map do |k|
           (k in { class: klass }) ? klass.constants : []
@@ -91,8 +95,8 @@ module Completion
       else
         []
       end
-      candidates.select { _1.start_with? name }.uniq.sort.map do
-        target + _1.to_s[name.size..]
+      candidates.map(&:to_s).select { _1.start_with? name }.uniq.sort.map do
+        target + _1[name.size..]
       end
     end
     IRB::InputCompletor.const_set :CompletionProc, completion_proc
@@ -116,6 +120,8 @@ module Completion
         ']'
       when /\A%.?(.)\z/
         $1
+      when '"', "'"
+        t.tok
       else
         'end'
       end
@@ -126,9 +132,12 @@ module Completion
     mark = "_trex_completion_#{8.times.map { alphabet.sample }.join}x"
     code = tokens.map(&:tok).join + suffix + mark + $/ + closing_heredocs.reverse.join($/) + $/ + closings.reverse.join($/)
     sexp = Ripper.sexp code
-    *, expression, target, _token = find_pattern sexp, mark
+    *parents, expression, target, _token = find_pattern sexp, mark
     return unless expression && (target in [type, String => name_with_mark, [Integer, Integer]])
     name = name_with_mark.sub mark, ''
+    if (target in [:@tstring_content,]) && (parents[-4] in [:command, [:@ident, 'require' | 'require_relative' => require_method,],])
+      return [require_method.to_sym, name.rstrip]
+    end
     case expression
     in [:vcall | :var_ref, [:@ident,]]
       if lvar_available
@@ -305,6 +314,7 @@ if $0 == __FILE__
         %[].aa
         '$hello'.to_s.size.times.map.to_a.hoge.to_a.hoge
         hoge.to_i.hoge
+        require 'hello
   RUBY
   tokens = RubyLex.ripper_lex_without_warning(code)
   p Completion.analyze tokens
