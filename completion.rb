@@ -226,9 +226,23 @@ module Completion
     in [:call | :vcall | :command | :command_call | :method_add_arg | :method_add_block,]
       receiver, method, args, kwargs, block = retrieve_method_call sexp
       receiver_type = simulate_evaluate receiver, binding, lvar_available, icvar_available if receiver
-      args_type = args&.map { simulate_evaluate _1, binding, lvar_available, icvar_available }
+      args_type = args&.map { simulate_evaluate _1, binding, lvar_available, icvar_available if _1 }
       kwargs_type = kwargs&.transform_values { simulate_evaluate _1, binding, lvar_available, icvar_available }
-      simulate_call receiver_type, method, args_type, kwargs_type, block
+      if block == true
+        has_block = true
+      elsif block
+        block_types = simulate_evaluate(block, binding, lvar_available, icvar_available)
+        if block_types == [NilClass]
+          has_block = false
+        elsif !block_types.empty? && !block_types.include?(NilClass)
+          has_block = true
+        else
+          has_block = nil
+        end
+      else
+        has_block = false
+      end
+      simulate_call receiver_type, method, args_type, kwargs_type, has_block
     in [:binary, a, Symbol => op, b]
       simulate_call simulate_evaluate(a, binding, lvar_available, icvar_available), op, [simulate_evaluate(b, binding, lvar_available, icvar_available)], {}, false
     in [:unary, op, receiver]
@@ -243,7 +257,7 @@ module Completion
         STDERR.puts :NOMATCH
         STDERR.puts sexp.inspect
       }
-      exit
+      # exit
     end
   end
 
@@ -279,12 +293,38 @@ module Completion
   end
 
   def self.retrieve_method_args(sexp)
-    # case sexp
-    # in [:args_add_block, [:args_add_star]]
-    # in [:arg_paren, args]
-    # end
-    # unimplemented
-    [[], {}, false]
+    case sexp
+    in [:args_add_block, [:args_add_star,] => args, block_arg]
+      args, = retrieve_method_args args
+      [args, {}, block_arg]
+    in [:args_add_block, [*args, [:bare_assoc_hash,] => kwargs], block_arg]
+      args, = retrieve_method_args args
+      _, kwargs, = retrieve_method_args kwargs
+      [args, kwargs, block_arg]
+    in [:args_add_block, [*args], block_arg]
+      [args, {}, block_arg]
+    in [:bare_assoc_hash, kws]
+      kwargs = {}
+      kws.each do |kw|
+        if kw in [:assoc_new, [:@label, label,], value]
+          key = label.delete ':'
+          kwargs[key] = value || [:var_ref, [key =~ /\A[A-Z]/ ? :@const : :@ident, key, [0, 0]]]
+        end
+      end
+      [[], kwargs, false]
+    in [:args_add_star, *args, [:bare_assoc_hash,] => kwargs]
+      args, = retrieve_method_args [:args_add_star, *args]
+      _, kwargs, = retrieve_method_args kwargs
+      [args, kwargs, false]
+    in [:args_add_star, pre_args, star_arg, *post_args]
+      pre_args, = retrieve_method_args pre_args if pre_args in [:args_add_star,]
+      args = [*pre_args, nil, *post_args]
+      [args, {}, false]
+    in [:arg_paren, args]
+      args ? retrieve_method_args(args) : [[], {}, false]
+    else
+      [[], {}, false]
+    end
   end
 
   def self.simulate_call(receiver, method, _args, _kwargs, _has_block)
