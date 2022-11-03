@@ -279,12 +279,16 @@ module Completion
       simulate_call simulate_evaluate(receiver, binding, lvar_available, icvar_available), op, [], {}, false
     in [:lambda,]
       [Proc]
-    in [:assign, target, value]
+    in [:assign | :massign, _target, value]
       simulate_evaluate(value, binding, lvar_available, icvar_available)
+    in [:mrhs_new_from_args,]
+      [Array]
     in [:if | :unless | :while | :until | :case | :begin | :for | :class | :module | :ifop | :rescue_mod,]
       []
     in [:void_stmt]
       [NilClass]
+    in [:dot2,]
+      [Range]
     else
       STDERR.cooked{
         10.times{puts}
