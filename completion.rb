@@ -59,6 +59,12 @@ module Completion
       return return_type.literal.class
     when RBS::Types::Bases::Bool
       return [TrueClass, FalseClass]
+    when RBS::Types::Variable
+      return [Object, NilClass]
+    when RBS::Types::Bases::Any
+      return [Object, NilClass]
+    when RBS::Types::Optional
+      return class_from_rbs_type return_type.type, self_class
     end
     name = return_type.name
     return Object.const_get name.name if name.kind == :class
@@ -299,6 +305,8 @@ module Completion
     case sexp
     in [:fcall | :vcall, [:@ident | :@const | :@kw | :@op, method,]] # hoge
       [nil, method, [], {}, false]
+    in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::', :call] # a.()
+      [receiver, :call, [], {}, false]
     in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::', [:@ident | :@const | :@kw | :@op, method,]] # a.hoge
       [receiver, method, [], {}, false]
     in [:command, [:@ident | :@const | :@kw | :@op, method,], args] # hoge 1, 2
