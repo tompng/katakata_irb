@@ -161,7 +161,7 @@ module Completion
       case t.tok
       when /\A%.[<>]\z/
         '>'
-      when '{', /\A%.[{}]\z/
+      when '{', '#{', /\A%.[{}]\z/
         '}'
       when '(', /\A%.[()]\z/
         ')'
