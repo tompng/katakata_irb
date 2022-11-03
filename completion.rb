@@ -214,8 +214,7 @@ module Completion
       [:call, simulate_evaluate(receiver, binding, lvar_available, icvar_available), name]
     in [:const_path_ref, receiver, [:@const,]]
       [:const, simulate_evaluate(receiver, binding, lvar_available, icvar_available), name]
-    in [:def,]
-    in [:string_content,]
+    in [:def,] | [:string_content,] | [:var_field,]
     else
       STDERR.cooked{
         10.times { STDERR.puts }
@@ -280,15 +279,19 @@ module Completion
       simulate_call simulate_evaluate(receiver, binding, lvar_available, icvar_available), op, [], {}, false
     in [:lambda,]
       [Proc]
-    in [:if | :unless | :while | :until | :case | :begin | :for | :class | :module,]
+    in [:assign, target, value]
+      simulate_evaluate(value, binding, lvar_available, icvar_available)
+    in [:if | :unless | :while | :until | :case | :begin | :for | :class | :module | :ifop | :rescue_mod,]
       []
+    in [:void_stmt]
+      [NilClass]
     else
       STDERR.cooked{
         10.times{puts}
         STDERR.puts :NOMATCH
         STDERR.puts sexp.inspect
       }
-      # exit
+      []
     end
   end
 
