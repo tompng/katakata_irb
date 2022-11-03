@@ -24,20 +24,59 @@ module Completion
     )
   end
 
-  def self.method_response(klass, method)
-    singleton = false
-    singleton = true if klass in { class: klass }
-    return [klass] if singleton && method == :new
-    return [{ class: klass }] if !singleton && method == :class
+  def self.rbs_method_response(klass, method_name, args_types, kwargs_types, has_block)
+    singleton = (klass in { class: klass })
+    return [klass] if singleton && method_name == :new
+    return [{ class: klass }] if !singleton && method_name == :class
     type_name = RBS::TypeName(klass.name).absolute!
     definition = (singleton ? rbs_builder.build_singleton(type_name) : rbs_builder.build_instance(type_name)) rescue nil
     return [] unless definition
-    method = definition.methods[method]
+    method = definition.methods[method_name]
     return [] unless method
-    names = method.method_types.filter_map { |method_type| method_type.type.return_type.name.name rescue nil }.uniq
-    names.filter_map { Object.const_get _1 rescue nil }
+    has_splat = !args_types.all?
+    method_types_with_score = method.method_types.map do |method_type|
+      match = 0
+      match += 10 if method_type.block && has_block
+      positionals = method_type.type.required_positionals
+      if has_splat
+        match += 5 if args_types.size <= positionals.size
+      elsif args_types.size == positionals.size
+        match += 10
+      end
+      [method_type, match]
+    end
+    max_score = method_types_with_score.map(&:last).max
+    method_types_with_score.select { _2 == max_score }.map(&:first).flat_map do
+      class_from_rbs_type _1.type.return_type, klass
+    end
   end
 
+  def self.class_from_rbs_type(return_type, self_class)
+    case return_type
+    when RBS::Types::Bases::Self
+      return self_class
+    when RBS::Types::Literal
+      return return_type.literal.class
+    when RBS::Types::Bases::Bool
+      return [TrueClass, FalseClass]
+    end
+    name = return_type.name
+    return Object.const_get name.name if name.kind == :class
+    case name.name
+    when :int
+      Integer
+    when :float
+      Float
+    when :string
+      String
+    when :nil
+      NilClass
+    when :true
+      TrueClass
+    when :false
+      FalseClass
+    end
+  end
 
   module LexerElemMatcher
     refine Ripper::Lexer::Elem do
@@ -327,13 +366,13 @@ module Completion
     end
   end
 
-  def self.simulate_call(receiver, method, _args, _kwargs, _has_block)
+  def self.simulate_call(receiver, method, args, kwargs, has_block)
     receiver ||= [{ class: Kernel }]
     result = receiver.flat_map do |klass|
-      method_response klass, method.to_sym
+      rbs_method_response klass, method.to_sym, args, kwargs, has_block
     end.uniq
     result |= [OBJECT_METHODS[method.to_sym]] if OBJECT_METHODS.has_key? method.to_sym
-    result
+    result.empty? ? [Object, NilClass] : result
   end
 
   def self.find_pattern(sexp, pattern, stack = [sexp])
@@ -369,8 +408,6 @@ if $0 == __FILE__
         123.to_f.hoge
         %[].aa
         '$hello'.to_s.size.times.map.to_a.hoge.to_a.hoge
-        hoge.to_i.hoge
-        require 'hello
   RUBY
   tokens = RubyLex.ripper_lex_without_warning(code)
   p Completion.analyze tokens
