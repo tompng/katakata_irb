@@ -36,7 +36,7 @@ module Completion
     has_splat = !args_types.all?
     method_types_with_score = method.method_types.map do |method_type|
       match = 0
-      match += 10 if method_type.block && has_block
+      match += 10 if !!method_type.block == has_block
       positionals = method_type.type.required_positionals
       if has_splat
         match += 5 if args_types.size <= positionals.size
@@ -267,21 +267,7 @@ module Completion
       receiver_type = simulate_evaluate receiver, binding, lvar_available, icvar_available if receiver
       args_type = args&.map { simulate_evaluate _1, binding, lvar_available, icvar_available if _1 }
       kwargs_type = kwargs&.transform_values { simulate_evaluate _1, binding, lvar_available, icvar_available }
-      if block == true
-        has_block = true
-      elsif block
-        block_types = simulate_evaluate(block, binding, lvar_available, icvar_available)
-        if block_types == [NilClass]
-          has_block = false
-        elsif !block_types.empty? && !block_types.include?(NilClass)
-          has_block = true
-        else
-          has_block = nil
-        end
-      else
-        has_block = false
-      end
-      simulate_call receiver_type, method, args_type, kwargs_type, has_block
+      simulate_call receiver_type, method, args_type, kwargs_type, !!block
     in [:binary, a, Symbol => op, b]
       simulate_call simulate_evaluate(a, binding, lvar_available, icvar_available), op, [simulate_evaluate(b, binding, lvar_available, icvar_available)], {}, false
     in [:unary, op, receiver]
