@@ -74,6 +74,12 @@ module Completion
         classes.flat_map do |k|
           (k in { class: klass }) ? klass.constants : []
         end
+      in [:ivar, name]
+        ivars = binding.eval('self').instance_variables rescue []
+        cvars = (binding.eval('self').class_variables rescue nil) if name == '@'
+        ivars | (cvars || [])
+      in [:cvar, name]
+        binding.eval('self').class_variables rescue []
       in [:gvar, name]
         global_variables
       in [:symbol, name]
@@ -131,8 +137,14 @@ module Completion
     code = tokens.map(&:tok).join + suffix + mark + $/ + closing_heredocs.reverse.join($/) + $/ + closings.reverse.join($/)
     sexp = Ripper.sexp code
     *parents, expression, target, _token = find_pattern sexp, mark
-    return unless expression && (target in [type, String => name_with_mark, [Integer, Integer]])
+    return unless target in [type, String => name_with_mark, [Integer, Integer]]
     name = name_with_mark.sub mark, ''
+    if target in [:@ivar,]
+      return [:ivar, name] if icvar_available
+    elsif target in [:@cvar,]
+      return [:cvar, name] if icvar_available
+    end
+    return unless expression
     if (target in [:@tstring_content,]) && (parents[-4] in [:command, [:@ident, 'require' | 'require_relative' => require_method,],])
       return [require_method.to_sym, name.rstrip]
     end
@@ -158,13 +170,13 @@ module Completion
     in [:const_path_ref, receiver, [:@const,]]
       [:const, simulate_evaluate(receiver, binding, lvar_available, icvar_available), name]
     in [:def,]
+    in [:string_content,]
     else
-      # STDOUT.cooked{
-      #   10.times { puts }
-      #   p [:ERROR, expression]
-      # }
-      # binding.irb
-      # exit
+      STDERR.cooked{
+        10.times { STDERR.puts }
+        STDERR.puts [:ERROR, expression].inspect
+        10.times { STDERR.puts }
+      }
     end
   end
 
@@ -203,6 +215,8 @@ module Completion
       type_of { Object.const_get name }
     in [:var_ref, [:@ivar | :@cvar, name,]]
       icvar_available ? type_of { binding.eval name } : []
+    in [:var_ref, [:@gvar, name,]]
+      type_of { binding.eval name }
     in [:var_ref, [:@ident, name,]]
       lvar_available ? type_of { binding.eval name } : []
     in [:aref, receiver, args]
@@ -224,10 +238,10 @@ module Completion
     in [:if | :unless | :while | :until | :case | :begin | :for | :class | :module,]
       []
     else
-      STDOUT.cooked{
-      10.times{puts}
-      p :NOMATCH, sexp
-      puts caller_locations
+      STDERR.cooked{
+        10.times{puts}
+        STDERR.puts :NOMATCH
+        STDERR.puts sexp.inspect
       }
       exit
     end
