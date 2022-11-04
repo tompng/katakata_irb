@@ -24,9 +24,10 @@ module Completion
     )
   end
 
-  def self.rbs_method_response(klass, method_name, args_types, kwargs_types, has_block)
+  def self.rbs_method_response(klass, method_name, args_types, kwargs_types, kwsplat, has_block)
     singleton = (klass in { class: klass })
     return [klass] if singleton && method_name == :new
+    return klass if method_name == :itself
     return [{ class: klass }] if !singleton && method_name == :class
     type_name = RBS::TypeName(klass.name).absolute!
     definition = (singleton ? rbs_builder.build_singleton(type_name) : rbs_builder.build_instance(type_name)) rescue nil
@@ -306,20 +307,20 @@ module Completion
       lvar_available ? type_of { binding.eval name } : []
     in [:aref, receiver, args]
       receiver_type = simulate_evaluate receiver, binding, lvar_available, icvar_available if receiver
-      args, kwargs, block = retrieve_method_args args
+      args, kwargs, kwsplat, block = retrieve_method_args args
       args_type = args.map { simulate_evaluate _1, binding, lvar_available, icvar_available if _1 }
       kwargs_type = kwargs&.transform_values { simulate_evaluate _1, binding, lvar_available, icvar_available }
-      simulate_call receiver_type, :[], args_type, kwargs_type, block
+      simulate_call receiver_type, :[], args_type, kwargs_type, kwsplat, block
     in [:call | :vcall | :command | :command_call | :method_add_arg | :method_add_block,]
-      receiver, method, args, kwargs, block = retrieve_method_call sexp
+      receiver, method, args, kwargs, kwsplat, block = retrieve_method_call sexp
       receiver_type = simulate_evaluate receiver, binding, lvar_available, icvar_available if receiver
       args_type = args.map { simulate_evaluate _1, binding, lvar_available, icvar_available if _1 }
       kwargs_type = kwargs&.transform_values { simulate_evaluate _1, binding, lvar_available, icvar_available }
-      simulate_call receiver_type, method, args_type, kwargs_type, !!block
+      simulate_call receiver_type, method, args_type, kwargs_type, kwsplat, block
     in [:binary, a, Symbol => op, b]
-      simulate_call simulate_evaluate(a, binding, lvar_available, icvar_available), op, [simulate_evaluate(b, binding, lvar_available, icvar_available)], {}, false
+      simulate_call simulate_evaluate(a, binding, lvar_available, icvar_available), op, [simulate_evaluate(b, binding, lvar_available, icvar_available)], {}, false, false
     in [:unary, op, receiver]
-      simulate_call simulate_evaluate(receiver, binding, lvar_available, icvar_available), op, [], {}, false
+      simulate_call simulate_evaluate(receiver, binding, lvar_available, icvar_available), op, [], {}, false, false
     in [:lambda,]
       [Proc]
     in [:assign | :massign, _target, value]
@@ -354,24 +355,24 @@ module Completion
   def self.retrieve_method_call(sexp)
     case sexp
     in [:fcall | :vcall, [:@ident | :@const | :@kw | :@op, method,]] # hoge
-      [nil, method, [], {}, false]
+      [nil, method, [], {}, false, false]
     in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::', :call] # a.()
-      [receiver, :call, [], {}, false]
+      [receiver, :call, [], {}, false, false]
     in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::', [:@ident | :@const | :@kw | :@op, method,]] # a.hoge
-      [receiver, method, [], {}, false]
+      [receiver, method, [], {}, false, false]
     in [:command, [:@ident | :@const | :@kw | :@op, method,], args] # hoge 1, 2
-      args, kwargs, block = retrieve_method_args args
-      [nil, method, args, kwargs, block]
+      args, kwargs, kwsplat, block = retrieve_method_args args
+      [nil, method, args, kwargs, kwsplat, block]
     in [:command_call, receiver, [:@period,] | [:@op, '&.',] | :'::', [:@ident | :@const | :@kw | :@op, method,], args] # a.hoge 1; a.hoge 1, 2;
-      args, kwargs, block = retrieve_method_args args
-      [receiver, method, args, kwargs, block]
+      args, kwargs, kwsplat, block = retrieve_method_args args
+      [receiver, method, args, kwargs, kwsplat, block]
     in [:method_add_arg, call, args]
       receiver, method = retrieve_method_call call
-      args, kwargs, block = retrieve_method_args args
-      [receiver, method, args, kwargs, block]
-    in [:method_add_block, call, block]
-      receiver, method, args, kwargs = retrieve_method_call(call)
-      [receiver, method, args, kwargs, true]
+      args, kwargs, kwsplat, block = retrieve_method_args args
+      [receiver, method, args, kwargs, kwsplat, block]
+    in [:method_add_block, call, _block]
+      receiver, method, args, kwargs, kwsplat = retrieve_method_call call
+      [receiver, method, args, kwargs, kwsplat, true]
     end
   end
 
@@ -379,41 +380,44 @@ module Completion
     case sexp
     in [:args_add_block, [:args_add_star,] => args, block_arg]
       args, = retrieve_method_args args
-      [args, {}, block_arg]
+      [args, {}, false, block_arg]
     in [:args_add_block, [*args, [:bare_assoc_hash,] => kwargs], block_arg]
       args, = retrieve_method_args args
-      _, kwargs, = retrieve_method_args kwargs
-      [args, kwargs, block_arg]
+      _, kwargs, kwsplat = retrieve_method_args kwargs
+      [args, kwargs, kwsplat, block_arg]
     in [:args_add_block, [*args], block_arg]
-      [args, {}, block_arg]
+      [args, {}, false, block_arg]
     in [:bare_assoc_hash, kws]
       kwargs = {}
+      kwsplat = false
       kws.each do |kw|
-        if kw in [:assoc_new, [:@label, label,], value]
+        if kw in [:assoc_splat, *rest]
+          kwsplat = true
+        elsif kw in [:assoc_new, [:@label, label,], value]
           key = label.delete ':'
           kwargs[key] = value || [:var_ref, [key =~ /\A[A-Z]/ ? :@const : :@ident, key, [0, 0]]]
         end
       end
-      [[], kwargs, false]
+      [[], kwargs, kwsplat, false]
     in [:args_add_star, *args, [:bare_assoc_hash,] => kwargs]
       args, = retrieve_method_args [:args_add_star, *args]
-      _, kwargs, = retrieve_method_args kwargs
-      [args, kwargs, false]
+      _, kwargs, kwsplat = retrieve_method_args kwargs
+      [args, kwargs, kwsplat, false]
     in [:args_add_star, pre_args, star_arg, *post_args]
       pre_args, = retrieve_method_args pre_args if pre_args in [:args_add_star,]
       args = [*pre_args, nil, *post_args]
-      [args, {}, false]
+      [args, {}, false, false]
     in [:arg_paren, args]
-      args ? retrieve_method_args(args) : [[], {}, false]
+      args ? retrieve_method_args(args) : [[], {}, false, false]
     else
-      [[], {}, false]
+      [[], {}, false, false]
     end
   end
 
-  def self.simulate_call(receiver, method, args, kwargs, has_block)
+  def self.simulate_call(receiver, method, args, kwargs, kwsplat, has_block)
     receiver ||= [{ class: Kernel }]
     result = receiver.flat_map do |klass|
-      rbs_method_response klass, method.to_sym, args, kwargs, has_block
+      rbs_method_response klass, method.to_sym, args, kwargs, kwsplat, has_block
     end.uniq
     result |= [OBJECT_METHODS[method.to_sym]] if OBJECT_METHODS.has_key? method.to_sym
     result.empty? ? [Object, NilClass] : result
