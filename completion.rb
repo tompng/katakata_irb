@@ -35,41 +35,62 @@ module Completion
     return [] unless method
     has_splat = !args_types.all?
     method_types_with_score = method.method_types.map do |method_type|
-      match = 0
-      match += 10 if !!method_type.block == has_block
-      positionals = method_type.type.required_positionals
-      if has_splat
-        match += 5 if args_types.size <= positionals.size
-      elsif args_types.size == positionals.size
-        match += 10
+      score = 0
+      score += 4 if !!method_type.block == has_block
+      reqs = method_type.type.required_positionals
+      opts = method_type.type.optional_positionals
+      keywords = method_type.type.required_keywords
+      keyopts = method_type.type.optional_keywords
+      kwrest = method_type.type.rest_keywords
+      if has_splat # skip type check
+        score += 1 if args_types.compact.size <= reqs.size + opts.size
+      elsif reqs.size <= args_types.size && args_types.size <= reqs.size + opts.size
+        score += 2
+        if args_types.size >= 1
+          score += (
+            args_types.zip(reqs + opts).count do |arg_type, type|
+              (arg_type & classes_from_rbs_type(type.type, klass)).any?
+            end
+          ).fdiv args_types.size
+        end
       end
-      [method_type, match]
+      score += 2 if !kwrest && (kwargs_types.keys - (keywords.keys + keyopts.keys)).empty?
+      if keywords.any?
+        score += keywords.keys.count { kwargs.has_key? _1 }.fdiv keywords.size
+      end
+      if keywords.any? || keyopts.any?
+        score += { **keywords, **keyopts }.count do |key, type|
+          arg_type = kwargs_types[key]
+          arg_type && (arg_type & classes_from_rbs_type(type.type, klass)).any?
+        end.fdinv keywords.size + keyopts.size
+      end
+      [method_type, score]
     end
     max_score = method_types_with_score.map(&:last).max
     method_types_with_score.select { _2 == max_score }.map(&:first).flat_map do
-      class_from_rbs_type _1.type.return_type, klass
+      classes_from_rbs_type _1.type.return_type, klass
     end
   end
 
-  def self.class_from_rbs_type(return_type, self_class)
+  def self.classes_from_rbs_type(return_type, self_class)
     case return_type
     when RBS::Types::Bases::Self
-      return self_class
+      [self_class]
     when RBS::Types::Bases::Void, RBS::Types::Bases::Bottom, RBS::Types::Bases::Nil
       [NilClass]
     when RBS::Types::Bases::Any
-      return [Object]
+      [Object]
     when RBS::Types::Bases::Class
       case self_type
       in { class: Class }
-        { class: Class }
+        [{ class: Class }]
       in { class: }
-        { class: Module }
+        [{ class: Module }]
       else
-        { class: self_type }
+        [{ class: self_type }]
       end
     when RBS::Types::Bases::Bool
-      return [TrueClass, FalseClass]
+      [TrueClass, FalseClass]
     when RBS::Types::Bases::Instance
       if self_class in { class: klass }
         [klass]
@@ -79,7 +100,7 @@ module Completion
         [Object]
       end
     when RBS::Types::Union
-      return_type.types.flat_map { class_from_rbs_type _1, self_class }
+      return_type.types.flat_map { classes_from_rbs_type _1, self_class }
     when RBS::Types::Proc
       [Proc]
     when RBS::Types::Tuple
@@ -87,20 +108,20 @@ module Completion
     when RBS::Types::Record
       [Hash]
     when RBS::Types::Literal
-      return return_type.literal.class
+      [return_type.literal.class]
     when RBS::Types::Variable
-      return [Object]
+      [Object]
     when RBS::Types::Optional
-      return class_from_rbs_type(return_type.type, self_class) | [NilClass]
+      classes_from_rbs_type(return_type.type, self_class) | [NilClass]
     when RBS::Types::Alias
       case return_type.name.name
       when :int
-        Integer
+        [Integer]
       when :boolish
         [TrueClass, FalseClass]
       end
     when RBS::Types::ClassInstance
-      Object.const_get return_type.name.name
+      [Object.const_get(return_type.name.name)]
     end
   end
 
@@ -286,11 +307,13 @@ module Completion
     in [:aref, receiver, args]
       receiver_type = simulate_evaluate receiver, binding, lvar_available, icvar_available if receiver
       args, kwargs, block = retrieve_method_args args
-      simulate_call receiver_type, :[], args, kwargs, block
+      args_type = args.map { simulate_evaluate _1, binding, lvar_available, icvar_available if _1 }
+      kwargs_type = kwargs&.transform_values { simulate_evaluate _1, binding, lvar_available, icvar_available }
+      simulate_call receiver_type, :[], args_type, kwargs_type, block
     in [:call | :vcall | :command | :command_call | :method_add_arg | :method_add_block,]
       receiver, method, args, kwargs, block = retrieve_method_call sexp
       receiver_type = simulate_evaluate receiver, binding, lvar_available, icvar_available if receiver
-      args_type = args&.map { simulate_evaluate _1, binding, lvar_available, icvar_available if _1 }
+      args_type = args.map { simulate_evaluate _1, binding, lvar_available, icvar_available if _1 }
       kwargs_type = kwargs&.transform_values { simulate_evaluate _1, binding, lvar_available, icvar_available }
       simulate_call receiver_type, method, args_type, kwargs_type, !!block
     in [:binary, a, Symbol => op, b]
@@ -418,6 +441,7 @@ if $0 == __FILE__
   classes = ObjectSpace.each_object(Class)
   Completion.class_eval do
     return_types = []
+    method_types = []
     classes.each do |klass|
       next unless klass.name
       type_name = RBS::TypeName(klass.name).absolute!
@@ -426,6 +450,7 @@ if $0 == __FILE__
       [mdefinition, idefinition].compact.each do |definition|
         definition.methods.each_value do |method|
           method.method_types.each do
+            method_types << _1.type
             return_types << _1.type.return_type
           end
         end
