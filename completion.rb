@@ -55,32 +55,52 @@ module Completion
     case return_type
     when RBS::Types::Bases::Self
       return self_class
-    when RBS::Types::Literal
-      return return_type.literal.class
+    when RBS::Types::Bases::Void, RBS::Types::Bases::Bottom, RBS::Types::Bases::Nil
+      [NilClass]
+    when RBS::Types::Bases::Any
+      return [Object]
+    when RBS::Types::Bases::Class
+      case self_type
+      in { class: Class }
+        { class: Class }
+      in { class: }
+        { class: Module }
+      else
+        { class: self_type }
+      end
     when RBS::Types::Bases::Bool
       return [TrueClass, FalseClass]
+    when RBS::Types::Bases::Instance
+      if self_class in { class: klass }
+        [klass]
+      elsif self_class == Class || self_class == Module
+        [self_class]
+      else
+        [Object]
+      end
+    when RBS::Types::Union
+      return_type.types.flat_map { class_from_rbs_type _1, self_class }
+    when RBS::Types::Proc
+      [Proc]
+    when RBS::Types::Tuple
+      [Array]
+    when RBS::Types::Record
+      [Hash]
+    when RBS::Types::Literal
+      return return_type.literal.class
     when RBS::Types::Variable
-      return [Object, NilClass]
-    when RBS::Types::Bases::Any
-      return [Object, NilClass]
+      return [Object]
     when RBS::Types::Optional
-      return class_from_rbs_type return_type.type, self_class
-    end
-    name = return_type.name
-    return Object.const_get name.name if name.kind == :class
-    case name.name
-    when :int
-      Integer
-    when :float
-      Float
-    when :string
-      String
-    when :nil
-      NilClass
-    when :true
-      TrueClass
-    when :false
-      FalseClass
+      return class_from_rbs_type(return_type.type, self_class) | [NilClass]
+    when RBS::Types::Alias
+      case return_type.name.name
+      when :int
+        Integer
+      when :boolish
+        [TrueClass, FalseClass]
+      end
+    when RBS::Types::ClassInstance
+      Object.const_get return_type.name.name
     end
   end
 
@@ -395,6 +415,27 @@ module Completion
 end
 
 if $0 == __FILE__
+  classes = ObjectSpace.each_object(Class)
+  Completion.class_eval do
+    return_types = []
+    classes.each do |klass|
+      next unless klass.name
+      type_name = RBS::TypeName(klass.name).absolute!
+      mdefinition = rbs_builder.build_singleton type_name rescue nil
+      idefinition = rbs_builder.build_instance type_name rescue nil
+      [mdefinition, idefinition].compact.each do |definition|
+        definition.methods.each_value do |method|
+          method.method_types.each do
+            return_types << _1.type.return_type
+          end
+        end
+      end
+    end
+    return_types.uniq!
+    binding.irb
+  end
+
+  exit
   code = <<~'RUBY'.chomp
     a = 1
     def geso()
