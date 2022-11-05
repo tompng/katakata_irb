@@ -256,12 +256,12 @@ module Completion
       [:call, simulate_evaluate(receiver, binding, lvar_available, icvar_available), name]
     in [:const_path_ref, receiver, [:@const,]]
       [:const, simulate_evaluate(receiver, binding, lvar_available, icvar_available), name]
-    in [:def,] | [:string_content,] | [:var_field,] | [:defs,]
+    in [:def,] | [:string_content,] | [:var_field,] | [:defs,] | [:rest_param,] | [:kwrest_param,] | [:blockarg,] | [[:@ident,],]
     else
       STDERR.cooked{
-        10.times { STDERR.puts }
-        STDERR.puts [:ERROR, expression].inspect
-        10.times { STDERR.puts }
+        STDERR.puts
+        STDERR.puts [:NEW_EXPRESSION, expression].inspect
+        STDERR.puts
       }
     end
   end
@@ -327,7 +327,7 @@ module Completion
       simulate_evaluate(value, binding, lvar_available, icvar_available)
     in [:mrhs_new_from_args,]
       [Array]
-    in [:if | :unless | :while | :until | :case | :begin | :for | :class | :module | :ifop | :rescue_mod,]
+    in [:if | :unless | :while | :until | :case | :begin | :for | :class | :sclass | :module | :ifop | :rescue_mod,]
       []
     in [:void_stmt]
       [NilClass]
@@ -335,7 +335,7 @@ module Completion
       [Range]
     else
       STDERR.cooked{
-        10.times{puts}
+        STDERR.puts
         STDERR.puts :NOMATCH
         STDERR.puts sexp.inspect
       }
