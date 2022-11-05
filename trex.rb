@@ -2,6 +2,7 @@ module TRex
   def self.parse(tokens)
     opens = []
     pending_heredocs = []
+    first_token_on_line = true
     tokens.each_with_index do |t, index|
       skip = false
       last_tok, state, args = opens.last
@@ -108,11 +109,9 @@ module TRex
           when 'for'
             opens << [t, :in_for_while_condition]
           when 'in'
-            if last_tok&.event == :on_kw
-              if %w[when in case].include?(last_tok.tok)
-                opens.pop
-                opens << [t, nil]
-              end
+            if last_tok&.event == :on_kw && %w[case in].include?(last_tok.tok) && first_token_on_line
+              opens.pop
+              opens << [t, nil]
             end
           end
         when :on_lparen, :on_lbracket, :on_lbrace, :on_tlambeg, :on_embexpr_beg, :on_embdoc_beg
@@ -136,6 +135,11 @@ module TRex
             opens << [t, nil]
           end
         end
+      end
+      if t.event == :on_nl || t.event == :on_semicolon
+        first_token_on_line = true
+      elsif t.event != :on_sp
+        first_token_on_line = false
       end
       if pending_heredocs.any? && t.tok.include?("\n")
         pending_heredocs.reverse_each { opens << [_1, nil] }
