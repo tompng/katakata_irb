@@ -175,7 +175,7 @@ module RubyLexPatch
     end
   end
 
-  def each_top_level_statement(context)
+  def each_top_level_statement(context = nil)
     initialize_input
     loop do
       begin
