@@ -15,4 +15,5 @@ require_relative './ruby_lex_patch'
 require_relative './completion'
 RubyLexPatch.patch_to_ruby_lex
 Completion.patch_to_completor
+IRB.conf[:USE_RELINE] = false if ARGV.include? '--nomultiline'
 IRB.start(__FILE__)

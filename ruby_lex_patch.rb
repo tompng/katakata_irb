@@ -146,26 +146,32 @@ module RubyLexPatch
     @prompt.call(ltype, nesting_level, opens.any?, @line_no + line_num_offset)
   end
 
+  def store_prompt_to_irb(...)
+    prompt(...) # TODO: do not use store, change API. example: @input.call(prompt)
+  end
+
   def readmultiline(context)
-    if @io.respond_to? :check_termination # multiline
+    if @io.respond_to? :check_termination
       loop do
-        @prompt.call(nil, 0, true, @line_no)
+        store_prompt_to_irb [], 0
         input = @input.call
         return input if input
       end
-    end
-    line = ''
-    line_offset = 0
-    @prompt.call(nil, 0, true, @line_no)
-    loop do
-      l = @input.call
-      next if l.nil?
-      line << l
-      tokens = self.class.ripper_lex_without_warning(line, context: context)
-      _prev_opens, next_opens = TRex.parse_line(tokens).first.last
-      return line if next_opens.empty?
-      prompt next_opens, line_offset
-      line_offset += 1
+    else
+      # nomultiline
+      line = ''
+      line_offset = 0
+      store_prompt_to_irb [], 0
+      loop do
+        l = @input.call
+        next if l.nil?
+        line << l
+        tokens = self.class.ripper_lex_without_warning(line, context: context)
+        _line, _prev_opens, next_opens = TRex.parse_line(tokens).first.last
+        return line if next_opens.empty?
+        line_offset += 1
+        store_prompt_to_irb next_opens, line_offset
+      end
     end
   end
 
