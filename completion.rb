@@ -256,7 +256,7 @@ module Completion
       [:call, simulate_evaluate(receiver, binding, lvar_available, icvar_available), name]
     in [:const_path_ref, receiver, [:@const,]]
       [:const, simulate_evaluate(receiver, binding, lvar_available, icvar_available), name]
-    in [:def,] | [:string_content,] | [:var_field,]
+    in [:def,] | [:string_content,] | [:var_field,] | [:defs,]
     else
       STDERR.cooked{
         10.times { STDERR.puts }
