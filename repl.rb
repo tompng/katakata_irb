@@ -13,7 +13,6 @@ end
 require 'irb'
 require_relative './ruby_lex_patch'
 require_relative './completion'
-(RubyLex.instance_methods(false) - [:initialize_input, :set_prompt]).each { RubyLex.remove_method _1 }
-RubyLex.prepend RubyLexPatch
+RubyLexPatch.patch_to_ruby_lex
 Completion.patch_to_completor
 IRB.start(__FILE__)

@@ -1,6 +1,11 @@
 require_relative './trex'
 
 module RubyLexPatch
+  def self.patch_to_ruby_lex
+    (RubyLex.instance_methods(false) - [:initialize_input, :set_prompt]).each { RubyLex.remove_method _1 }
+    RubyLex.prepend self
+  end
+
   def calc_nesting_depth(tokens)
     indent_level = 0
     nesting_level = 0
@@ -40,12 +45,6 @@ module RubyLexPatch
     depth, = calc_nesting_depth(opens.take(min_depth).map(&:first))
     prev_depth, = calc_nesting_depth(prev.map(&:first))
     depth * 2 if depth < prev_depth
-  end
-
-  def check_string_literal(tokens)
-    TRex.parse(tokens){}.first.map(&:first).reverse.find do |t, _state|
-      %i[on_tstring_beg on_regexp_beg on_symbeg on_backtick on_qwords_beg on_words_beg on_qsymbols_beg on_symbols_beg on_heredoc_beg].include? t.event
-    end
   end
 
   def ltype_from_open_tokens(opens)
