@@ -26,20 +26,14 @@ module RubyLexPatch
     [indent_level, nesting_level]
   end
 
-  def process_nesting_level(tokens = @tokens)
-    opens, heredocs = TRex.parse(tokens){}
-    _indent, nesting = calc_nesting_depth opens.map(&:first) + heredocs
-    nesting
-  end
-
-  def process_indent_level(tokens = @tokens)
+  def process_indent_level(tokens)
     opens, heredocs = TRex.parse(tokens){}
     indent, _nesting = calc_nesting_depth(opens.map(&:first) + heredocs)
     indent * 2
   end
 
-  def check_corresponding_token_depth(_lines, line_index)
-    lines, = TRex.parse_line(@tokens)
+  def check_corresponding_token_depth(tokens, line_index)
+    lines, = TRex.parse_line(tokens)
     result = lines[line_index]
     return unless result
     _tokens, prev, opens, min_depth = result
@@ -54,8 +48,22 @@ module RubyLexPatch
     end
   end
 
-  def process_continue(tokens)
-    tokens.last&.event == :on_sp && tokens.last.tok == "\\\n"
+  def ltype_from_open_tokens(opens)
+    return nil if opens.empty?
+    case opens.last.tok
+    when ?`, /^<<[-~]?`/, /^%x.$/
+      ?`
+    when ?', /^<<[-~]?'/, /^%q.$/
+      ?'
+    when ?", /^<</, /^%.$/, /^%Q.$/
+      ?"
+    when ":'", ':"', ':', /^%s$/
+      ':'
+    when /^%[iwIW]$/
+      ']'
+    when '/', /^%r.$/
+      '/'
+    end
   end
 
   def check_termination_in_prev_line(code, context: nil)
@@ -68,19 +76,113 @@ module RubyLexPatch
     end
   end
 
+  def check_termination(code, context: nil)
+    tokens = self.class.ripper_lex_without_warning(code, context: context)
+    opens, heredocs = TRex.parse(tokens){}
+    opens.empty? && heredocs.empty?
+  end
+
+  def set_input(io, p = nil, context: nil, &block)
+    @io = io
+    if @io.respond_to?(:check_termination)
+      @io.check_termination do |code|
+        if Reline::IOGate.in_pasting?
+          lex = RubyLex.new
+          rest = lex.check_termination_in_prev_line(code, context: context)
+          if rest
+            Reline.delete_text
+            rest.bytes.reverse_each do |c|
+              Reline.ungetc(c)
+            end
+            true
+          else
+            false
+          end
+        else
+          check_termination(code, context: context)
+        end
+      end
+    end
+    if @io.respond_to?(:dynamic_prompt)
+      @io.dynamic_prompt do |lines|
+        lines << '' if lines.empty?
+        code = lines.map{ |l| l + "\n" }.join
+        tokens = self.class.ripper_lex_without_warning code
+        lines, _unclosed_heredocs = TRex.parse_line(tokens)
+        lines.map.with_index do |(_line, _prev_opens, next_opens), line_num_offset|
+          prompt next_opens, line_num_offset
+        end
+      end
+    end
+
+    if p.respond_to?(:call)
+      @input = p
+    elsif block_given?
+      @input = block
+    else
+      @input = Proc.new{@io.gets}
+    end
+  end
+
   def set_auto_indent(context)
     if @io.respond_to?(:auto_indent) and context.auto_indent_mode
       @io.auto_indent do |lines, line_index, byte_pointer, is_newline|
         if is_newline
-          @tokens = self.class.ripper_lex_without_warning(lines[0..line_index].join("\n"), context: context)
-          process_indent_level(@tokens)
+          tokens = self.class.ripper_lex_without_warning(lines[0..line_index].join("\n"), context: context)
+          process_indent_level tokens
         else
           code = line_index.zero? ? '' : lines[0..(line_index - 1)].map{ |l| l + "\n" }.join
           last_line = lines[line_index]&.byteslice(0, byte_pointer)
           code += last_line if last_line
-          @tokens = self.class.ripper_lex_without_warning(code, context: context)
-          check_corresponding_token_depth(lines, line_index)
+          tokens = self.class.ripper_lex_without_warning(code, context: context)
+          check_corresponding_token_depth(tokens, line_index)
         end
+      end
+    end
+  end
+
+  def prompt(opens, line_num_offset)
+    ltype = ltype_from_open_tokens opens.map(&:first)
+    _indent, nesting_level = calc_nesting_depth opens.map(&:first)
+    @prompt.call(ltype, nesting_level, opens.any?, @line_no + line_num_offset)
+  end
+
+  def readmultiline(context)
+    if @io.respond_to? :check_termination # multiline
+      loop do
+        @prompt.call(nil, 0, true, @line_no)
+        input = @input.call
+        return input if input
+      end
+    end
+    line = ''
+    line_offset = 0
+    @prompt.call(nil, 0, true, @line_no)
+    loop do
+      l = @input.call
+      next if l.nil?
+      line << l
+      tokens = self.class.ripper_lex_without_warning(line, context: context)
+      _prev_opens, next_opens = TRex.parse_line(tokens).first.last
+      return line if next_opens.empty?
+      prompt next_opens, line_offset
+      line_offset += 1
+    end
+  end
+
+  def each_top_level_statement(context)
+    initialize_input
+    loop do
+      begin
+        line = readmultiline(context)
+        if line != "\n"
+          line.force_encoding(@io.encoding)
+          yield line, @line_no
+        end
+        @line_no += line.count("\n")
+        raise RubyLex::TerminateLineInput if @io.eof?
+      rescue RubyLex::TerminateLineInput
+        initialize_input
       end
     end
   end
