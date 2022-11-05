@@ -145,7 +145,7 @@ module TRex
         pending_heredocs.reverse_each { opens << [_1, nil] }
         pending_heredocs = []
       end
-      yield t, index, opens
+      yield t, index, opens if block_given?
     end
     [opens, pending_heredocs.reverse]
   end

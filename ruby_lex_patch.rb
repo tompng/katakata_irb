@@ -32,7 +32,7 @@ module RubyLexPatch
   end
 
   def process_indent_level(tokens)
-    opens, heredocs = TRex.parse(tokens){}
+    opens, heredocs = TRex.parse(tokens)
     indent, _nesting = calc_nesting_depth(opens.map(&:first) + heredocs)
     indent * 2
   end
@@ -77,7 +77,7 @@ module RubyLexPatch
 
   def check_termination(code, context: nil)
     tokens = self.class.ripper_lex_without_warning(code, context: context)
-    opens, heredocs = TRex.parse(tokens){}
+    opens, heredocs = TRex.parse(tokens)
     opens.empty? && heredocs.empty?
   end
 

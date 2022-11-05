@@ -195,7 +195,7 @@ module Completion
 
   def self.analyze(tokens, binding = Kernel.binding, suffix: '')
     return if tokens.last&.tok =~ /(\?|\!)\z/
-    last_opens, unclosed_heredocs = TRex.parse(tokens){ }
+    last_opens, unclosed_heredocs = TRex.parse(tokens)
     closing_heredocs = unclosed_heredocs.map {|t|
       t.tok.match(/\A<<(?:"(?<s>.+)"|'(?<s>.+)'|(?<s>.+))/)[:s]
     }
