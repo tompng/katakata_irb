@@ -66,19 +66,20 @@ module RubyLexPatch
   end
 
   def check_termination_in_prev_line(code, context: nil)
-    tokens = self.class.ripper_lex_without_warning(code, context: context)
-    lines, = TRex.parse_line(tokens)
-    if lines[-2]&.[](2)&.empty?
-      lines[-1].first.map(&:last).join
-    else
-      false
-    end
+    *lines, last_line = code.lines
+    last_line if lines.any? && check_termination(lines.join, context: context)
   end
 
   def check_termination(code, context: nil)
     tokens = self.class.ripper_lex_without_warning(code, context: context)
     opens, heredocs = TRex.parse(tokens)
-    opens.empty? && heredocs.empty?
+    opens.empty? && heredocs.empty? && !check_continue(tokens)
+  end
+
+  def check_continue(tokens)
+    last_token = tokens.reverse_each.find { !(_1.event in :on_sp | :on_nl | :on_ignored_nl) }
+    return unless last_token # should return nil
+    last_token.state.allbits?(Ripper::EXPR_BEG) || last_token.state.allbits?(Ripper::EXPR_DOT)
   end
 
   def set_input(io, p = nil, context: nil, &block)
@@ -108,8 +109,12 @@ module RubyLexPatch
         code = lines.map{ |l| l + "\n" }.join
         tokens = self.class.ripper_lex_without_warning code
         lines, _unclosed_heredocs = TRex.parse_line(tokens)
-        lines.map.with_index do |(_line, _prev_opens, next_opens), line_num_offset|
-          prompt next_opens, line_num_offset
+        continue = false
+        lines.map.with_index do |(line, _prev_opens, next_opens), line_num_offset|
+          unless (c = check_continue(line.map(&:first))).nil?
+            continue = c
+          end
+          prompt next_opens, continue, line_num_offset
         end
       end
     end
@@ -140,10 +145,10 @@ module RubyLexPatch
     end
   end
 
-  def prompt(opens, line_num_offset)
+  def prompt(opens, continue, line_num_offset)
     ltype = ltype_from_open_tokens opens.map(&:first)
     _indent, nesting_level = calc_nesting_depth opens.map(&:first)
-    @prompt.call(ltype, nesting_level, opens.any?, @line_no + line_num_offset)
+    @prompt.call(ltype, nesting_level, opens.any? || continue, @line_no + line_num_offset)
   end
 
   def store_prompt_to_irb(...)
@@ -153,7 +158,7 @@ module RubyLexPatch
   def readmultiline(context)
     if @io.respond_to? :check_termination
       loop do
-        store_prompt_to_irb [], 0
+        store_prompt_to_irb [], false, 0
         input = @input.call
         return input if input
       end
@@ -161,7 +166,7 @@ module RubyLexPatch
       # nomultiline
       line = ''
       line_offset = 0
-      store_prompt_to_irb [], 0
+      store_prompt_to_irb [], false, 0
       loop do
         l = @input.call
         next if l.nil?
@@ -170,7 +175,7 @@ module RubyLexPatch
         _line, _prev_opens, next_opens = TRex.parse_line(tokens).first.last
         return line if next_opens.empty?
         line_offset += 1
-        store_prompt_to_irb next_opens, line_offset
+        store_prompt_to_irb next_opens, true, line_offset
       end
     end
   end
