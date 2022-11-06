@@ -58,7 +58,6 @@ module TRex
           end
           if body == :oneliner
             opens.pop
-            opens << [last_tok, :in_oneliner_def]
           elsif body
             opens.pop
             opens << [last_tok, nil]
@@ -66,12 +65,6 @@ module TRex
             opens.pop
             opens << [last_tok, :in_method_head, next_args]
           end
-        end
-      when :in_oneliner_def
-        if %i[on_semicolon on_nl on_rbrace on_rbracket on_rparen].include?(t.event) ||
-          (t.event == :on_kw && t.tok == 'end') ||
-          (t.event == :on_kw && %w[if unless while until].include?(t.tok) && t.state.allbits?(Ripper::EXPR_LABEL))
-          opens.pop while opens.last&.[](1) == :in_oneliner_def
         end
       when :in_for_while_condition
         if t.event == :on_semicolon || t.event == :on_nl || (t.event == :on_kw && t.tok == 'do')
