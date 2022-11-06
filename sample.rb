@@ -1,6 +1,6 @@
 require 'irb'
-require_relative './trex'
-require_relative './ruby_lex_patch'
+require_relative 'trex'
+require_relative 'ruby_lex_patch'
 if ARGV.any?
   input = ARGV.map{ File.read _1 }.join($/)
 else

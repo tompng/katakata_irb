@@ -1,4 +1,4 @@
-require_relative './trex'
+require_relative 'trex'
 
 module RubyLexPatch
   def self.patch_to_ruby_lex
