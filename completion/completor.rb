@@ -58,7 +58,8 @@ module Completion::Completor
       else
         []
       end
-      candidates.map(&:to_s).select { _1.start_with? name }.uniq.sort.map do
+      all_symbols_pattern = /\A[ -\/:-@\[-`\{-~]*\z/
+      candidates.map(&:to_s).select { !_1.match?(all_symbols_pattern) && _1.start_with?(name) }.uniq.sort.map do
         target + _1[name.size..]
       end
     end
