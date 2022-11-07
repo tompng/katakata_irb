@@ -8,25 +8,39 @@ module Completion::Completor
   using Completion::TypeSimulator::LexerElemMatcher
 
   def self.patch_to_completor
+
+    call_candidates = -> classes do
+      classes.flat_map do |k|
+        if k in { class: klass }
+          klass.methods
+        else
+          k.instance_methods
+        end
+      end
+    end
+
+    const_candidates = -> classes do
+      classes.flat_map do |k|
+        (k in { class: klass }) ? klass.constants : []
+      end
+    end
+
     completion_proc = ->(target, preposing = nil, postposing = nil) do
       code = "#{preposing}#{target}"
       irb_context = IRB.conf[:MAIN_CONTEXT]
       binding = irb_context.workspace.binding
       lvars_code = RubyLex.generate_local_variables_assign_code binding.local_variables
-      tokens = RubyLex.ripper_lex_without_warning lvars_code + code, context: irb_context
-      suffix = code.end_with?('.') && tokens.last&.tok != '.' ? '.' : ''
-      result = analyze(tokens, binding, suffix:)
-      candidates = case result
+      candidates = case analyze lvars_code + "\n" + code, binding
       in [:require | :require_relative => method, name]
         if method == :require
           IRB::InputCompletor.retrieve_files_to_require_from_load_path
         else
           IRB::InputCompletor.retrieve_files_to_require_relative_from_current_dir
         end
+      in [:call_or_const, classes, name]
+        call_candidates.call(classes) | const_candidates.call(classes)
       in [:const, classes, name]
-        classes.flat_map do |k|
-          (k in { class: klass }) ? klass.constants : []
-        end
+        const_candidates.call classes
       in [:ivar, name]
         ivars = binding.eval('self').instance_variables rescue []
         cvars = (binding.eval('self').class_variables rescue nil) if name == '@'
@@ -38,13 +52,7 @@ module Completion::Completor
       in [:symbol, name]
         Symbol.all_symbols.reject { _1.match? '_trex_completion_' }
       in [:call, classes, name]
-        classes.flat_map do |k|
-          if k in { class: klass }
-            klass.methods
-          else
-            k.instance_methods
-          end
-        end
+        call_candidates.call(classes)
       in [:lvar_or_method, name]
         Kernel.methods | binding.local_variables
       else
@@ -59,8 +67,8 @@ module Completion::Completor
     end
   end
 
-  def self.analyze(tokens, binding = Kernel.binding, suffix: '')
-    return if tokens.last&.tok =~ /(\?|\!)\z/
+  def self.analyze(code, binding = Kernel.binding)
+    tokens = RubyLex.ripper_lex_without_warning code
     last_opens, unclosed_heredocs = TRex.parse(tokens)
     closing_heredocs = unclosed_heredocs.map {|t|
       t.tok.match(/\A<<(?:"(?<s>.+)"|'(?<s>.+)'|(?<s>.+))/)[:s]
@@ -83,15 +91,39 @@ module Completion::Completor
         'end'
       end
     end
+
+    return if code =~ /[!?]\z/
+    case tokens.last
+    in { event: :on_int }
+      return unless code.end_with? '.'
+      suffix = 'method'
+      name = ''
+    in { dot: true }
+      suffix = 'method'
+      name = ''
+    in { event: :on_ident | :on_kw, tok: }
+      return unless code.delete_suffix! tok
+      suffix = 'method'
+      name = tok
+    in { event: :on_const, tok: }
+      return unless code.delete_suffix! tok
+      suffix = 'Const'
+      name = tok
+    in { event: :on_tstring_content, tok: }
+      return unless code.delete_suffix! tok
+      suffix = 'string'
+      name = tok.rstrip
+    else
+      return
+    end
+
     icvar_available = !last_opens.any? {|t,| t in { event: :on_kw, tok: 'class' | 'module' } }
     lvar_available = !last_opens.any? {|t,| t in { event: :on_kw, tok: 'class' | 'module' | 'def' } }
-    alphabet = ('a'..'z').to_a
-    mark = "_trex_completion_#{8.times.map { alphabet.sample }.join}x"
-    code = tokens.map(&:tok).join + suffix + mark + $/ + closing_heredocs.reverse.join($/) + $/ + closings.reverse.join($/)
-    sexp = Ripper.sexp code
-    *parents, expression, target, _token = find_pattern sexp, mark
-    return unless target in [type, String => name_with_mark, [Integer, Integer]]
-    name = name_with_mark.sub mark, ''
+    closings = $/ + closing_heredocs.reverse.join($/) + $/ + closings.reverse.join($/)
+    sexp = Ripper.sexp code + suffix + closings
+    lines = code.lines
+    *parents, expression, target = find_target sexp, lines.size, lines.last.bytesize
+    return unless target in [type, String, [Integer, Integer]]
     if target in [:@ivar,]
       return [:ivar, name] if icvar_available
     elsif target in [:@cvar,]
@@ -118,8 +150,9 @@ module Completion::Completor
       [:ivar, name] if icvar_available
     in [:var_ref, [:@cvar,]]
       [:cvar, name] if icvar_available
-    in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::', [:@ident | :@const, ^name_with_mark,]]
-      [:call, Completion::TypeSimulator.simulate_evaluate(receiver, binding, lvar_available, icvar_available), name]
+    in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::' => dot, [:@ident | :@const,]]
+      type = dot == :'::' ? :call_or_const : :call
+      [type, Completion::TypeSimulator.simulate_evaluate(receiver, binding, lvar_available, icvar_available), name]
     in [:const_path_ref, receiver, [:@const,]]
       [:const, Completion::TypeSimulator.simulate_evaluate(receiver, binding, lvar_available, icvar_available), name]
     in [:def,] | [:string_content,] | [:var_field,] | [:defs,] | [:rest_param,] | [:kwrest_param,] | [:blockarg,] | [[:@ident,],]
@@ -132,15 +165,18 @@ module Completion::Completor
     end
   end
 
-  def self.find_pattern(sexp, pattern, stack = [sexp])
+  def self.find_target(sexp, line, col, stack = [sexp])
     return unless sexp.is_a? Array
     sexp.each do |child|
-      if child.is_a?(String) && child.include?(pattern)
-        stack << child
-        return stack
+      case child
+      in [Symbol, String, [Integer => l, Integer => c]]
+        if l == line && c == col
+          stack << child
+          return stack
+        end
       else
         stack << child
-        result = find_pattern(child, pattern, stack)
+        result = find_target(child, line, col, stack)
         return result if result
         stack.pop
       end
@@ -150,6 +186,7 @@ module Completion::Completor
 end
 
 if $0 == __FILE__
+=begin
   classes = ObjectSpace.each_object(Class)
   Completion::Completor.class_eval do
     return_types = []
@@ -171,8 +208,7 @@ if $0 == __FILE__
     return_types.uniq!
     binding.irb
   end
-
-  exit
+=end
   code = <<~'RUBY'.chomp
     a = 1
     def geso()
@@ -188,6 +224,5 @@ if $0 == __FILE__
         %[].aa
         '$hello'.to_s.size.times.map.to_a.hoge.to_a.hoge
   RUBY
-  tokens = RubyLex.ripper_lex_without_warning(code)
-  p Completion::Completor.analyze tokens
+  p Completion::Completor.analyze code
 end
