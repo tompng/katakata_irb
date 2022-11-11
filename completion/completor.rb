@@ -70,9 +70,11 @@ module Completion::Completor
 
   def self.analyze(code, binding = Kernel.binding)
     tokens = RubyLex.ripper_lex_without_warning code
+    tokens = TRex.interpolate_ripper_ignored_tokens code, tokens
     last_opens, unclosed_heredocs = TRex.parse(tokens)
+    heredoc_regexp = /\A<<(?:"(?<s>.+)"|'(?<s>.+)'|(?<s>.+))/
     closing_heredocs = unclosed_heredocs.map {|t|
-      t.tok.match(/\A<<(?:"(?<s>.+)"|'(?<s>.+)'|(?<s>.+))/)[:s]
+      t.tok.match(heredoc_regexp)[:s]
     }
     closings = last_opens.map do |t,|
       case t.tok
@@ -88,6 +90,8 @@ module Completion::Completor
         $1
       when '"', "'"
         t.tok
+      when heredoc_regexp
+        $3
       else
         'end'
       end
@@ -95,8 +99,7 @@ module Completion::Completor
 
     return if code =~ /[!?]\z/
     case tokens.last
-    in { event: :on_int }
-      return unless code.end_with? '.'
+    in { event: :on_ignored_by_ripper, tok: '.' }
       suffix = 'method'
       name = ''
     in { dot: true }
