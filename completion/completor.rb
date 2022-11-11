@@ -121,12 +121,14 @@ module Completion::Completor
       return
     end
 
-    icvar_available = !last_opens.any? {|t,| t in { event: :on_kw, tok: 'class' | 'module' } }
-    lvar_available = !last_opens.any? {|t,| t in { event: :on_kw, tok: 'class' | 'module' | 'def' } }
     closings = $/ + closing_heredocs.reverse.join($/) + $/ + closings.reverse.join($/)
     sexp = Ripper.sexp code + suffix + closings
     lines = code.lines
     *parents, expression, target = find_target sexp, lines.size, lines.last.bytesize
+    in_class_module = parents&.any? { _1 in [:class | :module,] }
+    in_method_def = parents&.any? { _1 in [:def,] }
+    icvar_available = !in_class_module
+    lvar_available = !in_class_module && !in_method_def
     return unless target in [type, String, [Integer, Integer]]
     if target in [:@ivar,]
       return [:ivar, name] if icvar_available
