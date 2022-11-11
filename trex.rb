@@ -1,4 +1,31 @@
 module TRex
+  def self.interpolate_ripper_ignored_tokens(code, tokens)
+    line_positions = code.lines.reduce([0]) { _1 << _1.last + _2.bytesize }
+    prev_byte_pos = 0
+    interpolated = []
+    prev_line = 1
+    event = :on_ignored_by_ripper
+    tokens.each do |t|
+      line, col = t.pos
+      byte_pos = line_positions[line - 1] + col
+      if prev_byte_pos < byte_pos
+        tok = code.byteslice(prev_byte_pos...byte_pos)
+        pos = [prev_line, prev_byte_pos - line_positions[prev_line - 1]]
+        interpolated << Ripper::Lexer::Elem.new(pos, event, tok, 0)
+        prev_line += tok.count("\n")
+      end
+      interpolated << t
+      prev_byte_pos = byte_pos + t.tok.bytesize
+      prev_line += t.tok.count("\n")
+    end
+    if prev_byte_pos < code.bytesize
+      tok = code.byteslice(prev_byte_pos..)
+      pos = [prev_line, prev_byte_pos - line_positions[prev_line - 1]]
+      interpolated << Ripper::Lexer::Elem.new(pos, event, tok, 0)
+    end
+    interpolated
+  end
+
   def self.parse(tokens)
     opens = []
     pending_heredocs = []
