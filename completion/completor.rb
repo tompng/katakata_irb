@@ -154,9 +154,9 @@ module Completion::Completor
       [:cvar, name] if icvar_available
     in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::' => dot, [:@ident | :@const,]]
       type = dot == :'::' ? :call_or_const : :call
-      [type, Completion::TypeSimulator.simulate_evaluate(receiver, binding, lvar_available, icvar_available), name]
+      [type, Completion::TypeSimulator.simulate_evaluate(receiver, Completion::TypeSimulator::Scope.from_binding(binding)), name]
     in [:const_path_ref, receiver, [:@const,]]
-      [:const, Completion::TypeSimulator.simulate_evaluate(receiver, binding, lvar_available, icvar_available), name]
+      [:const, Completion::TypeSimulator.simulate_evaluate(receiver, Completion::TypeSimulator::Scope.from_binding(binding)), name]
     in [:def,] | [:string_content,] | [:var_field,] | [:defs,] | [:rest_param,] | [:kwrest_param,] | [:blockarg,] | [[:@ident,],]
     else
       STDERR.cooked{
