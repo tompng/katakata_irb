@@ -187,20 +187,4 @@ module Completion::TypeSimulator
     result |= [OBJECT_METHODS[method.to_sym]] if OBJECT_METHODS.has_key? method.to_sym
     result.empty? ? [Object, NilClass] : result
   end
-
-  def self.find_pattern(sexp, pattern, stack = [sexp])
-    return unless sexp.is_a? Array
-    sexp.each do |child|
-      if child.is_a?(String) && child.include?(pattern)
-        stack << child
-        return stack
-      else
-        stack << child
-        result = find_pattern(child, pattern, stack)
-        return result if result
-        stack.pop
-      end
-    end
-    nil
-  end
 end
