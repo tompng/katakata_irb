@@ -72,11 +72,7 @@ module Completion::Completor
     tokens = RubyLex.ripper_lex_without_warning code
     tokens = TRex.interpolate_ripper_ignored_tokens code, tokens
     last_opens, unclosed_heredocs = TRex.parse(tokens)
-    heredoc_regexp = /\A<<(?:"(?<s>.+)"|'(?<s>.+)'|(?<s>.+))/
-    closing_heredocs = unclosed_heredocs.map {|t|
-      t.tok.match(heredoc_regexp)[:s]
-    }
-    closings = last_opens.map do |t,|
+    closings = (last_opens + unclosed_heredocs).map do |t,|
       case t.tok
       when /\A%.[<>]\z/
         '>'
@@ -90,7 +86,7 @@ module Completion::Completor
         $1
       when '"', "'"
         t.tok
-      when heredoc_regexp
+      when /\A<<(?:"(?<s>.+)"|'(?<s>.+)'|(?<s>.+))/
         $3
       else
         'end'
@@ -121,7 +117,7 @@ module Completion::Completor
       return
     end
 
-    closings = $/ + closing_heredocs.reverse.join($/) + $/ + closings.reverse.join($/)
+    closings = $/ + closings.reverse.join($/)
     sexp = Ripper.sexp code + suffix + closings
     lines = code.lines
     *parents, expression, target = find_target sexp, lines.size, lines.last.bytesize
