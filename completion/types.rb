@@ -105,6 +105,8 @@ module Completion::Types
       when :boolish
         [TrueClass, FalseClass]
       end
+    when RBS::Types::Interface
+      [] # unimplemented
     when RBS::Types::ClassInstance
       [Object.const_get(return_type.name.name)]
     end

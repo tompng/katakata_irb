@@ -154,9 +154,11 @@ module Completion::Completor
       [:cvar, name] if icvar_available
     in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::' => dot, [:@ident | :@const,]]
       type = dot == :'::' ? :call_or_const : :call
-      [type, Completion::TypeSimulator.simulate_evaluate(receiver, Completion::TypeSimulator::Scope.from_binding(binding)), name]
+      receiver_type = Completion::TypeSimulator.calculate_receiver binding, parents, receiver
+      [type, receiver_type, name]
     in [:const_path_ref, receiver, [:@const,]]
-      [:const, Completion::TypeSimulator.simulate_evaluate(receiver, Completion::TypeSimulator::Scope.from_binding(binding)), name]
+      receiver_type = Completion::TypeSimulator.calculate_receiver binding, parents, receiver
+      [:const, receiver_type, name]
     in [:def,] | [:string_content,] | [:var_field,] | [:defs,] | [:rest_param,] | [:kwrest_param,] | [:blockarg,] | [[:@ident,],]
     else
       STDERR.cooked{
@@ -226,5 +228,9 @@ if $0 == __FILE__
         %[].aa
         '$hello'.to_s.size.times.map.to_a.hoge.to_a.hoge
   RUBY
+  # code = <<~'RUBY'.chomp
+  #   a = 3
+  #   a.hoge
+  # RUBY
   p Completion::Completor.analyze code
 end
