@@ -38,10 +38,12 @@ module Completion::TypeSimulator
   end
 
   class Scope
+    attr_reader :parent
+
     def self.from_binding(binding) = new BaseScope.new(binding, binding.eval('self'))
 
     def initialize(parent, trace_cvar: true, trace_ivar: true, trace_lvar: true)
-      @table = {}
+      @tables = [{}]
       @parent = parent
       @trace_cvar = trace_cvar
       @trace_ivar = trace_ivar
@@ -57,20 +59,44 @@ module Completion::TypeSimulator
     end
 
     def [](name)
-      @table[name] || (@parent[name] if trace? name)
+      @tables.reverse_each do |table|
+        return table[name] if table.has_key? name
+      end
+      @parent[name] if trace? name
     end
 
-    def set(name, types, conditional: false)
+    def []=(name, types)
       if trace?(name) && @parent.mutable? && @parent.has?(name)
-        @parent.set(name, types, conditional:)
-      elsif conditional
-        @table[name] = (self[name] || [NilClass]) | types
+        @parent[name] = types
       else
-        @table[name] = types
+        @tables.last[name] = types
       end
     end
 
-    alias []= set
+    def start_conditional
+      @tables << {}
+    end
+
+    def end_conditional
+      changes = @tables.pop
+      table = @tables.last
+      changes.each do |key, value|
+        table[key] = (table[key] || [NilClass]) | value
+      end
+    end
+
+    def conditional
+      scopes = [self]
+      while scopes.last.parent&.mutable?
+        scopes << scopes.last.parent
+      end
+      begin
+        scopes.each(&:start_conditional)
+        yield
+      ensure
+        scopes.each(&:end_conditional)
+      end
+    end
 
     def has?(name)
       @table.has?(name) || (trace?(name) && @parent.has?(name))
@@ -106,7 +132,7 @@ module Completion::TypeSimulator
     to_r: Rational
   }
 
-  def self.simulate_evaluate(sexp, scope, conditional: false, only_sideeffect: false)
+  def self.simulate_evaluate(sexp, scope, only_sideeffect: false)
     case sexp
     in [:def,]
       [Symbol]
@@ -129,10 +155,10 @@ module Completion::TypeSimulator
     in [:hash,]
       [Hash]
     in [:paren | :ensure | :else, [*statements, statement]]
-      statements.each { simulate_evaluate(_1, scope, conditional:, only_sideeffect: true) }
-      simulate_evaluate(statement, scope, conditional:, only_sideeffect:)
+      statements.each { simulate_evaluate(_1, scope, only_sideeffect: true) }
+      simulate_evaluate(statement, scope, only_sideeffect:)
     in [:const_path_ref, receiver, [:@const, name,]]
-      simulate_evaluate(receiver, scope, conditional:, only_sideeffect:).flat_map do |k|
+      simulate_evaluate(receiver, scope, only_sideeffect:).flat_map do |k|
         (k in { class: klass }) ? type_of { klass.const_get name } : []
       end
     in [:var_ref, [:@kw, name,]]
@@ -141,90 +167,94 @@ module Completion::TypeSimulator
     in [:var_ref, [:@const | :@ivar | :@cvar | :@gvar | :@ident, name,]]
       scope[name] || []
     in [:aref, receiver, args]
-      receiver_type = simulate_evaluate(receiver, scope, conditional:, only_sideeffect:) if receiver
+      receiver_type = simulate_evaluate(receiver, scope, only_sideeffect:) if receiver
       args, kwargs, kwsplat, block = retrieve_method_args args
-      args_type = args.map { simulate_evaluate(_1, scope, conditional:, only_sideeffect:) if _1 }
-      kwargs_type = kwargs&.transform_values { simulate_evaluate(_1, scope, conditional:, only_sideeffect:) }
+      args_type = args.map { simulate_evaluate(_1, scope, only_sideeffect:) if _1 }
+      kwargs_type = kwargs&.transform_values { simulate_evaluate(_1, scope, only_sideeffect:) }
       simulate_call receiver_type, :[], args_type, kwargs_type, kwsplat, block
     in [:call | :vcall | :command | :command_call | :method_add_arg | :method_add_block,]
       receiver, method, args, kwargs, kwsplat, block = retrieve_method_call sexp
-      receiver_type = simulate_evaluate(receiver, scope, conditional:, only_sideeffect:) if receiver
-      args_type = args.map { simulate_evaluate(_1, scope, conditional:, only_sideeffect:) if _1 }
-      kwargs_type = kwargs&.transform_values { simulate_evaluate(_1, scope, conditional:, only_sideeffect:) }
+      receiver_type = simulate_evaluate(receiver, scope, only_sideeffect:) if receiver
+      args_type = args.map { simulate_evaluate(_1, scope, only_sideeffect:) if _1 }
+      kwargs_type = kwargs&.transform_values { simulate_evaluate(_1, scope, only_sideeffect:) }
       simulate_call receiver_type, method, args_type, kwargs_type, kwsplat, block
     in [:binary, a, Symbol => op, b]
-      simulate_call simulate_evaluate(a, scope, conditional:, only_sideeffect:), op, [simulate_evaluate(b, scope, conditional:, only_sideeffect:)], {}, false, false
+      simulate_call simulate_evaluate(a, scope, only_sideeffect:), op, [simulate_evaluate(b, scope, only_sideeffect:)], {}, false, false
     in [:unary, op, receiver]
-      simulate_call simulate_evaluate(receiver, scope, conditional:, only_sideeffect:), op, [], {}, false, false
+      simulate_call simulate_evaluate(receiver, scope, only_sideeffect:), op, [], {}, false, false
     in [:lambda,]
       [Proc]
     in [:assign, [:var_field, [:@gvar | :@ivar | :@cvar | :@ident, name,]], value]
-      res = simulate_evaluate(value, scope, conditional:, only_sideeffect:)
-      scope.set(name, res, conditional:)
+      res = simulate_evaluate(value, scope, only_sideeffect:)
+      scope[name] = res
       res
     in [:massign | :assign, _target, value]
-      simulate_evaluate(value, scope, conditional:, only_sideeffect: true)
+      simulate_evaluate(value, scope, only_sideeffect: true)
     in [:mrhs_new_from_args,]
       [Array]
     in [:ifop, cond, tval, fval]
-      simulate_evaluate(cond, scope, conditional:, only_sideeffect: true)
-      simulate_evaluate(tval, scope, conditional: true, only_sideeffect:) | simulate_evaluate(fval, scope, conditional: true, only_sideeffect:)
+      simulate_evaluate(cond, scope, only_sideeffect: true)
+      scope.conditional { simulate_evaluate(tval, scope, only_sideeffect:) } | scope.conditional { simulate_evaluate(fval, scope, only_sideeffect:) }
     in [:if_mod | :unless_mod, cond, statement]
-      simulate_evaluate(cond, scope, conditional:, only_sideeffect: true)
-      simulate_evaluate(statement, scope, conditional: true, only_sideeffect:) | [NilClass]
+      simulate_evaluate(cond, scope, only_sideeffect: true)
+      scope.conditional { simulate_evaluate(statement, scope, only_sideeffect:) } | [NilClass]
     in [:if | :unless | :elsif, cond, [*statements, statement], else_statement]
-      simulate_evaluate(cond, scope, conditional:, only_sideeffect: true)
-      statements.each { simulate_evaluate(_1, scope, conditional: true, only_sideeffect: true) }
-      type1 = simulate_evaluate(statement, scope, conditional: true, only_sideeffect:)
+      simulate_evaluate(cond, scope, only_sideeffect: true)
+      type1 = scope.conditional do
+        statements.each { simulate_evaluate(_1, scope, only_sideeffect: true) }
+        simulate_evaluate(statement, scope, only_sideeffect:)
+      end
       if else_statement
-        type1 | simulate_evaluate(else_statement, scope, conditional: true, only_sideeffect:)
+        type1 | scope.conditional { simulate_evaluate(else_statement, scope, only_sideeffect:) }
       else
         type1 | [NilClass]
       end
     in [:while | :until, cond, statements]
       simulate_evaluate cond, scope, only_sideeffect: true
-      statements.each { simulate_evaluate(_1, scope, conditional: true, only_sideeffect: true) }
+      scope.conditional { statements.each { simulate_evaluate(_1, scope, only_sideeffect: true) } }
       [NilClass]
     in [:while_mod | :until_mod, cond, statement]
-      simulate_evaluate(cond, scope, conditional:, only_sideeffect: true)
-      simulate_evaluate(statement, scope, conditional: true, only_sideeffect:)
+      simulate_evaluate(cond, scope, only_sideeffect: true)
+      scope.conditional { simulate_evaluate(statement, scope, only_sideeffect:) }
       [NilClass]
     in [:begin, body_stmt]
-      simulate_evaluate(body_stmt, scope, conditional:, only_sideeffect:)
+      simulate_evaluate(body_stmt, scope, only_sideeffect:)
     in [:bodystmt, [*statements, statement], rescue_stmt, _unknown, ensure_stmt]
-      statements.each { simulate_evaluate(_1, scope, conditional:, only_sideeffect: true) }
-      return_type = simulate_evaluate(statement, scope, conditional:, only_sideeffect:)
+      statements.each { simulate_evaluate(_1, scope, only_sideeffect: true) }
+      return_type = simulate_evaluate(statement, scope, only_sideeffect:)
       if rescue_stmt
-        return_type |= simulate_evaluate(rescue_stmt, scope, conditional: true, only_sideeffect:)
+        return_type |= scope.conditional { simulate_evaluate(rescue_stmt, scope, only_sideeffect:) }
       end
-      simulate_evaluate(ensure_stmt, scope, conditional:, only_sideeffect: true) if ensure_stmt
+      simulate_evaluate(ensure_stmt, scope, only_sideeffect: true) if ensure_stmt
       return_type
     in [:rescue, error_class_stmts, error_var_stmt, [*statements, statement], rescue_stmt]
-      if error_var_stmt in [:var_field, [:@ident, error_var,]]
-        error_classes = (error_class_stmts || []).flat_map { simulate_evaluate(_1, scope, conditional: true, only_sideeffect:) }.uniq
-        error_types = error_classes.filter_map { (_1 in { class: klass }) && klass }
-        error_types = [StandardError] if error_types.empty?
-        scope.set(error_var, error_types, conditional: true)
+      return_type = scope.conditional do
+        if error_var_stmt in [:var_field, [:@ident, error_var,]]
+          error_classes = (error_class_stmts || []).flat_map { simulate_evaluate(_1, scope, only_sideeffect:) }.uniq
+          error_types = error_classes.filter_map { (_1 in { class: klass }) && klass }
+          error_types = [StandardError] if error_types.empty?
+          scope[error_var] = error_types
+        end
+        statements.each { simulate_evaluate(_1, scope, only_sideeffect: true) }
+        simulate_evaluate(statement, scope, only_sideeffect:)
       end
-      statements.each { simulate_evaluate(_1, scope, conditional: true, only_sideeffect: true) }
-      return_type = simulate_evaluate(statement, scope, conditional: true, only_sideeffect:)
       if rescue_stmt
-        return_type |= simulate_evaluate(rescue_stmt, scope, conditional: true, only_sideeffect:)
+        return_type |= simulate_evaluate(rescue_stmt, scope, only_sideeffect:)
       end
       return_type
     in [:rescue_mod, statement1, statement2]
-      a = simulate_evaluate(statement1, scope, conditional:, only_sideeffect:)
-      b = simulate_evaluate(statement2, scope, conditional: true, only_sideeffect:)
+      a = simulate_evaluate(statement1, scope, only_sideeffect:)
+      b = scope.conditional { simulate_evaluate(statement2, scope, only_sideeffect:) }
       a | b
     in [:module, module_stmt, body_stmt]
       return [] if only_sideeffect
-      simulate_evaluate(body_stmt, Scope.new(nil), conditional: false)
+      simulate_evaluate(body_stmt, Scope.new(nil))
     in [:sclass, klass_stmt, body_stmt]
       return [] if only_sideeffect
-      simulate_evaluate(body_stmt, Scope.new(nil), conditional: false)
+      simulate_evaluate(body_stmt, Scope.new(nil))
     in [:class, klass_stmt, _superclass_stmt, body_stmt]
       return [] if only_sideeffect
-      simulate_evaluate(body_stmt, Scope.new(nil), conditional: false)
+      simulate_evaluate(body_stmt, Scope.new(nil))
     in [:case | :begin | :for | :class | :sclass | :module,]
       []
     in [:void_stmt]
