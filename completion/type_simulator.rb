@@ -2,6 +2,71 @@ require_relative 'types'
 require 'ripper'
 module Completion; end
 module Completion::TypeSimulator
+
+  class BaseScope
+    def initialize(binding, self_object)
+      @binding, @self_object = binding, self_object
+      @cache = {}
+    end
+
+    def mutable?() = false
+
+    def [](name)
+      @cache[name] ||= (
+        case BaseScope.type_by_name name
+        when :cvar
+          Completion::TypeSimulator.type_of { @self_object.class_variable_get name }
+        when :ivar
+          Completion::TypeSimulator.type_of { @self_object.instance_variable_get name }
+        when :lvar
+          Completion::TypeSimulator.type_of { @binding.eval name.to_s }
+        end
+      )
+    end
+
+    def self.type_by_name(name)
+      name.start_with?('@@') ? :cvar : name.start_with?('@') ? :ivar : :lvar
+    end
+  end
+
+  class Scope
+    def initialize(parent, trace_cvar: true, trace_ivar: true, trace_lvar: true)
+      @table = {}
+      @parent = parent
+      @trace_cvar = trace_cvar
+      @trace_ivar = trace_ivar
+      @trace_lvar = trace_lvar
+    end
+
+    def mutable?() = true
+
+    def trace?(name)
+      return false unless @parent
+      type = BaseScope.type_by_name(name)
+      type == :cvar ? @trace_cvar : type == :ivar ? @trace_ivar : @trace_lvar
+    end
+
+    def [](name)
+      @table[name] || (@parent[name] if trace? name)
+    end
+
+    def set(name, types, conditional: false)
+      if trace?(name) && @parent.mutable? && @parent.has?(name)
+        @parent.set(name, types, conditional:)
+      elsif conditional
+        @table[name] = (self[name] || []) | types
+      else
+        @table[name] = types
+      end
+    end
+
+    alias []= set
+
+    def has?(name)
+      @table.has?(name) || (trace?(name) && @parent.has?(name))
+    end
+  end
+
   module LexerElemMatcher
     refine Ripper::Lexer::Elem do
       def deconstruct_keys(_keys)
