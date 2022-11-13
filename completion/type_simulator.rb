@@ -243,7 +243,13 @@ module Completion::TypeSimulator
       res = simulate_evaluate value, scope, dig_targets
       scope[name] = res
       res
-    in [:massign | :assign, _target, value]
+    in [:opassign, target, op, value]
+      # TODO
+    in [:assign, target, value]
+      simulate_evaluate target, scope, dig_targets
+      simulate_evaluate value, scope, dig_targets
+    in [:massign, targets, value]
+      # TODO
       simulate_evaluate value, scope, dig_targets
     in [:mrhs_new_from_args,]
       [Array]
