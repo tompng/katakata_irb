@@ -228,9 +228,5 @@ if $0 == __FILE__
         %[].aa
         '$hello'.to_s.size.times.map.to_a.hoge.to_a.hoge
   RUBY
-  # code = <<~'RUBY'.chomp
-  #   a = 3
-  #   a.hoge
-  # RUBY
   p Completion::Completor.analyze code
 end

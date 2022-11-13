@@ -106,7 +106,7 @@ module Completion::TypeSimulator
 
     def [](name)
       @tables.reverse_each do |table|
-        return table[name] if table.has_key? name
+        return table[name] if table.key? name
       end
       @parent[name] if trace? name
     end
@@ -119,28 +119,52 @@ module Completion::TypeSimulator
       end
     end
 
-    def start_conditional
+    def start_branch
       @tables << {}
     end
 
-    def end_conditional
-      changes = @tables.pop
-      table = @tables.last
-      changes.each do |key, value|
-        table[key] = (table[key] || [NilClass]) | value
+    def end_branch
+      @tables.pop
+    end
+
+    def merge_branch(tables)
+      target_table = @tables.last
+      keys = tables.flat_map(&:keys).uniq
+      keys.each do |key|
+        original_value = self[key] || [NilClass]
+        target_table[key] = tables.flat_map { _1[key] || original_value }.uniq
       end
     end
 
-    def conditional
+    def ancestors
       scopes = [self]
       while scopes.last.parent&.mutable?
         scopes << scopes.last.parent
       end
-      begin
-        scopes.each(&:start_conditional)
-        yield
-      ensure
-        scopes.each(&:end_conditional)
+      scopes
+    end
+
+    def conditional(&block)
+      run_branches(block, ->{}).first
+    end
+
+    def run_branches(*blocks)
+      results = blocks.map { branch(&_1) }
+      merge results.map(&:last)
+      results.map(&:first)
+    end
+
+    def branch
+      scopes = ancestors
+      scopes.each(&:start_branch)
+      result = yield
+      [result, scopes.map(&:end_branch)]
+    end
+
+    def merge(branches)
+      scopes = ancestors
+      scopes.zip(*branches).each do |scope, *tables|
+        scope.merge_branch(tables)
       end
     end
 
@@ -248,7 +272,7 @@ module Completion::TypeSimulator
       kwargs_type = kwargs&.transform_values { simulate_evaluate _1, scope, jumps, dig_targets }
       if block
         block => [:do_block | :brace_block => type, params, body]
-        result, breaks = scope.conditional do
+        result, breaks =  scope.conditional do
           jumps.with :break do
             if type == :do_block
               simulate_evaluate body, scope, jumps, dig_targets
@@ -308,20 +332,20 @@ module Completion::TypeSimulator
       [Array]
     in [:ifop, cond, tval, fval]
       simulate_evaluate cond, scope, jumps, dig_targets
-      scope.conditional { simulate_evaluate tval, scope, jumps, jumps, dig_targets } | scope.conditional { simulate_evaluate fval, scope, jumps, dig_targets }
+      scope.run_branches(
+        -> { simulate_evaluate tval, scope, jumps, jumps, dig_targets },
+        -> { simulate_evaluate fval, scope, jumps, dig_targets }
+      ).inject(:|)
     in [:if_mod | :unless_mod, cond, statement]
       simulate_evaluate cond, scope, jumps, dig_targets
       scope.conditional { simulate_evaluate statement, scope, jumps, dig_targets } | [NilClass]
     in [:if | :unless | :elsif, cond, statements, else_statement]
       simulate_evaluate cond, scope, jumps, dig_targets
-      type1 = scope.conditional do
-        statements.map { simulate_evaluate _1, scope, jumps, dig_targets }.last
-      end
-      if else_statement
-        type1 | scope.conditional { simulate_evaluate else_statement, scope, jumps, dig_targets }
-      else
-        type1 | [NilClass]
-      end
+      if_result, else_result = scope.run_branches(
+        -> { statements.map { simulate_evaluate _1, scope, jumps, dig_targets }.last },
+        -> { else_statement ? simulate_evaluate(else_statement, scope, jumps, dig_targets) : [NilClass] }
+      )
+      if_result | else_result
     in [:while | :until, cond, statements]
       jumps.with :break do
         simulate_evaluate cond, scope, jumps, dig_targets
