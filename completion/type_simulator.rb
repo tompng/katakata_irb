@@ -211,7 +211,27 @@ module Completion::TypeSimulator
       end
       simulate_call receiver_type, method, args_type, kwargs_type, kwsplat, !!block
     in [:binary, a, Symbol => op, b]
-      simulate_call simulate_evaluate(a, scope, dig_targets), op, [simulate_evaluate(b, scope, dig_targets)], {}, false, false
+      atypes, btypes = [a, b].map { simulate_evaluate _1, scope, dig_targets }
+      case op
+      when :'&&', :and
+        truthy = atypes - [NilClass, FalseClass]
+        falsy = atypes & [NilClass, FalseClass]
+        if truthy.empty?
+          falsy
+        else
+          falsy | btypes
+        end
+      when :'||', :or
+        truthy = atypes - [NilClass, FalseClass]
+        falsy = atypes & [NilClass, FalseClass]
+        if falsy.empty?
+          atypes
+        else
+          truthy | btypes
+        end
+      else
+        simulate_call atypes, op, [btypes], {}, false, false
+      end
     in [:unary, op, receiver]
       simulate_call simulate_evaluate(receiver, scope, dig_targets), op, [], {}, false, false
     in [:lambda, params, statements]
