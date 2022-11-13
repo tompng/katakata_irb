@@ -59,13 +59,14 @@ module Completion::TypeSimulator
 
     def [](name)
       @cache[name] ||= (
+        fallback = [NilClass]
         case BaseScope.type_by_name name
         when :cvar
-          Completion::TypeSimulator.type_of { @self_object.class_variable_get name }
+          Completion::TypeSimulator.type_of(fallback:) { @self_object.class_variable_get name }
         when :ivar
-          Completion::TypeSimulator.type_of { @self_object.instance_variable_get name }
+          Completion::TypeSimulator.type_of(fallback:) { @self_object.instance_variable_get name }
         else
-          Completion::TypeSimulator.type_of { @binding.eval name }
+          Completion::TypeSimulator.type_of(fallback:) { @binding.eval name }
         end
       )
     end
@@ -131,7 +132,7 @@ module Completion::TypeSimulator
       target_table = @tables.last
       keys = tables.flat_map(&:keys).uniq
       keys.each do |key|
-        original_value = self[key] || [NilClass]
+        original_value = self[key]
         target_table[key] = tables.flat_map { _1[key] || original_value }.uniq
       end
     end
@@ -410,12 +411,12 @@ module Completion::TypeSimulator
     end
   end
 
-  def self.type_of
+  def self.type_of(fallback: [])
     begin
       value = yield
       value.is_a?(Module) ? [{ class: value }] : [value.class]
     rescue
-      []
+      fallback
     end
   end
 
