@@ -320,8 +320,10 @@ module Completion::TypeSimulator
       res = simulate_evaluate value, scope, jumps, dig_targets
       scope[name] = res
       res
-    in [:opassign, target, op, value]
-      # TODO
+    in [:opassign, target, [:@op, op,], value]
+      op = op.to_s.delete('=').to_sym
+      receiver = (target in [:var_field, *field]) ? [:var_ref, *field] : target
+      simulate_evaluate [:assign, target, [:binary, receiver, op, value]], scope, jumps, dig_targets
     in [:assign, target, value]
       simulate_evaluate target, scope, jumps, dig_targets
       simulate_evaluate value, scope, jumps, dig_targets
