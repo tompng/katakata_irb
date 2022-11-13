@@ -57,6 +57,86 @@ module Completion::Types
     end
   end
 
+  def self.type_from_object(object, max_level: 4)
+    max_level -= 1
+    case object
+    when Array
+      if max_level > 0
+        values = object.map { type_from_object(_1, max_level:) }
+        InstanceType.new Array, { Elem: UnionType[*values] }
+      else
+        InstanceType.new Array, { Elem: UnionType[*object.map(&:class).uniq.map { InstanceType.new _1 }] }
+      end
+    when Hash
+      if max_level > 0
+        keys = object.keys.map { type_from_object(_1, max_level:) }
+        values = object.values.map { type_from_object(_1, max_level:) }
+        InstanceType.new Hash, { K: UnionType[*keys], V: UnionType[*values] }
+      else
+        keys = object.keys.map(&:class).uniq.map { InstanceType.new _1 }
+        values = object.values.map(&:class).uniq.map { InstanceType.new _1 }
+        InstanceType.new Hash, { K: UnionType[*keys], V: UnionType[*values] }
+      end
+    when Module
+      SingletonType.new object
+    else
+      InstanceType.new object.class
+    end
+  end
+
+  class SingletonType
+    attr_reader :module_or_class
+    def initialize(module_or_class)
+      @module_or_class = module_or_class
+    end
+  end
+
+  class InstanceType
+    attr_reader :klass, :params
+    def initialize(klass, params = {})
+      @klass = klass
+      @params = params
+    end
+  end
+
+  class UnionType
+    attr_reader :types
+
+    def initialize(*types)
+      @types = []
+      singletons = []
+      instances = {}
+      collect = -> type do
+        case type
+        in UnionType
+          type.types.each(&collect)
+        in InstanceType
+          params = (instances[type.klass] ||= {})
+          type.params.each do |k, v|
+            (params[k] ||= []) << v
+          end
+        in SingletonType
+          singletons << type
+        end
+      end
+      types.each(&collect)
+      @types = singletons.uniq + instances.map do |klass, params|
+        InstanceType.new(klass, params.transform_values { |v| UnionType[*v] })
+      end
+    end
+
+    def self.[](*types)
+      type = new(*types)
+      if type.types.empty?
+        InstanceType.new Object
+      elsif type.types.size == 1
+        type.types.first
+      else
+        type
+      end
+    end
+  end
+
   def self.classes_from_rbs_type(return_type, self_class)
     case return_type
     when RBS::Types::Bases::Self
