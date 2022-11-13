@@ -2,6 +2,38 @@ require_relative 'types'
 require 'ripper'
 module Completion; end
 module Completion::TypeSimulator
+  class JumpPoints
+    def initialize
+      @returns = []
+      @breaks = []
+    end
+    def return(value) = @returns.last&.<< value
+    def break(value) = @breaks.last&.<< value
+
+    def with(*types)
+      accumulators = types.map do |type|
+        ac = []
+        case type
+        in :return
+          @returns << ac
+        in :break
+          @breaks << ac
+        end
+        ac
+      end
+      result = yield
+      [result, *accumulators]
+    ensure
+      types.each do |type|
+        case type
+        in :return
+          @returns.pop
+        in :break
+          @breaks.pop
+        end
+      end
+    end
+  end
 
   class DigTarget
     def initialize(parents, receiver, &block)
@@ -56,8 +88,8 @@ module Completion::TypeSimulator
 
     def self.from_binding(binding) = new BaseScope.new(binding, binding.eval('self'))
 
-    def initialize(parent, trace_cvar: true, trace_ivar: true, trace_lvar: true)
-      @tables = [{}]
+    def initialize(parent, table = {}, trace_cvar: true, trace_ivar: true, trace_lvar: true)
+      @tables = [table]
       @parent = parent
       @trace_cvar = trace_cvar
       @trace_ivar = trace_ivar
@@ -150,19 +182,27 @@ module Completion::TypeSimulator
     to_r: Rational
   }
 
-  def self.simulate_evaluate(sexp, scope, dig_targets)
-    result = simulate_evaluate_inner(sexp, scope, dig_targets)
+  def self.simulate_evaluate(sexp, scope, jumps, dig_targets)
+    result = simulate_evaluate_inner(sexp, scope, jumps, dig_targets)
     dig_targets.resolve result if dig_targets.target?(sexp)
     result
   end
 
-  def self.simulate_evaluate_inner(sexp, scope, dig_targets)
+  def self.simulate_proc_response(body, args_table, scope, jumps, dig_targets)
+    proc_scope = Scope.new(scope, args_table)
+    result, breaks = jumps.with :break do
+      simulate_evaluate body, proc_scope, jumps, dig_targets
+    end
+    result | breaks
+  end
+
+  def self.simulate_evaluate_inner(sexp, scope, jumps, dig_targets)
     case sexp
     in [:program, statements]
-      statements.map { simulate_evaluate _1, scope, dig_targets }.last
+      statements.map { simulate_evaluate _1, scope, jumps, dig_targets }.last
     in [:def, *receiver, method, params, body_stmt]
       if dig_targets.dig? sexp
-        simulate_evaluate body_stmt, Scope.new(scope, trace_lvar: false), dig_targets
+        simulate_evaluate body_stmt, Scope.new(scope, trace_lvar: false), jumps, dig_targets
       end
       [Symbol]
     in [:@int,]
@@ -180,14 +220,14 @@ module Completion::TypeSimulator
     in [:regexp_literal,]
       [Regexp]
     in [:array, statements]
-      statements.each { simulate_evaluate _1, scope, dig_targets }
+      statements.each { simulate_evaluate _1, scope, jumps, dig_targets }
       [Array]
     in [:hash,]
       [Hash]
     in [:paren | :ensure | :else, statements]
-      statements.map { simulate_evaluate _1, scope, dig_targets }.last
+      statements.map { simulate_evaluate _1, scope, jumps, dig_targets }.last
     in [:const_path_ref, receiver, [:@const, name,]]
-      simulate_evaluate(receiver, scope, dig_targets).flat_map do |k|
+      simulate_evaluate(receiver, scope, jumps, dig_targets).flat_map do |k|
         (k in { class: klass }) ? type_of { klass.const_get name } : []
       end
     in [:var_ref, [:@kw, name,]]
@@ -196,22 +236,32 @@ module Completion::TypeSimulator
     in [:var_ref, [:@const | :@ivar | :@cvar | :@gvar | :@ident, name,]]
       scope[name] || []
     in [:aref, receiver, args]
-      receiver_type = simulate_evaluate receiver, scope, dig_targets if receiver
+      receiver_type = simulate_evaluate receiver, scope, jumps, dig_targets if receiver
       args, kwargs, kwsplat, block = retrieve_method_args args
-      args_type = args.map { simulate_evaluate _1, scope, dig_targets if _1 }
-      kwargs_type = kwargs&.transform_values { simulate_evaluate _1, scope, dig_targets }
+      args_type = args.map { simulate_evaluate _1, scope, jumps, dig_targets if _1 }
+      kwargs_type = kwargs&.transform_values { simulate_evaluate _1, scope, jumps, dig_targets }
       simulate_call receiver_type, :[], args_type, kwargs_type, kwsplat, block
     in [:call | :vcall | :command | :command_call | :method_add_arg | :method_add_block,]
       receiver, method, args, kwargs, kwsplat, block = retrieve_method_call sexp
-      receiver_type = simulate_evaluate receiver, scope, dig_targets if receiver
-      args_type = args.map { simulate_evaluate _1, scope, dig_targets if _1 }
-      kwargs_type = kwargs&.transform_values { simulate_evaluate _1, scope, dig_targets }
-      if dig_targets.dig?(block) && (block in [:do_block | :brace_block, params, body_stmt])
-        simulate_evaluate body_stmt, scope, dig_targets
+      receiver_type = simulate_evaluate receiver, scope, jumps, dig_targets if receiver
+      args_type = args.map { simulate_evaluate _1, scope, jumps, dig_targets if _1 }
+      kwargs_type = kwargs&.transform_values { simulate_evaluate _1, scope, jumps, dig_targets }
+      if block
+        block => [:do_block | :brace_block => type, params, body]
+        result, breaks = scope.conditional do
+          jumps.with :break do
+            if type == :do_block
+              simulate_evaluate body, scope, jumps, dig_targets
+            else
+              body.each { simulate_evaluate _1, scope, jumps, dig_targets }
+            end
+          end
+        end
+        proc_response = result | breaks
       end
       simulate_call receiver_type, method, args_type, kwargs_type, kwsplat, !!block
     in [:binary, a, Symbol => op, b]
-      atypes, btypes = [a, b].map { simulate_evaluate _1, scope, dig_targets }
+      atypes, btypes = [a, b].map { simulate_evaluate _1, scope, jumps, dig_targets }
       case op
       when :'&&', :and
         truthy = atypes - [NilClass, FalseClass]
@@ -233,86 +283,91 @@ module Completion::TypeSimulator
         simulate_call atypes, op, [btypes], {}, false, false
       end
     in [:unary, op, receiver]
-      simulate_call simulate_evaluate(receiver, scope, dig_targets), op, [], {}, false, false
+      simulate_call simulate_evaluate(receiver, scope, jumps, dig_targets), op, [], {}, false, false
     in [:lambda, params, statements]
       if dig_targets.dig? statements
-        statements.each { simulate_evaluate _1, scope, dig_targets }
+        jump.with_return_point do
+          # TODO: new scope with params
+          statements.each { simulate_evaluate _1, scope, jumps, dig_targets }
+        end
       end
       [Proc]
     in [:assign, [:var_field, [:@gvar | :@ivar | :@cvar | :@ident, name,]], value]
-      res = simulate_evaluate value, scope, dig_targets
+      res = simulate_evaluate value, scope, jumps, dig_targets
       scope[name] = res
       res
     in [:opassign, target, op, value]
       # TODO
     in [:assign, target, value]
-      simulate_evaluate target, scope, dig_targets
-      simulate_evaluate value, scope, dig_targets
+      simulate_evaluate target, scope, jumps, dig_targets
+      simulate_evaluate value, scope, jumps, dig_targets
     in [:massign, targets, value]
       # TODO
-      simulate_evaluate value, scope, dig_targets
+      simulate_evaluate value, scope, jumps, dig_targets
     in [:mrhs_new_from_args,]
       [Array]
     in [:ifop, cond, tval, fval]
-      simulate_evaluate cond, scope, dig_targets
-      scope.conditional { simulate_evaluate tval, scope, dig_targets } | scope.conditional { simulate_evaluate fval, scope, dig_targets }
+      simulate_evaluate cond, scope, jumps, dig_targets
+      scope.conditional { simulate_evaluate tval, scope, jumps, jumps, dig_targets } | scope.conditional { simulate_evaluate fval, scope, jumps, dig_targets }
     in [:if_mod | :unless_mod, cond, statement]
-      simulate_evaluate cond, scope, dig_targets
-      scope.conditional { simulate_evaluate statement, scope, dig_targets } | [NilClass]
+      simulate_evaluate cond, scope, jumps, dig_targets
+      scope.conditional { simulate_evaluate statement, scope, jumps, dig_targets } | [NilClass]
     in [:if | :unless | :elsif, cond, statements, else_statement]
-      simulate_evaluate cond, scope, dig_targets
+      simulate_evaluate cond, scope, jumps, dig_targets
       type1 = scope.conditional do
-        statements.map { simulate_evaluate _1, scope, dig_targets }.last
+        statements.map { simulate_evaluate _1, scope, jumps, dig_targets }.last
       end
       if else_statement
-        type1 | scope.conditional { simulate_evaluate else_statement, scope, dig_targets }
+        type1 | scope.conditional { simulate_evaluate else_statement, scope, jumps, dig_targets }
       else
         type1 | [NilClass]
       end
     in [:while | :until, cond, statements]
-      simulate_evaluate cond, scope, dig_targets
-      scope.conditional { statements.each { simulate_evaluate _1, scope, dig_targets } }
+      jumps.with :break do
+        simulate_evaluate cond, scope, jumps, dig_targets
+        scope.conditional { statements.each { simulate_evaluate _1, scope, jumps, dig_targets } }
+      end
       [NilClass]
     in [:while_mod | :until_mod, cond, statement]
-      simulate_evaluate cond, scope, dig_targets
-      scope.conditional { simulate_evaluate statement, scope, dig_targets }
+      simulate_evaluate cond, scope, jumps, dig_targets
+      scope.conditional { simulate_evaluate statement, scope, jumps, dig_targets }
       [NilClass]
     in [:begin, body_stmt]
-      simulate_evaluate body_stmt, scope, dig_targets
+      simulate_evaluate body_stmt, scope, jumps, dig_targets
     in [:bodystmt, statements, rescue_stmt, _unknown, ensure_stmt]
-      return_type = statements.map { simulate_evaluate _1, scope, dig_targets }.last
+      return_type = statements.map { simulate_evaluate _1, scope, jumps, dig_targets }.last
       if rescue_stmt
-        return_type |= scope.conditional { simulate_evaluate rescue_stmt, scope, dig_targets }
+        return_type |= scope.conditional { simulate_evaluate rescue_stmt, scope, jumps, dig_targets }
       end
-      simulate_evaluate ensure_stmt, scope, dig_targets if ensure_stmt
+      simulate_evaluate ensure_stmt, scope, jumps, dig_targets if ensure_stmt
       return_type
     in [:rescue, error_class_stmts, error_var_stmt, statements, rescue_stmt]
       return_type = scope.conditional do
         if error_var_stmt in [:var_field, [:@ident, error_var,]]
-          error_classes = (error_class_stmts || []).flat_map { simulate_evaluate _1, scope, dig_targets }.uniq
+          error_classes = (error_class_stmts || []).flat_map { simulate_evaluate _1, scope, jumps, dig_targets }.uniq
           error_types = error_classes.filter_map { (_1 in { class: klass }) && klass }
           error_types = [StandardError] if error_types.empty?
           scope[error_var] = error_types
         end
-        statements.map { simulate_evaluate _1, scope, dig_targets }.last
+        statements.map { simulate_evaluate _1, scope, jumps, dig_targets }.last
       end
       if rescue_stmt
-        return_type |= simulate_evaluate rescue_stmt, scope, dig_targets
+        return_type |= simulate_evaluate rescue_stmt, scope, jumps, dig_targets
       end
       return_type
     in [:rescue_mod, statement1, statement2]
-      a = simulate_evaluate statement1, scope, dig_targets
-      b = scope.conditional { simulate_evaluate statement2, scope, dig_targets }
+      a = simulate_evaluate statement1, scope, jumps, dig_targets
+      b = scope.conditional { simulate_evaluate statement2, scope, jumps, dig_targets }
       a | b
     in [:module, module_stmt, body_stmt]
       return [] unless dig_targets.dig?(body_stmt)
-      simulate_evaluate body_stmt, Scope.new(scope, trace_cvar: false, trace_ivar: false, trace_lvar: false), dig_targets
+      simulate_evaluate body_stmt, Scope.new(scope, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
     in [:sclass, klass_stmt, body_stmt]
       return [] unless dig_targets.dig?(body_stmt)
-      simulate_evaluate body_stmt, Scope.new(scope, trace_cvar: false, trace_ivar: false, trace_lvar: false), dig_targets
+      simulate_evaluate body_stmt, Scope.new(scope, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
     in [:class, klass_stmt, _superclass_stmt, body_stmt]
       return [] unless dig_targets.dig?(body_stmt)
-      simulate_evaluate body_stmt, Scope.new(scope, trace_cvar: false, trace_ivar: false, trace_lvar: false), dig_targets
+      simulate_evaluate body_stmt, Scope.new(scope, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
     in [:case | :begin | :for | :class | :sclass | :module,]
       []
     in [:void_stmt]
@@ -410,10 +465,11 @@ module Completion::TypeSimulator
   end
 
   def self.calculate_receiver(binding, parents, receiver)
+    jumps = JumpPoints.new
     dig_targets = DigTarget.new(parents, receiver) do |types|
       return types
     end
-    simulate_evaluate parents[0], Scope.from_binding(binding), dig_targets
+    simulate_evaluate parents[0], Scope.from_binding(binding), jumps, dig_targets
     []
   end
 end
