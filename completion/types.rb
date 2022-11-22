@@ -8,16 +8,30 @@ module Completion::Types
     )
   end
 
-  def self.rbs_method_response(klass, method_name, args_types, kwargs_types, kwsplat, has_block)
-    singleton = (klass in { class: klass })
-    return [klass] if singleton && method_name == :new
-    return klass if method_name == :itself
-    return [{ class: klass }] if !singleton && method_name == :class
+  def self.rbs_method_response(type, method_name, args_types, kwargs_types, kwsplat, has_block)
+    if type in UnionType
+      types = type.types.map do
+        rbs_method_response _1, method_name, args_types, kwargs_types, kwsplat, has_block
+      end
+      return UnionType[*types]
+    end
+    klass = case type
+    in ProcType
+      Proc
+    in SingletonType
+      type.module_or_class
+    in InstanceType
+      type.klass
+    end
+    singleton = (type in SingletonType)
+    return InstanceType.new klass if singleton && method_name == :new
+    return type if method_name == :itself
+    return SingletonType.new klass if !singleton && method_name == :class
     type_name = RBS::TypeName(klass.name).absolute!
     definition = (singleton ? rbs_builder.build_singleton(type_name) : rbs_builder.build_instance(type_name)) rescue nil
-    return [] unless definition
+    return NilType unless definition
     method = definition.methods[method_name]
-    return [] unless method
+    return NilType unless method
     has_splat = !args_types.all?
     method_types_with_score = method.method_types.map do |method_type|
       score = 0
@@ -34,7 +48,7 @@ module Completion::Types
         if args_types.size >= 1
           score += (
             args_types.zip(reqs + opts).count do |arg_type, type|
-              (arg_type & classes_from_rbs_type(type.type, klass)).any?
+              (arg_type & from_rbs_type(type.type, klass)).any?
             end
           ).fdiv args_types.size
         end
@@ -46,15 +60,16 @@ module Completion::Types
       if keywords.any? || keyopts.any?
         score += { **keywords, **keyopts }.count do |key, type|
           arg_type = kwargs_types[key]
-          arg_type && (arg_type & classes_from_rbs_type(type.type, klass)).any?
+          arg_type && (arg_type & from_rbs_type(type.type, klass)).any?
         end.fdinv keywords.size + keyopts.size
       end
       [method_type, score]
     end
     max_score = method_types_with_score.map(&:last).max
-    method_types_with_score.select { _2 == max_score }.map(&:first).flat_map do
-      classes_from_rbs_type _1.type.return_type, klass
+    types = method_types_with_score.select { _2 == max_score }.map(&:first).flat_map do
+      from_rbs_type _1.type.return_type, klass
     end
+    UnionType[*types]
   end
 
   def self.type_from_object(object, max_level: 4)
@@ -89,6 +104,9 @@ module Completion::Types
     def initialize(module_or_class)
       @module_or_class = module_or_class
     end
+    def transform() = yield(self)
+    def methods() = @module_or_class.methods
+    def constants() = @module_or_class.constants
   end
 
   class InstanceType
@@ -97,6 +115,24 @@ module Completion::Types
       @klass = klass
       @params = params
     end
+    def transform() = yield(self)
+    def methods() = @klass.instance_methods
+    def constants() = []
+  end
+
+  NilType = InstanceType.new NilClass
+  ObjectType = InstanceType.new Object
+
+  class ProcType
+    attr_reader :params, :kwparams, :return_type
+    def initialize(params = [], kwparams = {}, return_type = NilType)
+      @params = params
+      @kwparams = kwparams
+      @return_type = return_type
+    end
+    def transform() = yield(self)
+    def methods() = Proc.instance_methods
+    def constants() = []
   end
 
   class UnionType
@@ -125,70 +161,89 @@ module Completion::Types
       end
     end
 
+    def transform(&block)
+      UnionType[*types.map(&block)]
+    end
+
     def self.[](*types)
       type = new(*types)
       if type.types.empty?
-        InstanceType.new Object
+        ObjectType
       elsif type.types.size == 1
         type.types.first
       else
         type
       end
     end
+
+    def methods() = @types.flat_map(&:methods).uniq
+    def constants() = @types.flat_map(&:constants).uniq
   end
 
-  def self.classes_from_rbs_type(return_type, self_class)
+  def self.from_rbs_type(return_type, self_type)
     case return_type
     when RBS::Types::Bases::Self
-      [self_class]
+      self_type
     when RBS::Types::Bases::Void, RBS::Types::Bases::Bottom, RBS::Types::Bases::Nil
-      [NilClass]
+      NilType
     when RBS::Types::Bases::Any
-      [Object]
+      ObjectType
     when RBS::Types::Bases::Class
-      case self_type
-      in { class: Class }
-        [{ class: Class }]
-      in { class: }
-        [{ class: Module }]
-      else
-        [{ class: self_type }]
+      self_type.transform do |type|
+        case type
+        in SingletonType
+          InstanceType.new(self_type.module_or_class.is_a?(Class) ? Class : Module)
+        in InstanceType
+          SingletonType.new type.klass
+        end
       end
+      UnionType[*types]
     when RBS::Types::Bases::Bool
-      [TrueClass, FalseClass]
+      UnionType[InstanceType.new(TrueClass), InstanceType.new(FalseClass)]
     when RBS::Types::Bases::Instance
-      if self_class in { class: klass }
-        [klass]
-      elsif self_class == Class || self_class == Module
-        [self_class]
-      else
-        [Object]
+      self_type.transform do |type|
+        case type
+        in SingletonClass
+          InstanceType.new type.klass
+        in InstanceType
+          case type.klass
+          in Class
+            InstanceType.new Class
+          in Module
+            InstanceType.new Module
+          else
+            ObjectType
+          end
+        end
       end
     when RBS::Types::Union
-      return_type.types.flat_map { classes_from_rbs_type _1, self_class }
+      UnionType[*return_type.types.flat_map { from_rbs_type _1, self_class }]
     when RBS::Types::Proc
-      [Proc]
+      InstanceType.new Proc
     when RBS::Types::Tuple
-      [Array]
+      InstanceType.new Array
     when RBS::Types::Record
-      [Hash]
+      InstanceType.new Hash
     when RBS::Types::Literal
-      [return_type.literal.class]
+      InstanceType.new return_type.literal.class
     when RBS::Types::Variable
-      [Object]
+      # unimplemented
+      ObjectType
     when RBS::Types::Optional
-      classes_from_rbs_type(return_type.type, self_class) | [NilClass]
+      UnionType[from_rbs_type(return_type.type, self_class), NilType]
     when RBS::Types::Alias
       case return_type.name.name
       when :int
-        [Integer]
+        InstanceType.new Integer
       when :boolish
-        [TrueClass, FalseClass]
+        UnionType[InstanceType.new(TrueClass), InstanceType.new(FalseClass)]
       end
     when RBS::Types::Interface
-      [] # unimplemented
+      # unimplemented
+      ObjectType
     when RBS::Types::ClassInstance
-      [Object.const_get(return_type.name.name)]
+      klass = Object.const_get(return_type.name.name)
+      (klass in Class) ? InstanceType.new(klass) : ObjectType
     end
   end
 end
