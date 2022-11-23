@@ -29,9 +29,9 @@ module Completion::Types
     return SingletonType.new klass if !singleton && method_name == :class
     type_name = RBS::TypeName(klass.name).absolute!
     definition = (singleton ? rbs_builder.build_singleton(type_name) : rbs_builder.build_instance(type_name)) rescue nil
-    return NilType unless definition
+    return NIL unless definition
     method = definition.methods[method_name]
-    return NilType unless method
+    return NIL unless method
     has_splat = !args_types.all?
     method_types_with_score = method.method_types.map do |method_type|
       score = 0
@@ -120,12 +120,24 @@ module Completion::Types
     def constants() = []
   end
 
-  NilType = InstanceType.new NilClass
-  ObjectType = InstanceType.new Object
+  NIL = InstanceType.new NilClass
+  OBJECT = InstanceType.new Object
+  TRUE = InstanceType.new FalseClass
+  FALSE = InstanceType.new FalseClass
+  SYMBOL = InstanceType.new Symbol
+  STRING = InstanceType.new String
+  INTEGER = InstanceType.new Integer
+  RANGE = InstanceType.new Range
+  REGEXP = InstanceType.new Regexp
+  FLOAT = InstanceType.new Float
+  RATIONAL = InstanceType.new Rational
+  COMPLEX = InstanceType.new Complex
+  ARRAY = InstanceType.new Array
+  HASH = InstanceType.new Hash
 
   class ProcType
     attr_reader :params, :kwparams, :return_type
-    def initialize(params = [], kwparams = {}, return_type = NilType)
+    def initialize(params = [], kwparams = {}, return_type = NIL)
       @params = params
       @kwparams = kwparams
       @return_type = return_type
@@ -168,7 +180,7 @@ module Completion::Types
     def self.[](*types)
       type = new(*types)
       if type.types.empty?
-        ObjectType
+        OBJECT
       elsif type.types.size == 1
         type.types.first
       else
@@ -185,9 +197,9 @@ module Completion::Types
     when RBS::Types::Bases::Self
       self_type
     when RBS::Types::Bases::Void, RBS::Types::Bases::Bottom, RBS::Types::Bases::Nil
-      NilType
+      NIL
     when RBS::Types::Bases::Any
-      ObjectType
+      OBJECT
     when RBS::Types::Bases::Class
       self_type.transform do |type|
         case type
@@ -199,7 +211,7 @@ module Completion::Types
       end
       UnionType[*types]
     when RBS::Types::Bases::Bool
-      UnionType[InstanceType.new(TrueClass), InstanceType.new(FalseClass)]
+      UnionType[TRUE, FALSE]
     when RBS::Types::Bases::Instance
       self_type.transform do |type|
         case type
@@ -212,7 +224,7 @@ module Completion::Types
           in Module
             InstanceType.new Module
           else
-            ObjectType
+            OBJECT
           end
         end
       end
@@ -224,36 +236,36 @@ module Completion::Types
       elem = UnionType[*return_type.types.map { from_rbs_type _1, self_type }]
       InstanceType.new Array, Elem: elem
     when RBS::Types::Record
-      InstanceType.new Hash
+      InstanceType.new Hash, K: SYMBOL, V: OBJECT
     when RBS::Types::Literal
       InstanceType.new return_type.literal.class
     when RBS::Types::Variable
       if self_type in InstanceType
-        self_type.params[return_type.name] || ObjectType
+        self_type.params[return_type.name] || OBJECT
       else
-        ObjectType
+        OBJECT
       end
     when RBS::Types::Optional
-      UnionType[from_rbs_type(return_type.type, self_type), NilType]
+      UnionType[from_rbs_type(return_type.type, self_type), NIL]
     when RBS::Types::Alias
       case return_type.name.name
       when :int
-        InstanceType.new Integer
+        INTEGER
       when :boolish
-        UnionType[InstanceType.new(TrueClass), InstanceType.new(FalseClass)]
+        UnionType[TRUE, FALSE]
       end
     when RBS::Types::Interface
       p return_type
       # unimplemented
-      ObjectType
+      OBJECT
     when RBS::Types::ClassInstance
       klass = Object.const_get(return_type.name.name)
-      return ObjectType unless klass in Class
+      return OBJECT unless klass in Class
       $hoge ||= return_type
       if return_type.args
         args = return_type.args.map { from_rbs_type _1, self_type }
         names = rbs_builder.build_singleton(return_type.name).type_params
-        params = names.map.with_index { [_1, args[_2] || ObjectType] }.to_h
+        params = names.map.with_index { [_1, args[_2] || OBJECT] }.to_h
       end
       InstanceType.new(klass, params || {})
     end

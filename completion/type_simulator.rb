@@ -59,7 +59,7 @@ module Completion::TypeSimulator
 
     def [](name)
       @cache[name] ||= (
-        fallback = Completion::Types::NilType
+        fallback = Completion::Types::NIL
         case BaseScope.type_by_name name
         when :cvar
           Completion::TypeSimulator.type_of(fallback:) { @self_object.class_variable_get name }
@@ -194,17 +194,17 @@ module Completion::TypeSimulator
   using LexerElemMatcher
 
   OBJECT_METHODS = {
-    to_s: String,
-    to_str: String,
-    to_a: Array,
-    to_ary: Array,
-    to_h: Hash,
-    to_hash: Hash,
-    to_i: Integer,
-    to_int: Integer,
-    to_f: Float,
-    to_c: Complex,
-    to_r: Rational
+    to_s: Completion::Types::STRING,
+    to_str: Completion::Types::STRING,
+    to_a: Completion::Types::ARRAY,
+    to_ary: Completion::Types::ARRAY,
+    to_h: Completion::Types::HASH,
+    to_hash: Completion::Types::HASH,
+    to_i: Completion::Types::INTEGER,
+    to_int: Completion::Types::INTEGER,
+    to_f: Completion::Types::FLOAT,
+    to_c: Completion::Types::COMPLEX,
+    to_r: Completion::Types::RATIONAL
   }
 
   def self.simulate_evaluate(sexp, scope, jumps, dig_targets)
@@ -229,23 +229,23 @@ module Completion::TypeSimulator
       if dig_targets.dig? sexp
         simulate_evaluate body_stmt, Scope.new(scope, trace_lvar: false), jumps, dig_targets
       end
-      Completion::Types::InstanceType.new Symbol
+      Completion::Types::SYMBOL
     in [:@int,]
-      Completion::Types::InstanceType.new Integer
+      Completion::Types::INTEGER
     in [:@float,]
-      Completion::Types::InstanceType.new Float
+      Completion::Types::FLOAT
     in [:@rational,]
-      Completion::Types::InstanceType.new Rational
+      Completion::Types::RATIONAL
     in [:@imaginary,]
-      Completion::Types::InstanceType.new Complex
+      Completion::Types::COMPLEX
     in [:symbol_literal | :dyna_symbol,]
-      Completion::Types::InstanceType.new Symbol
+      Completion::Types::SYMBOL
     in [:string_literal | :@CHAR, ]
-      Completion::Types::InstanceType.new String
+      Completion::Types::STRING
     in [:regexp_literal,]
-      Completion::Types::InstanceType.new Regexp
+      Completion::Types::REGEXP
     in [:array, statements]
-      elem = statements ? Completion::Types::UnionType[*statements.map { simulate_evaluate _1, scope, jumps, dig_targets }] : Completion::Types::NilType
+      elem = statements ? Completion::Types::UnionType[*statements.map { simulate_evaluate _1, scope, jumps, dig_targets }] : Completion::Types::NIL
       Completion::Types::InstanceType.new Array, Elem: elem
     in [:hash,]
       # TODO
@@ -254,12 +254,11 @@ module Completion::TypeSimulator
       statements.map { simulate_evaluate _1, scope, jumps, dig_targets }.last
     in [:const_path_ref, receiver, [:@const, name,]]
       r = simulate_evaluate(receiver, scope, jumps, dig_targets)
-      (r in Completion::Types::SingletonType) ? type_of { r.module_or_class.const_get name } : Completion::Types::NilType
+      (r in Completion::Types::SingletonType) ? type_of { r.module_or_class.const_get name } : Completion::Types::NIL
     in [:var_ref, [:@kw, name,]]
-      klass = { 'true' => TrueClass, 'false' => FalseClass, 'nil' => NilClass }[name]
-      Completion::Types::InstanceType.new klass
+      { 'true' => Completion::Types::TRUE, 'false' => Completion::Types::FALSE, 'nil' => Completion::Types::NIL }[name]
     in [:var_ref, [:@const | :@ivar | :@cvar | :@gvar | :@ident, name,]]
-      scope[name] || Completion::Types::NilType
+      scope[name] || Completion::Types::NIL
     in [:aref, receiver, args]
       receiver_type = simulate_evaluate receiver, scope, jumps, dig_targets if receiver
       args, kwargs, kwsplat, block = retrieve_method_args args
@@ -293,7 +292,7 @@ module Completion::TypeSimulator
       case op
       when :'&&', :and
         btype = scope.conditional { simulate_evaluate b, scope, jumps, dig_targets }
-        Completion::Types::UnionType[btype, Completion::Types::NilType, Completion::Types::InstanceType.new(FalseClass)]
+        Completion::Types::UnionType[btype, Completion::Types::NIL, Completion::Types::FALSE]
       when :'||', :or
         btype = scope.conditional { simulate_evaluate b, scope, jumps, dig_targets }
         Completion::Types::UnionType[atype, btype]
@@ -326,6 +325,7 @@ module Completion::TypeSimulator
       # TODO
       simulate_evaluate value, scope, jumps, dig_targets
     in [:mrhs_new_from_args,]
+      # TODO
       Completion::Types::InstanceType.new Array
     in [:ifop, cond, tval, fval]
       simulate_evaluate cond, scope, jumps, dig_targets
@@ -335,12 +335,12 @@ module Completion::TypeSimulator
       )]
     in [:if_mod | :unless_mod, cond, statement]
       simulate_evaluate cond, scope, jumps, dig_targets
-      Completion::Types::UnionType[scope.conditional { simulate_evaluate statement, scope, jumps, dig_targets }, Completion::Types::NilType]
+      Completion::Types::UnionType[scope.conditional { simulate_evaluate statement, scope, jumps, dig_targets }, Completion::Types::NIL]
     in [:if | :unless | :elsif, cond, statements, else_statement]
       simulate_evaluate cond, scope, jumps, dig_targets
       if_result, else_result = scope.run_branches(
         -> { statements.map { simulate_evaluate _1, scope, jumps, dig_targets }.last },
-        -> { else_statement ? simulate_evaluate(else_statement, scope, jumps, dig_targets) : Completion::Types::NilType }
+        -> { else_statement ? simulate_evaluate(else_statement, scope, jumps, dig_targets) : Completion::Types::NIL }
       )
       Completion::Types::UnionType[if_result, else_result]
     in [:while | :until, cond, statements]
@@ -348,11 +348,11 @@ module Completion::TypeSimulator
         simulate_evaluate cond, scope, jumps, dig_targets
         scope.conditional { statements.each { simulate_evaluate _1, scope, jumps, dig_targets } }
       end
-      Completion::Types::NilType
+      Completion::Types::NIL
     in [:while_mod | :until_mod, cond, statement]
       simulate_evaluate cond, scope, jumps, dig_targets
       scope.conditional { simulate_evaluate statement, scope, jumps, dig_targets }
-      Completion::Types::NilType
+      Completion::Types::NIL
     in [:begin, body_stmt]
       simulate_evaluate body_stmt, scope, jumps, dig_targets
     in [:bodystmt, statements, rescue_stmt, _unknown, ensure_stmt]
@@ -381,31 +381,31 @@ module Completion::TypeSimulator
       b = scope.conditional { simulate_evaluate statement2, scope, jumps, dig_targets }
       Completion::Types::UnionType[a, b]
     in [:module, module_stmt, body_stmt]
-      return Completion::Types::NilType unless dig_targets.dig?(body_stmt)
+      return Completion::Types::NIL unless dig_targets.dig?(body_stmt)
       simulate_evaluate body_stmt, Scope.new(scope, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
     in [:sclass, klass_stmt, body_stmt]
-      return Completion::Types::NilType unless dig_targets.dig?(body_stmt)
+      return Completion::Types::NIL unless dig_targets.dig?(body_stmt)
       simulate_evaluate body_stmt, Scope.new(scope, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
     in [:class, klass_stmt, _superclass_stmt, body_stmt]
-      return Completion::Types::NilType unless dig_targets.dig?(body_stmt)
+      return Completion::Types::NIL unless dig_targets.dig?(body_stmt)
       simulate_evaluate body_stmt, Scope.new(scope, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
     in [:case | :begin | :for | :class | :sclass | :module,]
-      Completion::Types::NilType
+      Completion::Types::NIL
     in [:void_stmt]
-      Completion::Types::NilType
+      Completion::Types::NIL
     in [:dot2,]
-      Completion::Types::InstanceType.new Range
+      Completion::Types::RANGE
     else
       STDERR.cooked{
         STDERR.puts
         STDERR.puts :NOMATCH
         STDERR.puts sexp.inspect
       }
-      Completion::Types::NilType
+      Completion::Types::NIL
     end
   end
 
-  def self.type_of(fallback: Completion::Types::ObjectType)
+  def self.type_of(fallback: Completion::Types::OBJECT)
     begin
       Completion::Types.type_from_object yield
     rescue
@@ -478,7 +478,7 @@ module Completion::TypeSimulator
   def self.simulate_call(receiver, method, args, kwargs, kwsplat, has_block)
     receiver ||= Completion::Types::SingletonType.new(Kernel)
     result = Completion::Types.rbs_method_response receiver, method.to_sym, args, kwargs, kwsplat, has_block
-    result = Completion::Types::UnionType[result, Completion::Types::InstanceType.new(OBJECT_METHODS[method.to_sym])] if OBJECT_METHODS.has_key? method.to_sym
+    result = Completion::Types::UnionType[result, OBJECT_METHODS[method.to_sym]] if OBJECT_METHODS.has_key? method.to_sym
     result
   end
 
