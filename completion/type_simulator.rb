@@ -365,10 +365,13 @@ module Completion::TypeSimulator
     in [:rescue, error_class_stmts, error_var_stmt, statements, rescue_stmt]
       return_type = scope.conditional do
         if error_var_stmt in [:var_field, [:@ident, error_var,]]
+          if (error_class_stmts in [:mrhs_new_from_args, Array => stmts, stmt])
+            error_class_stmts = [*stmts, stmt]
+          end
           error_classes = (error_class_stmts || []).flat_map { simulate_evaluate _1, scope, jumps, dig_targets }.uniq
-          error_types = error_classes.filter_map { (_1 in { class: klass }) && klass }
-          error_types = [StandardError] if error_types.empty?
-          scope[error_var] = error_types
+          error_types = error_classes.filter_map { Completion::Types::InstanceType.new _1.module_or_class if _1 in Completion::Types::SingletonType }
+          error_types << Completion::Types::InstanceType.new(StandardError) if error_types.empty?
+          scope[error_var] = Completion::Types::UnionType[*error_types]
         end
         statements.map { simulate_evaluate _1, scope, jumps, dig_targets }.last
       end
