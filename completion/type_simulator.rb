@@ -278,7 +278,9 @@ module Completion::TypeSimulator
             if type == :do_block
               simulate_evaluate body, scope, jumps, dig_targets
             else
-              body.each { simulate_evaluate _1, scope, jumps, dig_targets }
+              body.map {
+                simulate_evaluate _1, scope, jumps, dig_targets
+              }.last
             end
           end
         end

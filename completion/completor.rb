@@ -125,12 +125,12 @@ module Completion::Completor
       if lvar_available
         [:lvar_or_method, name]
       else
-        [:call, [{ class: Kernel }], name]
+        [:call, Completion::Types::SingletonType.new(Kernel), name]
       end
     in [:symbol, [:@ident | :@const | :@op | :@kw,]]
       [:symbol, name]
     in [:var_ref | :const_ref, [:@const,]]
-      [:const, [{ class: Object }], name]
+      [:const, Completion::Types::SingletonType.new(Object), name]
     in [:var_ref, [:@gvar,]]
       [:gvar, name]
     in [:var_ref, [:@ivar,]]
