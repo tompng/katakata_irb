@@ -275,11 +275,12 @@ module Completion::TypeSimulator
         block => [:do_block | :brace_block => type, params, body]
         result, breaks =  scope.conditional do
           jumps.with :break do
+            block_scope = Scope.new scope, {} # TODO: with block params
             if type == :do_block
-              simulate_evaluate body, scope, jumps, dig_targets
+              simulate_evaluate body, block_scope, jumps, dig_targets
             else
               body.map {
-                simulate_evaluate _1, scope, jumps, dig_targets
+                simulate_evaluate _1, block_scope, jumps, dig_targets
               }.last
             end
           end
@@ -288,34 +289,25 @@ module Completion::TypeSimulator
       end
       simulate_call receiver_type, method, args_type, kwargs_type, kwsplat, !!block
     in [:binary, a, Symbol => op, b]
-      atypes, btypes = [a, b].map { simulate_evaluate _1, scope, jumps, dig_targets }
+      atype = simulate_evaluate a, scope, jumps, dig_targets
       case op
       when :'&&', :and
-        truthy = atypes - [NilClass, FalseClass]
-        falsy = atypes & [NilClass, FalseClass]
-        if truthy.empty?
-          falsy
-        else
-          falsy | btypes
-        end
+        btype = scope.conditional { simulate_evaluate b, scope, jumps, dig_targets }
+        Completion::Types::UnionType[btype, Completion::Types::NilType, Completion::Types::InstanceType.new(FalseClass)]
       when :'||', :or
-        truthy = atypes - [NilClass, FalseClass]
-        falsy = atypes & [NilClass, FalseClass]
-        if falsy.empty?
-          atypes
-        else
-          truthy | btypes
-        end
+        btype = scope.conditional { simulate_evaluate b, scope, jumps, dig_targets }
+        Completion::Types::UnionType[atype, btype]
       else
-        simulate_call atypes, op, [btypes], {}, false, false
+        btype = simulate_evaluate b, scope, jumps, dig_targets
+        simulate_call atype, op, [btype], {}, false, false
       end
     in [:unary, op, receiver]
       simulate_call simulate_evaluate(receiver, scope, jumps, dig_targets), op, [], {}, false, false
     in [:lambda, params, statements]
       if dig_targets.dig? statements
         jump.with_return_point do
-          # TODO: new scope with params
-          statements.each { simulate_evaluate _1, scope, jumps, dig_targets }
+          block_scope = Scope.new scope, {} # TODO: with block params
+          statements.each { simulate_evaluate _1, block_scope, jumps, dig_targets }
         end
       end
       Completion::Types::ProcType.new
