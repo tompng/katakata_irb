@@ -341,10 +341,12 @@ module Completion::TypeSimulator
       receiver_type = simulate_evaluate receiver, scope, jumps, dig_targets if receiver
       args_type = args.map { simulate_evaluate _1, scope, jumps, dig_targets if _1 }
       if block
-        block => [:do_block | :brace_block => type, params, body]
+        block => [:do_block | :brace_block => type, [:block_var, params,], body]
         result, breaks =  scope.conditional do
           jumps.with :break do
-            block_scope = Scope.new scope, {} # TODO: with block params
+            names = extract_param_names params
+            block_scope = Scope.new scope, names.to_h { [_1, Completion::Types::NIL] }
+            evaluate_param_defaults params, block_scope, jumps, dig_targets
             if type == :do_block
               simulate_evaluate body, block_scope, jumps, dig_targets
             else
@@ -373,8 +375,9 @@ module Completion::TypeSimulator
     in [:unary, op, receiver]
       simulate_call simulate_evaluate(receiver, scope, jumps, dig_targets), op, [], {}, false, false
     in [:lambda, params, statements]
+      params in [:paren, params]
       if dig_targets.dig? statements
-        jump.with_return_point do
+        jumps.with :break, :return do
           block_scope = Scope.new scope, {} # TODO: with block params
           statements.each { simulate_evaluate _1, block_scope, jumps, dig_targets }
         end
@@ -576,6 +579,58 @@ module Completion::TypeSimulator
     result = Completion::Types.rbs_method_response receiver, method.to_sym, args, kwargs, has_block
     result = Completion::Types::UnionType[result, OBJECT_METHODS[method.to_sym]] if OBJECT_METHODS.has_key? method.to_sym
     result
+  end
+
+  def self.extract_param_names(params)
+    params => [:params, pre_required, optional, rest, post_required, keywords, keyrest, block]
+    names = []
+    [*pre_required, *post_required].each do |item|
+      item => [:@ident, name,]
+      names << name
+    end
+    optional&.each { |name,| names << name }
+    keywords&.each do |key, value|
+      key => [:@label, label,]
+      names << label.delete(':')
+    end
+    [*rest, *keyrest, *block].each do |item|
+      item => [:rest_param | :kwrest_params | :blockarg, [:@ident, name,]]
+      names << name
+    end
+    names
+  end
+
+  def self.evaluate_param_defaults(params, scope, jumps, dig_targets)
+    params => [:params, pre_required, optional, rest, post_required, keywords, keyrest, block]
+    pre_required&.each do |item|
+      item => [:@ident, name,]
+      scope[name] = Completion::Types::OBJECT
+    end
+    optional&.each do |item, value|
+      item => [:@ident, name,]
+      scope[name] = simulate_evaluate value, scope, jumps, dig_targets
+    end
+    if rest
+      rest => [:rest_param, [:@ident, name,]]
+      scope[name] = Completion::Types::ARRAY
+    end
+    post_required&.each do |item|
+      item => [:@ident, name,]
+      scope[name] = Completion::Types::OBJECT
+    end
+    keywords&.each do |key, value|
+      key => [:@label, label,]
+      name = label.delete ':'
+      scope[name] = value ? simulate_evaluate(value, scope, jumps, dig_targets) : Completion::Types::OBJECT
+    end
+    if keyrest
+      keyerst => [:kwrest_param, [:@ident, name,]]
+      scope[name] = Completion::Types::HASH
+    end
+    if block
+      block => [:blockarg, [:@ident, name,]]
+      scope[name] = Completion::Types::PROC
+    end
   end
 
   def self.calculate_receiver(binding, parents, receiver)
