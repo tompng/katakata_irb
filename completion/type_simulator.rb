@@ -1,5 +1,7 @@
 require_relative 'types'
 require 'ripper'
+require 'set'
+
 module Completion; end
 module Completion::TypeSimulator
   class JumpPoints
@@ -53,6 +55,7 @@ module Completion::TypeSimulator
     def initialize(binding, self_object)
       @binding, @self_object = binding, self_object
       @cache = {}
+      @local_variables = binding.local_variables.map(&:to_s).to_set
     end
 
     def mutable?() = false
@@ -66,7 +69,7 @@ module Completion::TypeSimulator
         when :ivar
           Completion::TypeSimulator.type_of(fallback:) { @self_object.instance_variable_get name }
         else
-          Completion::TypeSimulator.type_of(fallback:) { @binding.eval name }
+          @local_variables.include?(name) ? Completion::TypeSimulator.type_of(fallback:) { @binding.eval name } : Completion::Types::NIL
         end
       )
     end
@@ -80,6 +83,17 @@ module Completion::TypeSimulator
         :gvar
       else
         :lvar
+      end
+    end
+
+    def has?(name)
+      case BaseScope.type_by_name name
+      when :cvar
+        @self_object.class_variable_defined? name
+      when :ivar
+        @self_object.instance_variable_defined? name
+      else
+        @local_variables.include? name
       end
     end
   end
@@ -174,7 +188,7 @@ module Completion::TypeSimulator
     end
 
     def has?(name)
-      @table.has?(name) || (trace?(name) && @parent.has?(name))
+      @tables.any? { _1.key? name } || (trace?(name) && @parent.has?(name))
     end
   end
 
@@ -227,6 +241,7 @@ module Completion::TypeSimulator
       statements.map { simulate_evaluate _1, scope, jumps, dig_targets }.last
     in [:def, *receiver, method, params, body_stmt]
       if dig_targets.dig? sexp
+        # TODO: method args
         simulate_evaluate body_stmt, Scope.new(scope, trace_lvar: false), jumps, dig_targets
       end
       Completion::Types::SYMBOL
@@ -244,32 +259,87 @@ module Completion::TypeSimulator
       Completion::Types::STRING
     in [:regexp_literal,]
       Completion::Types::REGEXP
+    in [:array, [:args_add_star,] => star]
+      args, kwargs = retrieve_method_args star
+      types = args.flat_map do |elem|
+        if elem in Completion::Types::Splat
+          splat = simulate_evaluate elem.item, scope, jumps, dig_targets
+          unless (splat in Completion::Types::InstanceType) && splat.klass == Array
+            to_a_result = simulate_call splat, :to_a, [], {}, false, false
+            splat = to_a_result if (to_a_result in Completion::Types::InstanceType) && splat.klass == Array
+          end
+          if (splat in Completion::Types::InstanceType) && splat.klass == Array
+            splat.params[:Elem] || []
+          else
+            splat
+          end
+        else
+          simulate_evaluate elem, scope, jumps, dig_targets
+        end
+      end
+      types << kwargs_type(kwargs, scope, jumps, dig_targets) if kwargs
+      Completion::Types::InstanceType.new Array, Elem: Completion::Types::UnionType[*types]
     in [:array, statements]
       elem = statements ? Completion::Types::UnionType[*statements.map { simulate_evaluate _1, scope, jumps, dig_targets }] : Completion::Types::NIL
       Completion::Types::InstanceType.new Array, Elem: elem
-    in [:hash,]
-      # TODO
+    in [:bare_assoc_hash, args]
+      simulate_evaluate [:hash, [:assoclist_from_args, args]], scope, jumps, dig_targets
+    in [:hash, [:assoclist_from_args, args]]
+      keys = []
+      values = []
+      args.each do |arg|
+        case arg
+        in [:assoc_new, key, value]
+          if key in [:@label, label, pos]
+            keys << Completion::Types::SYMBOL
+            name = label.delete ':'
+            value ||= [:__var_ref_or_call, [name =~ /\A[A-Z]/ ? :@const : :@ident, name, pos]]
+          else
+            keys << simulate_evaluate(key, scope, jumps, dig_targets)
+          end
+          values << simulate_evaluate(value, scope, jumps, dig_targets)
+        in [:assoc_splat, value]
+          hash = simulate_evaluate value, scope, jumps, dig_targets
+          unless (hash in Completion::Types::InstanceType) && hash.klass == Hash
+            hash = simulate_call hash, :to_hash, [], {}, false, false
+          end
+          if (hash in Completion::Types::InstanceType) && hash.klass == Hash
+            keys << hash.params[:K] if hash.params[:K]
+            values << hash.params[:V] if hash.params[:V]
+          end
+        end
+      end
+      Completion::Types::InstanceType.new Hash, K: Completion::Types::UnionType[*keys], V: Completion::Types::UnionType[*values]
+    in [:hash, nil]
       Completion::Types::InstanceType.new Hash
     in [:paren | :ensure | :else, statements]
       statements.map { simulate_evaluate _1, scope, jumps, dig_targets }.last
     in [:const_path_ref, receiver, [:@const, name,]]
-      r = simulate_evaluate(receiver, scope, jumps, dig_targets)
+      r = simulate_evaluate receiver, scope, jumps, dig_targets
       (r in Completion::Types::SingletonType) ? type_of { r.module_or_class.const_get name } : Completion::Types::NIL
+    in [:__var_ref_or_call, [type, name, pos]]
+      sexp = scope.has?(name) ? [:var_ref, [type, name, pos]] : [:vcall, [:@ident, name, pos]]
+      simulate_evaluate sexp, scope, jumps, dig_targets
     in [:var_ref, [:@kw, name,]]
-      { 'true' => Completion::Types::TRUE, 'false' => Completion::Types::FALSE, 'nil' => Completion::Types::NIL }[name]
+      case name
+      in 'true'
+        Completion::Types::TRUE
+      in 'false'
+        Completion::Types::FALSE
+      in 'nil'
+        Completion::Types::NIL
+      end
     in [:var_ref, [:@const | :@ivar | :@cvar | :@gvar | :@ident, name,]]
       scope[name] || Completion::Types::NIL
     in [:aref, receiver, args]
       receiver_type = simulate_evaluate receiver, scope, jumps, dig_targets if receiver
-      args, kwargs, kwsplat, block = retrieve_method_args args
+      args, kwargs, block = retrieve_method_args args
       args_type = args.map { simulate_evaluate _1, scope, jumps, dig_targets if _1 }
-      kwargs_type = kwargs&.transform_values { simulate_evaluate _1, scope, jumps, dig_targets }
-      simulate_call receiver_type, :[], args_type, kwargs_type, kwsplat, block
+      simulate_call receiver_type, :[], args_type, kwargs_type(kwargs, scope, jumps, dig_targets), block
     in [:call | :vcall | :command | :command_call | :method_add_arg | :method_add_block,]
-      receiver, method, args, kwargs, kwsplat, block = retrieve_method_call sexp
+      receiver, method, args, kwargs, block = retrieve_method_call sexp
       receiver_type = simulate_evaluate receiver, scope, jumps, dig_targets if receiver
       args_type = args.map { simulate_evaluate _1, scope, jumps, dig_targets if _1 }
-      kwargs_type = kwargs&.transform_values { simulate_evaluate _1, scope, jumps, dig_targets }
       if block
         block => [:do_block | :brace_block => type, params, body]
         result, breaks =  scope.conditional do
@@ -286,7 +356,7 @@ module Completion::TypeSimulator
         end
         proc_response = Completion::Types::UnionType[result, breaks]
       end
-      simulate_call receiver_type, method, args_type, kwargs_type, kwsplat, !!block
+      simulate_call receiver_type, method, args_type, kwargs_type(kwargs, scope, jumps, dig_targets), !!block
     in [:binary, a, Symbol => op, b]
       atype = simulate_evaluate a, scope, jumps, dig_targets
       case op
@@ -408,6 +478,28 @@ module Completion::TypeSimulator
     end
   end
 
+  def self.kwargs_type(kwargs, scope, jumps, dig_targets)
+    keys = []
+    values = []
+    kwargs.each do |kv|
+      if kv in Completion::Types::Splat
+        hash = simulate_evaluate kv.item, scope, jumps, dig_targets
+        unless (hash in Completion::Types::InstanceType) && hash.klass == Hash
+          hash = simulate_call hash, :to_hash, [], {}, false, false
+        end
+        if (hash in Completion::Types::InstanceType) && hash.klass == Hash
+          keys << hash.params[:K] if hash.params[:K]
+          values << hash.params[:V] if hash.params[:V]
+        end
+      else
+        key, value = kv
+        keys << ((key in [:@label,]) ? Completion::Types::SYMBOL : simulate_evaluate(key, scope, jumps, dig_targets))
+        values << simulate_evaluate(value, scope, jumps, dig_targets)
+      end
+    end
+    Completion::Types::InstanceType.new(Hash, K: Completion::Types::UnionType[*keys], V: Completion::Types::UnionType[*values])
+  end
+
   def self.type_of(fallback: Completion::Types::OBJECT)
     begin
       Completion::Types.type_from_object yield
@@ -419,24 +511,24 @@ module Completion::TypeSimulator
   def self.retrieve_method_call(sexp)
     case sexp
     in [:fcall | :vcall, [:@ident | :@const | :@kw | :@op, method,]] # hoge
-      [nil, method, [], {}, false, nil]
+      [nil, method, [], [], false, nil]
     in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::', :call] # a.()
-      [receiver, :call, [], {}, false, nil]
+      [receiver, :call, [], [], false, nil]
     in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::', [:@ident | :@const | :@kw | :@op, method,]] # a.hoge
-      [receiver, method, [], {}, false, nil]
+      [receiver, method, [], [], false, nil]
     in [:command, [:@ident | :@const | :@kw | :@op, method,], args] # hoge 1, 2
-      args, kwargs, kwsplat, block = retrieve_method_args args
-      [nil, method, args, kwargs, kwsplat, block]
+      args, kwargs, block = retrieve_method_args args
+      [nil, method, args, kwargs, block]
     in [:command_call, receiver, [:@period,] | [:@op, '&.',] | :'::', [:@ident | :@const | :@kw | :@op, method,], args] # a.hoge 1; a.hoge 1, 2;
-      args, kwargs, kwsplat, block = retrieve_method_args args
-      [receiver, method, args, kwargs, kwsplat, block]
+      args, kwargs, block = retrieve_method_args args
+      [receiver, method, args, kwargs, block]
     in [:method_add_arg, call, args]
       receiver, method = retrieve_method_call call
-      args, kwargs, kwsplat, block = retrieve_method_args args
-      [receiver, method, args, kwargs, kwsplat, block]
+      args, kwargs, block = retrieve_method_args args
+      [receiver, method, args, kwargs, block]
     in [:method_add_block, call, block]
-      receiver, method, args, kwargs, kwsplat = retrieve_method_call call
-      [receiver, method, args, kwargs, kwsplat, block]
+      receiver, method, args, kwargs = retrieve_method_call call
+      [receiver, method, args, kwargs, block]
     end
   end
 
@@ -444,43 +536,44 @@ module Completion::TypeSimulator
     case sexp
     in [:args_add_block, [:args_add_star,] => args, block_arg]
       args, = retrieve_method_args args
-      [args, {}, false, block_arg]
-    in [:args_add_block, [*args, [:bare_assoc_hash,] => kwargs], block_arg]
+      [args, [], block_arg]
+    in [:args_add_block, [*args, [:bare_assoc_hash,] => kw], block_arg]
       args, = retrieve_method_args args
-      _, kwargs, kwsplat = retrieve_method_args kwargs
-      [args, kwargs, kwsplat, block_arg]
+      _, kwargs = retrieve_method_args kw
+      [args, kwargs, block_arg]
     in [:args_add_block, [*args], block_arg]
-      [args, {}, false, block_arg]
+      [args, [], block_arg]
     in [:bare_assoc_hash, kws]
-      kwargs = {}
-      kwsplat = false
+      kwargs = []
       kws.each do |kw|
-        if kw in [:assoc_splat, *rest]
-          kwsplat = true
-        elsif kw in [:assoc_new, [:@label, label,], value]
-          key = label.delete ':'
-          kwargs[key] = value || [:var_ref, [key =~ /\A[A-Z]/ ? :@const : :@ident, key, [0, 0]]]
+        if kw in [:assoc_splat, value,]
+          kwargs << Completion::Types::Splat.new(value)
+        elsif kw in [:assoc_new, [:@label, label,] => key, nil]
+          name = label.delete ':'
+          kwargs << [key, [:__var_ref_or_call, [name =~ /\A[A-Z]/ ? :@const : :@ident, name, [0, 0]]]]
+        elsif kw in [:assoc_new, key, value]
+          kwargs << [key, value]
         end
       end
-      [[], kwargs, kwsplat, nil]
+      [[], kwargs, nil]
     in [:args_add_star, *args, [:bare_assoc_hash,] => kwargs]
       args, = retrieve_method_args [:args_add_star, *args]
-      _, kwargs, kwsplat = retrieve_method_args kwargs
-      [args, kwargs, kwsplat, nil]
+      _, kwargs = retrieve_method_args kwargs
+      [args, kwargs, nil]
     in [:args_add_star, pre_args, star_arg, *post_args]
       pre_args, = retrieve_method_args pre_args if pre_args in [:args_add_star,]
-      args = [*pre_args, nil, *post_args]
-      [args, {}, false, nil]
+      args = [*pre_args, Completion::Types::Splat.new(star_arg), *post_args]
+      [args, [], nil]
     in [:arg_paren, args]
-      args ? retrieve_method_args(args) : [[], {}, false, nil]
+      args ? retrieve_method_args(args) : [[], [], nil]
     else
-      [[], {}, false, nil]
+      [[], [], nil]
     end
   end
 
-  def self.simulate_call(receiver, method, args, kwargs, kwsplat, has_block)
+  def self.simulate_call(receiver, method, args, kwargs, has_block)
     receiver ||= Completion::Types::SingletonType.new(Kernel)
-    result = Completion::Types.rbs_method_response receiver, method.to_sym, args, kwargs, kwsplat, has_block
+    result = Completion::Types.rbs_method_response receiver, method.to_sym, args, kwargs, has_block
     result = Completion::Types::UnionType[result, OBJECT_METHODS[method.to_sym]] if OBJECT_METHODS.has_key? method.to_sym
     result
   end

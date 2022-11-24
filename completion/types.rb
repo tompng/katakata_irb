@@ -8,10 +8,12 @@ module Completion::Types
     )
   end
 
-  def self.rbs_method_response(type, method_name, args_types, kwargs_types, kwsplat, has_block)
+  Splat = Struct.new :item
+
+  def self.rbs_method_response(type, method_name, args_types, kwargs_type, has_block)
     if type in UnionType
       types = type.types.map do
-        rbs_method_response _1, method_name, args_types, kwargs_types, kwsplat, has_block
+        rbs_method_response _1, method_name, args_types, kwargs_type, has_block
       end
       return UnionType[*types]
     end
@@ -32,7 +34,7 @@ module Completion::Types
     return NIL unless definition
     method = definition.methods[method_name]
     return NIL unless method
-    has_splat = !args_types.all?
+    has_splat = args_types.any? { _1 in Splat }
     method_types_with_score = method.method_types.map do |method_type|
       score = 0
       score += 4 if !!method_type.block == has_block
@@ -53,14 +55,14 @@ module Completion::Types
           ).fdiv args_types.size
         end
       end
-      score += 2 if !kwrest && (kwargs_types.keys - (keywords.keys + keyopts.keys)).empty?
+      # score += 2 if !kwrest && (kwargs_type.keys - (keywords.keys + keyopts.keys)).empty?
       if keywords.any?
         score += keywords.keys.count { kwargs.has_key? _1 }.fdiv keywords.size
       end
       if keywords.any? || keyopts.any?
         score += { **keywords, **keyopts }.count do |key, t|
-          arg_type = kwargs_types[key]
-          arg_type && (arg_type & from_rbs_type(t.type, type)).any? rescue true
+          # arg_type = kwargs_type[key]
+          # arg_type && (arg_type & from_rbs_type(t.type, type)).any? rescue true
         end.fdiv keywords.size + keyopts.size
       end
       [method_type, score]
