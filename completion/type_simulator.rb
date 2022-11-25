@@ -355,7 +355,7 @@ module Completion::TypeSimulator
                 # TODO: params match
                 names = params ? extract_param_names(params) : []
                 block_scope = Scope.new scope, names.zip(args).to_h { [_1, _2 || Completion::Types::NIL] }
-                block_scope.conditional { evaluate_param_defaults params, block_scope, jumps, dig_targets }
+                block_scope.conditional { evaluate_param_defaults params, block_scope, jumps, dig_targets } if params
                 if type == :do_block
                   simulate_evaluate body, block_scope, jumps, dig_targets
                 else
@@ -462,7 +462,7 @@ module Completion::TypeSimulator
     in [:bodystmt, statements, rescue_stmt, _unknown, ensure_stmt]
       return_type = statements.map { simulate_evaluate _1, scope, jumps, dig_targets }.last
       if rescue_stmt
-        return_type |= scope.conditional { simulate_evaluate rescue_stmt, scope, jumps, dig_targets }
+        return_type = Completion::Types::UnionType[return_type, scope.conditional { simulate_evaluate rescue_stmt, scope, jumps, dig_targets }]
       end
       simulate_evaluate ensure_stmt, scope, jumps, dig_targets if ensure_stmt
       return_type
@@ -480,7 +480,7 @@ module Completion::TypeSimulator
         statements.map { simulate_evaluate _1, scope, jumps, dig_targets }.last
       end
       if rescue_stmt
-        return_type |= simulate_evaluate rescue_stmt, scope, jumps, dig_targets
+        return_type = Completion::Types::UnionType[return_type, scope.conditional { simulate_evaluate rescue_stmt, scope, jumps, dig_targets }]
       end
       return_type
     in [:rescue_mod, statement1, statement2]
