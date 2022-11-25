@@ -350,7 +350,7 @@ module Completion::TypeSimulator
               # TODO: params match
               names = params ? extract_param_names(params) : []
               block_scope = Scope.new scope, names.zip(args).to_h { [_1, _2 || Completion::Types::NIL] }
-              # evaluate_param_defaults params, block_scope, jumps, dig_targets
+              block_scope.conditional { evaluate_param_defaults params, block_scope, jumps, dig_targets }
               if type == :do_block
                 simulate_evaluate body, block_scope, jumps, dig_targets
               else
@@ -640,11 +640,7 @@ module Completion::TypeSimulator
   end
 
   def self.evaluate_param_defaults(params, scope, jumps, dig_targets)
-    params => [:params, pre_required, optional, rest, post_required, keywords, keyrest, block]
-    pre_required&.each do |item|
-      item => [:@ident, name,]
-      scope[name] = Completion::Types::OBJECT
-    end
+    params => [:params, _pre_required, optional, rest, _post_required, keywords, keyrest, block]
     optional&.each do |item, value|
       item => [:@ident, name,]
       scope[name] = simulate_evaluate value, scope, jumps, dig_targets
@@ -652,10 +648,6 @@ module Completion::TypeSimulator
     if rest
       rest => [:rest_param, [:@ident, name,]]
       scope[name] = Completion::Types::ARRAY
-    end
-    post_required&.each do |item|
-      item => [:@ident, name,]
-      scope[name] = Completion::Types::OBJECT
     end
     keywords&.each do |key, value|
       key => [:@label, label,]
