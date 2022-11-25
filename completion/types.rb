@@ -55,7 +55,7 @@ module Completion::Types
             intersect? t, from_rbs_type(e, receiver_type)
           end
         end
-        [[method_type, given, expected], score]
+        [[method_type, given || [], expected || []], score]
       end
     end
     max_score = methods_with_score.map(&:last).max

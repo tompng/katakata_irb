@@ -8,9 +8,11 @@ module Completion::TypeSimulator
     def initialize
       @returns = []
       @breaks = []
+      @nexts = []
     end
     def return(value) = @returns.last&.<< value
     def break(value) = @breaks.last&.<< value
+    def next(value) = @nexts.last&.<< value
 
     def with(*types)
       accumulators = types.map do |type|
@@ -20,6 +22,8 @@ module Completion::TypeSimulator
           @returns << ac
         in :break
           @breaks << ac
+        in :next
+          @nexts << ac
         end
         ac
       end
@@ -32,6 +36,8 @@ module Completion::TypeSimulator
           @returns.pop
         in :break
           @breaks.pop
+        in :next
+          @nexts.pop
         end
       end
     end
@@ -227,14 +233,6 @@ module Completion::TypeSimulator
     result
   end
 
-  def self.simulate_proc_response(body, args_table, scope, jumps, dig_targets)
-    proc_scope = Scope.new(scope, args_table)
-    result, breaks = jumps.with :break do
-      simulate_evaluate body, proc_scope, jumps, dig_targets
-    end
-    Completion::Types::UnionType[result, breaks]
-  end
-
   def self.simulate_evaluate_inner(sexp, scope, jumps, dig_targets)
     case sexp
     in [:program, statements]
@@ -347,8 +345,8 @@ module Completion::TypeSimulator
         block => [:do_block | :brace_block => type, block_var, body]
         block_var in [:block_var, params,]
         call_block_proc = ->(args) do
-          result, breaks =  scope.conditional do
-            jumps.with :break do
+          result, breaks, nexts =  scope.conditional do
+            jumps.with :break, :next do
               # TODO: params match
               names = params ? extract_param_names(params) : []
               block_scope = Scope.new scope, names.zip(args).to_h { [_1, _2 || Completion::Types::NIL] }
@@ -362,7 +360,7 @@ module Completion::TypeSimulator
               end
             end
           end
-          Completion::Types::UnionType[result, breaks]
+          [Completion::Types::UnionType[result, nexts], breaks]
         end
       end
       simulate_call receiver_type, method, args_type, kwargs_type(kwargs, scope, jumps, dig_targets), call_block_proc
@@ -384,7 +382,7 @@ module Completion::TypeSimulator
     in [:lambda, params, statements]
       params in [:paren, params]
       if dig_targets.dig? statements
-        jumps.with :break, :return do
+        jumps.with :break, :next, :return do
           block_scope = Scope.new scope, {} # TODO: with block params
           statements.each { simulate_evaluate _1, block_scope, jumps, dig_targets }
         end
@@ -433,6 +431,24 @@ module Completion::TypeSimulator
       simulate_evaluate cond, scope, jumps, dig_targets
       scope.conditional { simulate_evaluate statement, scope, jumps, dig_targets }
       Completion::Types::NIL
+    in [:break | :next | :return => jump_type, value]
+      if value.empty?
+        jumps.send jump_type, Completion::Types::NIL
+      else
+        args, kwargs, = retrieve_method_args value
+        types = args.filter_map do |t|
+          if t in Completion::Types::Splat
+            # TODO
+          else
+            simulate_evaluate t, scope, jumps, dig_targets
+          end
+        end
+        # TODO: kwargs
+        jumps.send jump_type, Completion::Types::UnionType[*types]
+      end
+      Completion::Types::NIL
+    in [:return0]
+      jumps.return Completion::Types::NIL
     in [:begin, body_stmt]
       simulate_evaluate body_stmt, scope, jumps, dig_targets
     in [:bodystmt, statements, rescue_stmt, _unknown, ensure_stmt]
@@ -585,7 +601,7 @@ module Completion::TypeSimulator
   def self.simulate_call(receiver, method, args, kwargs, block)
     receiver ||= Completion::Types::SingletonType.new(Kernel) # TODO: self
     methods = Completion::Types.rbs_methods receiver, method.to_sym, args, kwargs, !!block
-    types = methods.map do |method, given_params, method_params|
+    type_breaks = methods.map do |method, given_params, method_params|
       receiver_vars = receiver.respond_to?(:params) ? receiver.params : {}
       free_vars = method.type.free_variables - receiver_vars.keys.to_set
       vars = receiver_vars.merge Completion::Types.match_free_variables(free_vars, method_params, given_params)
@@ -593,13 +609,15 @@ module Completion::TypeSimulator
         params_type = method.block.type.required_positionals.map do |func_param|
           Completion::Types.from_rbs_type func_param.type, receiver, vars
         end
-        block_response = block.call params_type
+        block_response, breaks = block.call params_type
         vars.merge! Completion::Types.match_free_variables(free_vars - vars.keys.to_set, [method.block.type.return_type], [block_response])
       end
-      Completion::Types.from_rbs_type method.type.return_type, receiver, vars || {}
+      [Completion::Types.from_rbs_type(method.type.return_type, receiver, vars || {}), breaks]
     end
+    types = type_breaks.map(&:first)
+    breaks = type_breaks.map(&:last).compact
     types << OBJECT_METHODS[method.to_sym] if OBJECT_METHODS.has_key? method.to_sym
-    Completion::Types::UnionType[*types]
+    Completion::Types::UnionType[*types, *breaks]
   end
 
   def self.extract_param_names(params)
