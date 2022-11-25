@@ -353,7 +353,11 @@ module Completion::TypeSimulator
             result, breaks, nexts =  scope.conditional do
               jumps.with :break, :next do
                 # TODO: params match
-                names = params ? extract_param_names(params) : []
+                if params
+                  names = extract_param_names(params)
+                else
+                  names = (1..max_numbered_params(body)).map { "_#{_1}" }
+                end
                 block_scope = Scope.new scope, names.zip(args).to_h { [_1, _2 || Completion::Types::NIL] }
                 block_scope.conditional { evaluate_param_defaults params, block_scope, jumps, dig_targets } if params
                 if type == :do_block
@@ -672,6 +676,19 @@ module Completion::TypeSimulator
     if block
       block => [:blockarg, [:@ident, name,]]
       scope[name] = Completion::Types::PROC
+    end
+  end
+
+  def self.max_numbered_params(sexp)
+    case sexp
+    in [:do_block | :brace_block | :def | :class | :module,]
+      0
+    in [:var_ref, [:@ident, name,]]
+      name.match?(/\A_[1-9]\z/) ? name[1..].to_i : 0
+    else
+      sexp.filter_map do |s|
+        max_numbered_params s if s in Array
+      end.max || 0
     end
   end
 
