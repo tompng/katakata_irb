@@ -69,7 +69,7 @@ module Completion::TypeSimulator
         when :ivar
           Completion::TypeSimulator.type_of(fallback:) { @self_object.instance_variable_get name }
         else
-          @local_variables.include?(name) ? Completion::TypeSimulator.type_of(fallback:) { @binding.eval name } : Completion::Types::NIL
+          @local_variables.include?(name) || name =~ /\A[A-Z]/ ? Completion::TypeSimulator.type_of(fallback:) { @binding.eval name } : Completion::Types::NIL
         end
       )
     end
@@ -277,7 +277,7 @@ module Completion::TypeSimulator
           simulate_evaluate elem, scope, jumps, dig_targets
         end
       end
-      types << kwargs_type(kwargs, scope, jumps, dig_targets) if kwargs
+      types << kwargs_type(kwargs, scope, jumps, dig_targets) if kwargs && kwargs.any?
       Completion::Types::InstanceType.new Array, Elem: Completion::Types::UnionType[*types]
     in [:array, statements]
       elem = statements ? Completion::Types::UnionType[*statements.map { simulate_evaluate _1, scope, jumps, dig_targets }] : Completion::Types::NIL
@@ -322,6 +322,9 @@ module Completion::TypeSimulator
       simulate_evaluate sexp, scope, jumps, dig_targets
     in [:var_ref, [:@kw, name,]]
       case name
+      in 'self'
+        # TODO
+        Completion::Types::OBJECT
       in 'true'
         Completion::Types::TRUE
       in 'false'
@@ -482,6 +485,7 @@ module Completion::TypeSimulator
   end
 
   def self.kwargs_type(kwargs, scope, jumps, dig_targets)
+    return if kwargs.empty?
     keys = []
     values = []
     kwargs.each do |kv|
@@ -639,6 +643,6 @@ module Completion::TypeSimulator
       return types
     end
     simulate_evaluate parents[0], Scope.from_binding(binding), jumps, dig_targets
-    Completion::Types::NullType
+    Completion::Types::NIL
   end
 end

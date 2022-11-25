@@ -10,66 +10,74 @@ module Completion::Types
 
   Splat = Struct.new :item
 
-  def self.rbs_method_response(type, method_name, args_types, kwargs_type, has_block)
-    if type in UnionType
-      types = type.types.map do
-        rbs_method_response _1, method_name, args_types, kwargs_type, has_block
+  def self.rbs_methods(type, method_name, args_types, kwargs_type, has_block)
+    types = (type in UnionType) ? type.types : [type]
+    receivers = types.map do |t|
+      case t
+      in ProcType
+        [t, Proc, false]
+      in SingletonType
+        [t, t.module_or_class, true]
+      in InstanceType
+        [t, t.klass, false]
       end
-      return UnionType[*types]
     end
-    klass = case type
-    in ProcType
-      Proc
-    in SingletonType
-      type.module_or_class
-    in InstanceType
-      type.klass
-    end
-    singleton = (type in SingletonType)
-    return InstanceType.new klass if singleton && method_name == :new
-    return type if method_name == :itself
-    return SingletonType.new klass if !singleton && method_name == :class
-    type_name = RBS::TypeName(klass.name).absolute!
-    definition = (singleton ? rbs_builder.build_singleton(type_name) : rbs_builder.build_instance(type_name)) rescue nil
-    return NIL unless definition
-    method = definition.methods[method_name]
-    return NIL unless method
     has_splat = args_types.any? { _1 in Splat }
-    method_types_with_score = method.method_types.map do |method_type|
-      score = 0
-      score += 4 if !!method_type.block == has_block
-      reqs = method_type.type.required_positionals
-      opts = method_type.type.optional_positionals
-      keywords = method_type.type.required_keywords
-      keyopts = method_type.type.optional_keywords
-      kwrest = method_type.type.rest_keywords
-      if has_splat # skip type check
-        score += 1 if args_types.compact.size <= reqs.size + opts.size
-      elsif reqs.size <= args_types.size && args_types.size <= reqs.size + opts.size
-        score += 2
-        if args_types.size >= 1
-          score += (
-            args_types.zip(reqs + opts).count do |arg_type, atype|
-              (arg_type & from_rbs_type(atype.type, type)).any? rescue true
-            end
-          ).fdiv args_types.size
+    # TODO: new, class
+    methods_with_score = receivers.flat_map do |receiver_type, klass, singleton|
+      type_name = RBS::TypeName(klass.name).absolute!
+      definition = (singleton ? rbs_builder.build_singleton(type_name) : rbs_builder.build_instance(type_name)) rescue nil
+      method = definition&.methods&.[](method_name)
+      next [] unless method
+      method.method_types.map do |method_type|
+        score = 0
+        score += 2 if !!method_type.block == has_block
+        reqs = method_type.type.required_positionals
+        opts = method_type.type.optional_positionals
+        rest = method_type.type.rest_positionals
+        trailings = method_type.type.trailing_positionals
+        keyreqs = method_type.type.required_keywords
+        keyopts = method_type.type.optional_keywords
+        keyrest = method_type.type.rest_keywords
+        args = (kwargs_type && keyreqs.empty? && keyopts.empty? && keyrest.nil?) ? args_types + [kwargs_type] : args_types
+        if has_splat
+          score += 1 if args.count { !(_1 in Splat) } <= reqs.size + opts.size + trailings.size
+        elsif reqs.size + trailings.size <= args.size && (rest || args.size <= reqs.size + opts.size + trailings.size)
+          score += 2
+          centers = args[reqs.size...-trailings.size]
+          given = args.first(reqs.size) + centers.take(opts.size) + args.last(trailings.size)
+          expected = reqs + opts.take(centers.size) + trailings
+          if rest
+            given << Union[*centers.drop(opts.size)]
+            expected << rest
+          end
+          score += given.zip(expected).count do |t, r|
+            intersect? t, from_rbs_type(r.type, receiver_type)
+          end
         end
+        [[method_type, given, expected], score]
       end
-      # score += 2 if !kwrest && (kwargs_type.keys - (keywords.keys + keyopts.keys)).empty?
-      if keywords.any?
-        score += keywords.keys.count { kwargs.has_key? _1 }.fdiv keywords.size
-      end
-      if keywords.any? || keyopts.any?
-        score += { **keywords, **keyopts }.count do |key, t|
-          # arg_type = kwargs_type[key]
-          # arg_type && (arg_type & from_rbs_type(t.type, type)).any? rescue true
-        end.fdiv keywords.size + keyopts.size
-      end
-      [method_type, score]
     end
-    max_score = method_types_with_score.map(&:last).max
-    types = method_types_with_score.select { _2 == max_score }.map(&:first).flat_map do
-      from_rbs_type _1.type.return_type, type
+    max_score = methods_with_score.map(&:last).max
+    methods_with_score.select { _2 == max_score }.map(&:first)
+  end
+
+  def self.intersect?(a, b)
+    atypes = ((a in UnionType) ? a.types : [a]).group_by(&:class)
+    btypes = ((b in UnionType) ? b.types : [b]).group_by(&:class)
+    intersect = ->(type, &block) do
+      aa, bb = [atypes, btypes].map {|types| (types[type] || []).map(&block) }
+      (aa & bb).any?
+    end
+    return true if atypes[ProcType] && btypes[ProcType]
+    return true if intersect.call(SingletonType, &:class_or_module)
+    intersect.call(InstanceType, &:klass)
+  end
+
+  def self.rbs_method_response(receiver_type, method_name, args_types, kwargs_type, has_block)
+    methods = rbs_methods(receiver_type, method_name, args_types, kwargs_type, has_block)
+    types = methods.map do |method,|
+      from_rbs_type method.type.return_type, receiver_type
     end
     UnionType[*types]
   end
@@ -244,6 +252,11 @@ module Completion::Types
     when RBS::Types::Variable
       if self_type in InstanceType
         self_type.params[return_type.name] || OBJECT
+      elsif self_type in UnionType
+        types = self_type.types.filter_map do |t|
+          t.params[return_type.name] if t in InstanceType
+        end
+        UnionType[*types]
       else
         OBJECT
       end
