@@ -609,6 +609,7 @@ module Completion::TypeSimulator
   def self.simulate_call(receiver, method, args, kwargs, block)
     receiver ||= Completion::Types::SingletonType.new(Kernel) # TODO: self
     methods = Completion::Types.rbs_methods receiver, method.to_sym, args, kwargs, !!block
+    block_called = false
     type_breaks = methods.map do |method, given_params, method_params|
       receiver_vars = receiver.respond_to?(:params) ? receiver.params : {}
       free_vars = method.type.free_variables - receiver_vars.keys.to_set
@@ -618,10 +619,12 @@ module Completion::TypeSimulator
           Completion::Types.from_rbs_type func_param.type, receiver, vars
         end
         block_response, breaks = block.call params_type
+        block_called = true
         vars.merge! Completion::Types.match_free_variables(free_vars - vars.keys.to_set, [method.block.type.return_type], [block_response])
       end
       [Completion::Types.from_rbs_type(method.type.return_type, receiver, vars || {}), breaks]
     end
+    block&.call [] unless block_called
     types = type_breaks.map(&:first)
     breaks = type_breaks.map(&:last).compact
     types << OBJECT_METHODS[method.to_sym] if OBJECT_METHODS.has_key? method.to_sym
