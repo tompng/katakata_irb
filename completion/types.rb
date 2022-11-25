@@ -46,13 +46,13 @@ module Completion::Types
           score += 2
           centers = args[reqs.size...-trailings.size]
           given = args.first(reqs.size) + centers.take(opts.size) + args.last(trailings.size)
-          expected = reqs + opts.take(centers.size) + trailings
+          expected = (reqs + opts.take(centers.size) + trailings).map(&:type)
           if rest
-            given << Union[*centers.drop(opts.size)]
-            expected << rest
+            given << UnionType[*centers.drop(opts.size)]
+            expected << rest.type
           end
-          score += given.zip(expected).count do |t, r|
-            intersect? t, from_rbs_type(r.type, receiver_type)
+          score += given.zip(expected).count do |t, e|
+            intersect? t, from_rbs_type(e, receiver_type)
           end
         end
         [[method_type, given, expected], score]
@@ -202,7 +202,7 @@ module Completion::Types
     def constants() = @types.flat_map(&:constants).uniq
   end
 
-  def self.from_rbs_type(return_type, self_type)
+  def self.from_rbs_type(return_type, self_type, extra_vars = {})
     case return_type
     when RBS::Types::Bases::Self
       self_type
@@ -239,18 +239,20 @@ module Completion::Types
         end
       end
     when RBS::Types::Union
-      UnionType[*return_type.types.flat_map { from_rbs_type _1, self_type }]
+      UnionType[*return_type.types.flat_map { from_rbs_type _1, self_type, extra_vars }]
     when RBS::Types::Proc
       InstanceType.new Proc
     when RBS::Types::Tuple
-      elem = UnionType[*return_type.types.map { from_rbs_type _1, self_type }]
+      elem = UnionType[*return_type.types.map { from_rbs_type _1, self_type, extra_vars }]
       InstanceType.new Array, Elem: elem
     when RBS::Types::Record
       InstanceType.new Hash, K: SYMBOL, V: OBJECT
     when RBS::Types::Literal
       InstanceType.new return_type.literal.class
     when RBS::Types::Variable
-      if self_type in InstanceType
+      if extra_vars.key? return_type.name
+        extra_vars[return_type.name]
+      elsif self_type in InstanceType
         self_type.params[return_type.name] || OBJECT
       elsif self_type in UnionType
         types = self_type.types.filter_map do |t|
@@ -261,7 +263,7 @@ module Completion::Types
         OBJECT
       end
     when RBS::Types::Optional
-      UnionType[from_rbs_type(return_type.type, self_type), NIL]
+      UnionType[from_rbs_type(return_type.type, self_type, extra_vars), NIL]
     when RBS::Types::Alias
       case return_type.name.name
       when :int
@@ -278,11 +280,39 @@ module Completion::Types
       return OBJECT unless klass in Class
       $hoge ||= return_type
       if return_type.args
-        args = return_type.args.map { from_rbs_type _1, self_type }
+        args = return_type.args.map { from_rbs_type _1, self_type, extra_vars }
         names = rbs_builder.build_singleton(return_type.name).type_params
         params = names.map.with_index { [_1, args[_2] || OBJECT] }.to_h
       end
       InstanceType.new(klass, params || {})
+    end
+  end
+
+  def self.match_free_variables(vars, types, values)
+    accumulator = {}
+    types.zip(values).each do |t, v|
+      _match_free_variable(vars, t, v, accumulator)
+    end
+    accumulator.transform_values { UnionType[*_1] }
+  end
+
+  def self._match_free_variable(vars, rbs_type, value, accumulator)
+    case [rbs_type, value]
+    in [RBS::Types::Variable,]
+      (accumulator[rbs_type.name] ||= []) << value if vars.include? rbs_type.name
+    in [RBS::Types::ClassInstance, InstanceType]
+      names = rbs_builder.build_singleton(rbs_type.name).type_params
+      names.zip(rbs_type.args).each do |name, arg|
+        v = value.params[name]
+        _match_free_variable vars, arg, v, accumulator if v
+      end
+    in [RBS::Types::Tuple, InstanceType] if value.klass == Array
+      v = value.params[:Elem]
+      rbs_type.types.each do |t|
+        _match_free_variable vars, t, v
+      end
+    in [RBS::Types::Record, InstanceType] if value.klass == Hash
+    else
     end
   end
 end
