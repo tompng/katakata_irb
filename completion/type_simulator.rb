@@ -342,25 +342,33 @@ module Completion::TypeSimulator
       receiver_type = simulate_evaluate receiver, scope, jumps, dig_targets if receiver
       args_type = args.map { simulate_evaluate _1, scope, jumps, dig_targets if _1 }
       if block
-        block => [:do_block | :brace_block => type, block_var, body]
-        block_var in [:block_var, params,]
-        call_block_proc = ->(args) do
-          result, breaks, nexts =  scope.conditional do
-            jumps.with :break, :next do
-              # TODO: params match
-              names = params ? extract_param_names(params) : []
-              block_scope = Scope.new scope, names.zip(args).to_h { [_1, _2 || Completion::Types::NIL] }
-              block_scope.conditional { evaluate_param_defaults params, block_scope, jumps, dig_targets }
-              if type == :do_block
-                simulate_evaluate body, block_scope, jumps, dig_targets
-              else
-                body.map {
-                  simulate_evaluate _1, block_scope, jumps, dig_targets
-                }.last
+        if block in [:symbol_literal, [:symbol, [:@ident, block_name,]]]
+          call_block_proc = ->(args) do
+            block_receiver, *rest = args
+            block_receiver ? simulate_call(block_receiver, block_name, rest, nil, nil) : Completion::Types::OBJECT
+          end
+        elsif block in [:do_block | :brace_block => type, block_var, body]
+          block_var in [:block_var, params,]
+          call_block_proc = ->(args) do
+            result, breaks, nexts =  scope.conditional do
+              jumps.with :break, :next do
+                # TODO: params match
+                names = params ? extract_param_names(params) : []
+                block_scope = Scope.new scope, names.zip(args).to_h { [_1, _2 || Completion::Types::NIL] }
+                block_scope.conditional { evaluate_param_defaults params, block_scope, jumps, dig_targets }
+                if type == :do_block
+                  simulate_evaluate body, block_scope, jumps, dig_targets
+                else
+                  body.map {
+                    simulate_evaluate _1, block_scope, jumps, dig_targets
+                  }.last
+                end
               end
             end
+            [Completion::Types::UnionType[result, nexts], breaks]
           end
-          [Completion::Types::UnionType[result, nexts], breaks]
+        else
+          _block_arg = simulate_evaluate block, block_scope, jumps, dig_targets
         end
       end
       simulate_call receiver_type, method, args_type, kwargs_type(kwargs, scope, jumps, dig_targets), call_block_proc
