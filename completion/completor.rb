@@ -8,28 +8,13 @@ module Completion::Completor
   using Completion::TypeSimulator::LexerElemMatcher
 
   def self.patch_to_completor
-
-    call_candidates = -> classes do
-      classes.flat_map do |k|
-        if k in { class: klass }
-          klass.methods
-        else
-          k.instance_methods
-        end
-      end
-    end
-
-    const_candidates = -> classes do
-      classes.flat_map do |k|
-        (k in { class: klass }) ? klass.constants : []
-      end
-    end
-
     completion_proc = ->(target, preposing = nil, postposing = nil) do
       code = "#{preposing}#{target}"
       irb_context = IRB.conf[:MAIN_CONTEXT]
       binding = irb_context.workspace.binding
-      lvars_code = RubyLex.generate_local_variables_assign_code binding.local_variables
+      lvars_code = binding.local_variables.map do |name|
+        "#{name}=#{name};"
+      end.join
       candidates = case analyze lvars_code + "\n" + code, binding
       in [:require | :require_relative => method, name]
         if method == :require
@@ -37,10 +22,10 @@ module Completion::Completor
         else
           IRB::InputCompletor.retrieve_files_to_require_relative_from_current_dir
         end
-      in [:call_or_const, classes, name]
-        call_candidates.call(classes) | const_candidates.call(classes)
-      in [:const, classes, name]
-        const_candidates.call classes
+      in [:call_or_const, type, name]
+        type.methods | type.constants
+      in [:const, type, name]
+        type.constants
       in [:ivar, name]
         ivars = binding.eval('self').instance_variables rescue []
         cvars = (binding.eval('self').class_variables rescue nil) if name == '@'
@@ -51,8 +36,8 @@ module Completion::Completor
         global_variables
       in [:symbol, name]
         Symbol.all_symbols.reject { _1.match? '_trex_completion_' }
-      in [:call, classes, name]
-        call_candidates.call(classes)
+      in [:call, type, name]
+        type.methods
       in [:lvar_or_method, name]
         Kernel.methods | binding.local_variables
       else
@@ -140,12 +125,12 @@ module Completion::Completor
       if lvar_available
         [:lvar_or_method, name]
       else
-        [:call, [{ class: Kernel }], name]
+        [:call, Completion::Types::SingletonType.new(Kernel), name]
       end
     in [:symbol, [:@ident | :@const | :@op | :@kw,]]
       [:symbol, name]
     in [:var_ref | :const_ref, [:@const,]]
-      [:const, [{ class: Object }], name]
+      [:const, Completion::Types::SingletonType.new(Object), name]
     in [:var_ref, [:@gvar,]]
       [:gvar, name]
     in [:var_ref, [:@ivar,]]
@@ -154,9 +139,11 @@ module Completion::Completor
       [:cvar, name] if icvar_available
     in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::' => dot, [:@ident | :@const,]]
       type = dot == :'::' ? :call_or_const : :call
-      [type, Completion::TypeSimulator.simulate_evaluate(receiver, binding, lvar_available, icvar_available), name]
+      receiver_type = Completion::TypeSimulator.calculate_receiver binding, parents, receiver
+      [type, receiver_type, name]
     in [:const_path_ref, receiver, [:@const,]]
-      [:const, Completion::TypeSimulator.simulate_evaluate(receiver, binding, lvar_available, icvar_available), name]
+      receiver_type = Completion::TypeSimulator.calculate_receiver binding, parents, receiver
+      [:const, receiver_type, name]
     in [:def,] | [:string_content,] | [:var_field,] | [:defs,] | [:rest_param,] | [:kwrest_param,] | [:blockarg,] | [[:@ident,],]
     else
       STDERR.cooked{
