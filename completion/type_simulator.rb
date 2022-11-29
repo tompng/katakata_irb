@@ -139,7 +139,7 @@ module Completion::TypeSimulator
     end
 
     def []=(name, types)
-      if trace?(name) && @parent.mutable? && @parent.has?(name)
+      if trace?(name) && @parent.mutable? && !@tables.any? { _1.key? name } && @parent.has?(name)
         @parent[name] = types
       else
         @tables.last[name] = types
@@ -358,12 +358,13 @@ module Completion::TypeSimulator
           call_block_proc = ->(args) do
             result, breaks, nexts =  scope.conditional do
               jumps.with :break, :next do
-                # TODO: params match
                 if params
                   names = extract_param_names(params)
                 else
                   names = (1..max_numbered_params(body)).map { "_#{_1}" }
+                  params = [:params, names.map { [:@ident, _1, [0, 0]] }, nil, nil, nil, nil, nil, nil]
                 end
+                # TODO: params match
                 block_scope = Scope.new scope, names.zip(args).to_h { [_1, _2 || Completion::Types::NIL] }
                 block_scope.conditional { evaluate_param_defaults params, block_scope, jumps, dig_targets } if params
                 if type == :do_block
@@ -644,17 +645,30 @@ module Completion::TypeSimulator
   def self.extract_param_names(params)
     params => [:params, pre_required, optional, rest, post_required, keywords, keyrest, block]
     names = []
-    [*pre_required, *post_required].each do |item|
-      item => [:@ident, name,]
+    extract_mlhs = ->(item) do
+      case item
+      in [:@ident, name,]
+        names << name
+      in [:mlhs, *items]
+        items.each(&extract_mlhs)
+      in [:rest_param, item]
+        extract_mlhs.call item if item
+      end
+    end
+    [*pre_required, *post_required].each(&extract_mlhs)
+    extract_mlhs.call rest if rest
+    optional&.each do |key, _value|
+      key => [:@ident, name,]
       names << name
     end
-    optional&.each { |name,| names << name }
-    keywords&.each do |key, value|
+    keywords&.each do |key, _value|
       key => [:@label, label,]
       names << label.delete(':')
     end
-    [*rest, *keyrest, *block].each do |item|
-      item => [:rest_param | :kwrest_params | :blockarg, [:@ident, name,]]
+    if keyrest in [:kwrest_params, [:@ident, name,]]
+      names << name
+    end
+    if block in [:blockarg, [:@ident, name,]]
       names << name
     end
     names
@@ -666,8 +680,7 @@ module Completion::TypeSimulator
       item => [:@ident, name,]
       scope[name] = simulate_evaluate value, scope, jumps, dig_targets
     end
-    if rest
-      rest => [:rest_param, [:@ident, name,]]
+    if rest in [:rest_param, [:@ident, name,]]
       scope[name] = Completion::Types::ARRAY
     end
     keywords&.each do |key, value|

@@ -278,7 +278,6 @@ module Completion::Types
     when RBS::Types::ClassInstance
       klass = Object.const_get(return_type.name.name)
       return OBJECT unless klass in Class
-      $hoge ||= return_type
       if return_type.args
         args = return_type.args.map { from_rbs_type _1, self_type, extra_vars }
         names = rbs_builder.build_singleton(return_type.name).type_params
