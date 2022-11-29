@@ -74,8 +74,10 @@ module Completion::TypeSimulator
           Completion::TypeSimulator.type_of(fallback:) { @self_object.class_variable_get name }
         when :ivar
           Completion::TypeSimulator.type_of(fallback:) { @self_object.instance_variable_get name }
-        else
-          @local_variables.include?(name) || name =~ /\A[A-Z]/ ? Completion::TypeSimulator.type_of(fallback:) { @binding.eval name } : Completion::Types::NIL
+        when :lvar
+          Completion::TypeSimulator.type_of(fallback:) { @binding.local_variable_get(name) }
+        when :const
+          Completion::TypeSimulator.type_of(fallback:) { @binding.eval name }
         end
       )
     end
@@ -87,6 +89,8 @@ module Completion::TypeSimulator
         :ivar
       elsif name.start_with? '$'
         :gvar
+      elsif name[0].downcase != name[0]
+        :const
       else
         :lvar
       end
@@ -98,8 +102,10 @@ module Completion::TypeSimulator
         @self_object.class_variable_defined? name
       when :ivar
         @self_object.instance_variable_defined? name
-      else
+      when :lvar
         @local_variables.include? name
+      when :const
+        @binding.eval("#{name};true") rescue false
       end
     end
   end
@@ -122,7 +128,7 @@ module Completion::TypeSimulator
     def trace?(name)
       return false unless @parent
       type = BaseScope.type_by_name(name)
-      type == :cvar ? @trace_cvar : type == :ivar ? @trace_ivar : @trace_lvar
+      type == :cvar ? @trace_cvar : type == :ivar ? @trace_ivar : type == :lvar ? @trace_lvar : true
     end
 
     def [](name)
