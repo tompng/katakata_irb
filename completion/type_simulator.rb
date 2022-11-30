@@ -246,8 +246,7 @@ module Completion::TypeSimulator
     in [:def, *receiver, method, params, body_stmt]
       if dig_targets.dig? sexp
         params in [:paren, params]
-        names = extract_param_names(params)
-        method_scope = Scope.new scope, names.to_h { [_1, Completion::Types::NIL] }, trace_lvar: false
+        method_scope = Scope.new scope, extract_param_names(params).to_h { [_1, Completion::Types::NIL] }, trace_lvar: false
         evaluate_assign_params params, [], method_scope
         method_scope.conditional { evaluate_param_defaults params, method_scope, jumps, dig_targets }
         simulate_evaluate body_stmt, method_scope, jumps, dig_targets
@@ -406,7 +405,10 @@ module Completion::TypeSimulator
       params in [:paren, params]
       if dig_targets.dig? statements
         jumps.with :break, :next, :return do
-          block_scope = Scope.new scope, {} # TODO: with block params
+          params in [:paren, params]
+          block_scope = Scope.new scope, extract_param_names(params).to_h { [_1, Completion::Types::NIL] }
+          evaluate_assign_params params, [], block_scope
+          block_scope.conditional { evaluate_param_defaults params, block_scope, jumps, dig_targets }
           statements.each { simulate_evaluate _1, block_scope, jumps, dig_targets }
         end
       end
