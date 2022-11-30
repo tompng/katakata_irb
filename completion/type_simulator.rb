@@ -507,7 +507,18 @@ module Completion::TypeSimulator
     in [:class, klass_stmt, _superclass_stmt, body_stmt]
       return Completion::Types::NIL unless dig_targets.dig?(body_stmt)
       simulate_evaluate body_stmt, Scope.new(scope, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
-    in [:case | :begin | :for | :class | :sclass | :module,]
+    in [:for, fields, enum, statements]
+      fields = [fields] if fields in [:var_field,]
+      params = [:params, fields, nil, nil, nil, nil, nil, nil]
+      enum = simulate_evaluate enum, scope, jumps, dig_targets
+      extract_param_names(params).each { scope[_1] = Completion::Types::NIL }
+      response = simulate_call enum, :first, [], nil, nil
+      evaluate_assign_params params, [response], scope
+      scope.conditional do
+        statements.each { simulate_evaluate _1, scope, jumps, dig_targets }
+      end
+    in [:case]
+      # TODO
       Completion::Types::NIL
     in [:void_stmt]
       Completion::Types::NIL
@@ -725,6 +736,8 @@ module Completion::TypeSimulator
     names = []
     extract_mlhs = ->(item) do
       case item
+      in [:var_field, [:@ident, name,],]
+        names << name
       in [:@ident, name,]
         names << name
       in [:mlhs, *items]
