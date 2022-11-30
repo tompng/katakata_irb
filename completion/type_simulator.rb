@@ -364,8 +364,8 @@ module Completion::TypeSimulator
                   names = (1..max_numbered_params(body)).map { "_#{_1}" }
                   params = [:params, names.map { [:@ident, _1, [0, 0]] }, nil, nil, nil, nil, nil, nil]
                 end
-                # TODO: params match
                 block_scope = Scope.new scope, names.zip(args).to_h { [_1, _2 || Completion::Types::NIL] }
+                evaluate_assign_params params, args, block_scope
                 block_scope.conditional { evaluate_param_defaults params, block_scope, jumps, dig_targets } if params
                 if type == :do_block
                   simulate_evaluate body, block_scope, jumps, dig_targets
@@ -419,8 +419,9 @@ module Completion::TypeSimulator
       simulate_evaluate target, scope, jumps, dig_targets
       simulate_evaluate value, scope, jumps, dig_targets
     in [:massign, targets, value]
-      # TODO
-      simulate_evaluate value, scope, jumps, dig_targets
+      rhs = simulate_evaluate value, scope, jumps, dig_targets
+      evaluate_massign targets, rhs, scope
+      rhs
     in [:mrhs_new_from_args,]
       # TODO
       Completion::Types::InstanceType.new Array
@@ -523,6 +524,42 @@ module Completion::TypeSimulator
     end
   end
 
+  def self.evaluate_massign(sexp, values, scope)
+    unless values in Array
+      to_ary_result = simulate_call values, :to_ary, [], nil, nil
+      values = to_ary_result if (to_ary_result in Completion::Types::InstanceType) && to_ary_result.klass == Array
+      if (values in Completion::Types::InstanceType) && values.klass == Array
+        values = [values.params[:Elem] || Completion::Types::OBJECT] * sexp.size
+      else
+        values = [values]
+      end
+    end
+
+    rest_index = sexp.find_index { _1 in [:rest_param, ]}
+    if rest_index
+      pre = rest_index ? sexp[0...rest_index] : sexp
+      post = rest_index ? sexp[rest_index + 1..] : []
+      sexp[rest_index] in [:rest_param, rest_field]
+      rest_values = values[pre.size...-post.size] || []
+      rest_type = Completion::Types::InstanceType.new Array, Elem: Completion::Types::UnionType[*rest_values]
+      pairs = pre.zip(values.first(pre.size)) + [[rest_field, rest_type]] + post.zip(values.last(post.size))
+    else
+      pairs = sexp.zip values
+    end
+    pairs.each do |field, value|
+      case field
+      in [:@ident, name,]
+        # block arg mlhs
+        scope[name] = value
+      in [:var_field, [:@ident, name,]]
+        # massign
+        scope[name] = value
+      in [:mlhs, *mlhs]
+        evaluate_massign mlhs, value, scope
+      end
+    end
+  end
+
   def self.kwargs_type(kwargs, scope, jumps, dig_targets)
     return if kwargs.empty?
     keys = []
@@ -617,9 +654,9 @@ module Completion::TypeSimulator
     end
   end
 
-  def self.simulate_call(receiver, method, args, kwargs, block)
+  def self.simulate_call(receiver, method_name, args, kwargs, block)
     receiver ||= Completion::Types::SingletonType.new(Kernel) # TODO: self
-    methods = Completion::Types.rbs_methods receiver, method.to_sym, args, kwargs, !!block
+    methods = Completion::Types.rbs_methods receiver, method_name.to_sym, args, kwargs, !!block
     block_called = false
     type_breaks = methods.map do |method, given_params, method_params|
       receiver_vars = receiver.respond_to?(:params) ? receiver.params : {}
@@ -638,7 +675,7 @@ module Completion::TypeSimulator
     block&.call [] unless block_called
     types = type_breaks.map(&:first)
     breaks = type_breaks.map(&:last).compact
-    types << OBJECT_METHODS[method.to_sym] if OBJECT_METHODS.has_key? method.to_sym
+    types << OBJECT_METHODS[method_name.to_sym] if OBJECT_METHODS.has_key? method_name.to_sym
     Completion::Types::UnionType[*types, *breaks]
   end
 
@@ -653,6 +690,7 @@ module Completion::TypeSimulator
         items.each(&extract_mlhs)
       in [:rest_param, item]
         extract_mlhs.call item if item
+      in [:excessed_comma]
       end
     end
     [*pre_required, *post_required].each(&extract_mlhs)
@@ -674,6 +712,35 @@ module Completion::TypeSimulator
     names
   end
 
+  def self.evaluate_assign_params(params, values, scope)
+    values = values.dup
+    params => [:params, pre_required, optional, rest, post_required, keywords, keyrest, block]
+    size = (pre_required&.size || 0) + (optional&.size || 0) + (post_required&.size || 0) + (rest ? 1 : 0)
+    if values.size == 1 && size >= 2
+      to_ary_result = simulate_call values.first, :to_ary, [], nil, nil
+      if (to_ary_result in Completion::Types::InstanceType) && to_ary_result.klass == Array
+        values = [to_ary_result.params[:Elem] || Completion::Types::OBJECT] * size
+      end
+    end
+
+    pre_values = values.shift pre_required.size if pre_required
+    post_values = values.pop post_required.size if post_required
+    opt_values = values.shift optional.size if optional
+    rest_values = values
+    evaluate_massign pre_required, pre_values, scope if pre_required
+    evaluate_massign optional.map(&:first), opt_values, scope if optional
+    if rest in [:rest_param, [:@ident, name,]]
+      scope[name] = Completion::Types::InstanceType.new Array, Elem: Completion::Types::UnionType[*rest_values]
+    end
+    evaluate_massign post_required, post_values, scope if post_required
+    if keyrest in [:kwrest_param, [:@ident, name,]]
+      scope[name] = Completion::Types::InstanceType.new Hash, K: Completion::Types::SYMBOL, V: Completion::Types::OBJECT
+    end
+    if block in [:blockarg, [:@ident, name,]]
+      scope[name] = Completion::Types::PROC
+    end
+  end
+
   def self.evaluate_param_defaults(params, scope, jumps, dig_targets)
     params => [:params, _pre_required, optional, rest, _post_required, keywords, keyrest, block]
     optional&.each do |item, value|
@@ -689,7 +756,7 @@ module Completion::TypeSimulator
       scope[name] = value ? simulate_evaluate(value, scope, jumps, dig_targets) : Completion::Types::OBJECT
     end
     if keyrest
-      keyerst => [:kwrest_param, [:@ident, name,]]
+      keyrest => [:kwrest_param, [:@ident, name,]]
       scope[name] = Completion::Types::HASH
     end
     if block

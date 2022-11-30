@@ -130,6 +130,18 @@ module Completion::Types
     def constants() = []
   end
 
+  class ProcType
+    attr_reader :params, :kwparams, :return_type
+    def initialize(params = [], kwparams = {}, return_type = NIL)
+      @params = params
+      @kwparams = kwparams
+      @return_type = return_type
+    end
+    def transform() = yield(self)
+    def methods() = Proc.instance_methods
+    def constants() = []
+  end
+
   NIL = InstanceType.new NilClass
   OBJECT = InstanceType.new Object
   TRUE = InstanceType.new FalseClass
@@ -144,18 +156,7 @@ module Completion::Types
   COMPLEX = InstanceType.new Complex
   ARRAY = InstanceType.new Array
   HASH = InstanceType.new Hash
-
-  class ProcType
-    attr_reader :params, :kwparams, :return_type
-    def initialize(params = [], kwparams = {}, return_type = NIL)
-      @params = params
-      @kwparams = kwparams
-      @return_type = return_type
-    end
-    def transform() = yield(self)
-    def methods() = Proc.instance_methods
-    def constants() = []
-  end
+  PROC = ProcType.new
 
   class UnionType
     attr_reader :types
@@ -164,6 +165,7 @@ module Completion::Types
       @types = []
       singletons = []
       instances = {}
+      procs = []
       collect = -> type do
         case type
         in UnionType
@@ -175,10 +177,12 @@ module Completion::Types
           end
         in SingletonType
           singletons << type
+        in ProcType
+          procs << type
         end
       end
       types.each(&collect)
-      @types = singletons.uniq + instances.map do |klass, params|
+      @types = procs.uniq + singletons.uniq + instances.map do |klass, params|
         InstanceType.new(klass, params.transform_values { |v| UnionType[*v] })
       end
     end
