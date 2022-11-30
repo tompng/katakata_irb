@@ -223,7 +223,6 @@ module Completion::TypeSimulator
     to_s: Completion::Types::STRING,
     to_str: Completion::Types::STRING,
     to_a: Completion::Types::ARRAY,
-    to_ary: Completion::Types::ARRAY,
     to_h: Completion::Types::HASH,
     to_hash: Completion::Types::HASH,
     to_i: Completion::Types::INTEGER,
@@ -722,7 +721,6 @@ module Completion::TypeSimulator
         values = [to_ary_result.params[:Elem] || Completion::Types::OBJECT] * size
       end
     end
-
     pre_values = values.shift pre_required.size if pre_required
     post_values = values.pop post_required.size if post_required
     opt_values = values.shift optional.size if optional
