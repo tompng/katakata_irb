@@ -138,11 +138,12 @@ module Completion::TypeSimulator
       @parent[name] if trace? name
     end
 
-    def []=(name, types)
+    def []=(name, type)
+      raise if type.nil?
       if trace?(name) && @parent.mutable? && !@tables.any? { _1.key? name } && @parent.has?(name)
-        @parent[name] = types
+        @parent[name] = type
       else
-        @tables.last[name] = types
+        @tables.last[name] = type
       end
     end
 
@@ -244,8 +245,12 @@ module Completion::TypeSimulator
       statements.map { simulate_evaluate _1, scope, jumps, dig_targets }.last
     in [:def, *receiver, method, params, body_stmt]
       if dig_targets.dig? sexp
-        # TODO: method args
-        simulate_evaluate body_stmt, Scope.new(scope, trace_lvar: false), jumps, dig_targets
+        params in [:paren, params]
+        names = extract_param_names(params)
+        method_scope = Scope.new scope, names.to_h { [_1, Completion::Types::NIL] }, trace_lvar: false
+        evaluate_assign_params params, [], method_scope
+        method_scope.conditional { evaluate_param_defaults params, method_scope, jumps, dig_targets }
+        simulate_evaluate body_stmt, method_scope, jumps, dig_targets
       end
       Completion::Types::SYMBOL
     in [:@int,]
@@ -549,12 +554,12 @@ module Completion::TypeSimulator
       case field
       in [:@ident, name,]
         # block arg mlhs
-        scope[name] = value
+        scope[name] = value || Completion::Types::OBJECT
       in [:var_field, [:@ident, name,]]
         # massign
-        scope[name] = value
+        scope[name] = value || Completion::Types::OBJECT
       in [:mlhs, *mlhs]
-        evaluate_massign mlhs, value, scope
+        evaluate_massign mlhs, value || [], scope
       end
     end
   end
