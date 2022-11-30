@@ -428,9 +428,9 @@ module Completion::TypeSimulator
       rhs = simulate_evaluate value, scope, jumps, dig_targets
       evaluate_massign targets, rhs, scope
       rhs
-    in [:mrhs_new_from_args,]
-      # TODO
-      Completion::Types::InstanceType.new Array
+    in [:mrhs_new_from_args | :mrhs_add_star,]
+      values, = evaluate_mrhs sexp, scope, jumps, dig_targets
+      Completion::Types::InstanceType.new Array, Elem: Completion::Types::UnionType[*values]
     in [:ifop, cond, tval, fval]
       simulate_evaluate cond, scope, jumps, dig_targets
       Completion::Types::UnionType[*scope.run_branches(
@@ -461,16 +461,9 @@ module Completion::TypeSimulator
       if value.empty?
         jumps.send jump_type, Completion::Types::NIL
       else
-        args, kwargs, = retrieve_method_args value
-        types = args.filter_map do |t|
-          if t in Completion::Types::Splat
-            # TODO
-          else
-            simulate_evaluate t, scope, jumps, dig_targets
-          end
-        end
-        # TODO: kwargs
-        jumps.send jump_type, Completion::Types::UnionType[*types]
+        values, kw = evaluate_mrhs value, scope, jumps, dig_targets
+        values << kw if kw
+        jumps.send jump_type, Completion::Types::InstanceType.new(Array, Elem: Completion::Types::UnionType[*values])
       end
       Completion::Types::NIL
     in [:return0]
@@ -528,6 +521,36 @@ module Completion::TypeSimulator
       }
       Completion::Types::NIL
     end
+  end
+
+  def self.evaluate_mrhs(sexp, scope, jumps, dig_targets)
+    args, kwargs, = retrieve_method_args sexp
+    values = args.filter_map do |t|
+      if t in Completion::Types::Splat
+        simulate_evaluate t.item, scope, jumps, dig_targets
+        # TODO
+        nil
+      else
+        simulate_evaluate t, scope, jumps, dig_targets
+      end
+    end
+    unless kwargs.empty?
+      kvs = kwargs.map do |t|
+        case t
+        in Completion::Types::Splat
+          simulate_evaluate t.item, scope, jumps, dig_targets
+          # TODO
+          [Completion::Types::SYMBOL, Completion::Types::OBJECT]
+        in [key, value]
+          key_type = (key in [:@label,]) ? Completion::Types::SYMBOL : simulate_evaluate(key, scope, jumps, dig_targets)
+          [key_type, simulate_evaluate(value, scope, jumps, dig_targets)]
+        end
+      end
+      key_type = Completion::Types::UnionType[*kvs.map(&:first)]
+      value_type = Completion::Types::UnionType[*kvs.map(&:last)]
+      kw = Completion::Types::InstanceType.new(Hash, K: key_type, V: value_type)
+    end
+    [values, kw]
   end
 
   def self.evaluate_massign(sexp, values, scope)
@@ -623,11 +646,23 @@ module Completion::TypeSimulator
 
   def self.retrieve_method_args(sexp)
     case sexp
+    in [:mrhs_add_star, args, star]
+      args, = retrieve_method_args args
+      [[*args, Completion::Types::Splat.new(star)], [], nil]
+    in [:mrhs_new_from_args, [:args_add_star,] => args]
+      args, = retrieve_method_args args
+      [args, [], nil]
+    in [:mrhs_new_from_args, [:args_add_star,] => args, last_arg]
+      args, = retrieve_method_args args
+      [[*args, last_arg], [], nil]
+    in [:mrhs_new_from_args, args, last_arg]
+      [[*args, last_arg], [], nil]
+    in [:mrhs_new_from_args, args]
+      [args, [], nil]
     in [:args_add_block, [:args_add_star,] => args, block_arg]
       args, = retrieve_method_args args
       [args, [], block_arg]
     in [:args_add_block, [*args, [:bare_assoc_hash,] => kw], block_arg]
-      args, = retrieve_method_args args
       _, kwargs = retrieve_method_args kw
       [args, kwargs, block_arg]
     in [:args_add_block, [*args], block_arg]

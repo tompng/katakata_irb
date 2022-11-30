@@ -23,7 +23,6 @@ module Completion::Types
       end
     end
     has_splat = args_types.any? { _1 in Splat }
-    # TODO: new, class
     methods_with_score = receivers.flat_map do |receiver_type, klass, singleton|
       type_name = RBS::TypeName(klass.name).absolute!
       definition = (singleton ? rbs_builder.build_singleton(type_name) : rbs_builder.build_instance(type_name)) rescue nil
