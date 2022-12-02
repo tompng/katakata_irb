@@ -517,6 +517,7 @@ module Completion::TypeSimulator
       scope.conditional do
         statements.each { simulate_evaluate _1, scope, jumps, dig_targets }
       end
+      enum
     in [:case]
       # TODO
       Completion::Types::NIL
