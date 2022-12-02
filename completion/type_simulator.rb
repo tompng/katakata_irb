@@ -347,6 +347,10 @@ module Completion::TypeSimulator
       args_type = args.map { simulate_evaluate _1, scope, jumps, dig_targets if _1 }
       simulate_call receiver_type, :[], args_type, kwargs_type(kwargs, scope, jumps, dig_targets), nil
     in [:call | :vcall | :command | :command_call | :method_add_arg | :method_add_block,]
+      if (sexp in [:vcall, [:@ident, name,]]) && scope.has?(name)
+        # workaround for https://bugs.ruby-lang.org/issues/19175
+        return scope[name]
+      end
       receiver, method, args, kwargs, block = retrieve_method_call sexp
       receiver_type = simulate_evaluate receiver, scope, jumps, dig_targets if receiver
       args_type = args.map { simulate_evaluate _1, scope, jumps, dig_targets if _1 }
