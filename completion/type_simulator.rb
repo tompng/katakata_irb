@@ -233,13 +233,13 @@ module Completion::TypeSimulator
     to_r: Completion::Types::RATIONAL
   }
 
-  def self.simulate_evaluate(sexp, scope, jumps, dig_targets)
-    result = simulate_evaluate_inner(sexp, scope, jumps, dig_targets)
+  def self.simulate_evaluate(sexp, scope, jumps, dig_targets, case_target: nil)
+    result = simulate_evaluate_inner(sexp, scope, jumps, dig_targets, case_target:)
     dig_targets.resolve result if dig_targets.target?(sexp)
     result
   end
 
-  def self.simulate_evaluate_inner(sexp, scope, jumps, dig_targets)
+  def self.simulate_evaluate_inner(sexp, scope, jumps, dig_targets, case_target: nil)
     case sexp
     in [:program, statements]
       statements.map { simulate_evaluate _1, scope, jumps, dig_targets }.last
@@ -518,9 +518,24 @@ module Completion::TypeSimulator
         statements.each { simulate_evaluate _1, scope, jumps, dig_targets }
       end
       enum
-    in [:case]
-      # TODO
-      Completion::Types::NIL
+    in [:in | :when => mode, pattern, if_statements, else_statement]
+      # TODO: match then if_statements, conditional match then else_statement
+      match_pattern case_target, pattern, scope, jumps, dig_targets if mode == :in
+      if if_statements && else_statement
+        Completion::Types::UnionType[*scope.run_branches(
+          -> { if_statements.map { simulate_evaluate _1, scope, jumps, dig_targets }.last },
+          -> { simulate_evaluate(else_statement, scope, jumps, dig_targets, case_target:) }
+        )]
+      elsif if_statements
+        Completion::Types::UnionType[scope.conditional { if_statements.map { simulate_evaluate _1, scope, jumps, dig_targets }.last }, Completion::Types::NIL]
+      elsif else_statement
+        Completion::Types::UnionType[scope.conditional { simulate_evaluate(else_statement, scope, jumps, dig_targets, case_target:) }, Completion::Types::NIL]
+      else
+        Completion::Types::NIL
+      end
+    in [:case, target_exp, match_exp]
+      target = simulate_evaluate target_exp, scope, jumps, dig_targets
+      simulate_evaluate match_exp, scope, jumps, dig_targets, case_target: target
     in [:void_stmt]
       Completion::Types::NIL
     in [:dot2,]
@@ -532,6 +547,60 @@ module Completion::TypeSimulator
         STDERR.puts sexp.inspect
       }
       Completion::Types::NIL
+    end
+  end
+
+  def self.match_pattern(target, pattern, scope, jumps, dig_targets)
+  types = (target in Completion::Types::UnionType) ? target.types : [target]
+    case pattern
+    in [:var_field, [:@ident, name,]]
+      scope[name] = target
+    in [:var_ref,] # in Array, in ^a, in nil
+    in [:@int | :@float | :@rational | :@imaginary | :@symbol_literal | :@string_literal | :@regexp_literal | :@CHAR,]
+    in [:begin, statement] # in (statement)
+      simulate_evaluate statement, scope, jumps, dig_targets
+    in [:binary, lpattern, :'=>', [var_field, [:@ident, name,]]]
+      if lpattern in [:var_ref, [:@const, const_name,]]
+        const_value = simulate_evaluate lpattern, scope, jumps, dig_targets
+        if (const_value in Completion::Types::SingletonType) && const_value.module_or_class.is_a?(Class)
+          scope[name] = Completion::Types::InstanceType.new const_value.module_or_class
+        else
+          scope[name] = Completion::Types::OBJECT
+        end
+      else
+        match_pattern target, lpattern, scope, jumps, dig_targets
+        match_pattern target, rpattern, scope, jumps, dig_targets
+      end
+    in [:aryptn, _unknown, items, splat, post_items]
+      # TODO: deconstruct keys
+      array_types = types.select { (_1 in Completion::Types::InstanceType) && _1.klass == Array }
+      elem = Completion::Types::UnionType[*array_types.filter_map { _1.params[:Elem] }]
+      items&.each do |item|
+        match_pattern elem, item, scope, jumps, dig_targets
+      end
+      if splat in [:var_field, [:@ident, name,]]
+        scope[name] = Completion::Types::InstanceType.new Array, Elem: elem
+      end
+      post_items&.each do |item|
+        match_pattern elem, item, scope, jumps, dig_targets
+      end
+    in [:hshptn, _unknown, items, splat]
+      # TODO: deconstruct keys
+      hash_types = types.select { (_1 in Completion::Types::InstanceType) && _1.klass == Hash }
+      key_type = Completion::Types::UnionType[*hash_types.filter_map { _1.params[:K] }]
+      value_type = Completion::Types::UnionType[*hash_types.filter_map { _1.params[:V] }]
+      items&.each do |key_pattern, value_pattern|
+        if key_pattern in [:@label, label,]
+          name = label.delete ':'
+          scope[name] = value_type unless value_pattern
+        end
+        match_pattern value_type, value_pattern, scope, jumps, dig_targets if value_pattern
+      end
+      if splat in [:var_field, [:@ident, name,]]
+        scope[name] = Completion::Types::InstanceType.new Hash, K: key_type, V: value_type
+      end
+    else
+      puts "Unimplemented match pattern: #{pattern}"
     end
   end
 
