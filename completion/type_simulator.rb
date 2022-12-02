@@ -60,7 +60,7 @@ module Completion::TypeSimulator
   class BaseScope
     def initialize(binding, self_object)
       @binding, @self_object = binding, self_object
-      @cache = {}
+      @cache = { SELF => Completion::Types.type_from_object(self_object) }
       @local_variables = binding.local_variables.map(&:to_s).to_set
     end
 
@@ -233,6 +233,8 @@ module Completion::TypeSimulator
     to_r: Completion::Types::RATIONAL
   }
 
+  SELF = '%self'
+
   def self.simulate_evaluate(sexp, scope, jumps, dig_targets, case_target: nil)
     result = simulate_evaluate_inner(sexp, scope, jumps, dig_targets, case_target:)
     dig_targets.resolve result if dig_targets.target?(sexp)
@@ -243,10 +245,28 @@ module Completion::TypeSimulator
     case sexp
     in [:program, statements]
       statements.map { simulate_evaluate _1, scope, jumps, dig_targets }.last
-    in [:def, *receiver, method, params, body_stmt]
+    in [:def | :defs,]
+      sexp in [:def, method_name_exp, params, body_stmt]
+      sexp in [:defs, receiver_exp, dot_exp, method_name_exp, params, body_stmt]
+      if receiver_exp
+        receiver_exp in  [:paren, receiver_exp]
+        self_type = simulate_evaluate receiver_exp, scope, jumps, dig_targets
+      else
+        current_self_type = scope[SELF]
+        current_self_types = (current_self_type in Completion::Types::UnionType) ? current_self_type.types : [current_self_type]
+        self_types = current_self_types.map do |type|
+          if (type in Completion::Types::SingletonType) && type.module_or_class.is_a?(Class)
+            Completion::Types::InstanceType.new type.module_or_class
+          else
+            type
+          end
+        end
+        self_type = Completion::Types::UnionType[*self_types]
+      end
       if dig_targets.dig? sexp
         params in [:paren, params]
-        method_scope = Scope.new scope, extract_param_names(params).to_h { [_1, Completion::Types::NIL] }, trace_lvar: false
+        params_table = extract_param_names(params).to_h { [_1, Completion::Types::NIL] }
+        method_scope = Scope.new scope, { **params_table, SELF => self_type }, trace_lvar: false
         evaluate_assign_params params, [], method_scope
         method_scope.conditional { evaluate_param_defaults params, method_scope, jumps, dig_targets }
         simulate_evaluate body_stmt, method_scope, jumps, dig_targets
@@ -330,8 +350,7 @@ module Completion::TypeSimulator
     in [:var_ref, [:@kw, name,]]
       case name
       in 'self'
-        # TODO
-        Completion::Types::OBJECT
+        scope[SELF]
       in 'true'
         Completion::Types::TRUE
       in 'false'
@@ -504,13 +523,13 @@ module Completion::TypeSimulator
       Completion::Types::UnionType[a, b]
     in [:module, module_stmt, body_stmt]
       return Completion::Types::NIL unless dig_targets.dig?(body_stmt)
-      simulate_evaluate body_stmt, Scope.new(scope, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
+      simulate_evaluate body_stmt, Scope.new(scope, { SELF => Completion::Types::MODULE }, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
     in [:sclass, klass_stmt, body_stmt]
       return Completion::Types::NIL unless dig_targets.dig?(body_stmt)
-      simulate_evaluate body_stmt, Scope.new(scope, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
+      simulate_evaluate body_stmt, Scope.new(scope, { SELF => Completion::Types::CLASS }, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
     in [:class, klass_stmt, _superclass_stmt, body_stmt]
       return Completion::Types::NIL unless dig_targets.dig?(body_stmt)
-      simulate_evaluate body_stmt, Scope.new(scope, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
+      simulate_evaluate body_stmt, Scope.new(scope, { SELF => Completion::Types::CLASS }, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
     in [:for, fields, enum, statements]
       fields = [fields] if fields in [:var_field,]
       params = [:params, fields, nil, nil, nil, nil, nil, nil]

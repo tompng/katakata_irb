@@ -155,6 +155,8 @@ module Completion::Types
   COMPLEX = InstanceType.new Complex
   ARRAY = InstanceType.new Array
   HASH = InstanceType.new Hash
+  CLASS = InstanceType.new Class
+  MODULE = InstanceType.new Module
   PROC = ProcType.new
 
   class UnionType
