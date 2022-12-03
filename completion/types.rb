@@ -10,6 +10,17 @@ module Completion::Types
 
   Splat = Struct.new :item
 
+  def self.rbs_search_method(klass, method_name, singleton)
+    klass.ancestors.each do |ancestor|
+      next unless ancestor.name
+      type_name = RBS::TypeName(ancestor.name).absolute!
+      definition = (singleton ? rbs_builder.build_singleton(type_name) : rbs_builder.build_instance(type_name)) rescue nil
+      method = definition&.methods&.[](method_name)
+      return method if definition
+    end
+    nil
+  end
+
   def self.rbs_methods(type, method_name, args_types, kwargs_type, has_block)
     types = (type in UnionType) ? type.types : [type]
     receivers = types.map do |t|
@@ -24,9 +35,7 @@ module Completion::Types
     end
     has_splat = args_types.any? { _1 in Splat }
     methods_with_score = receivers.flat_map do |receiver_type, klass, singleton|
-      type_name = RBS::TypeName(klass.name).absolute!
-      definition = (singleton ? rbs_builder.build_singleton(type_name) : rbs_builder.build_instance(type_name)) rescue nil
-      method = definition&.methods&.[](method_name)
+      method = rbs_search_method klass, method_name, singleton
       next [] unless method
       method.method_types.map do |method_type|
         score = 0
