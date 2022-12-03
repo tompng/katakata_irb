@@ -14,12 +14,6 @@ require 'irb'
 require_relative 'ruby_lex_patch'
 require_relative 'completion/completor.rb'
 
-unless RubyLex.respond_to? :generate_local_variables_assign_code
-  def RubyLex.generate_local_variables_assign_code(*)
-    '_=nil;'
-  end
-end
-
 RubyLexPatch.patch_to_ruby_lex
 Completion::Completor.patch_to_completor
 IRB.conf[:USE_RELINE] = false if ARGV.include? '--nomultiline'

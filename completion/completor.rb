@@ -12,10 +12,7 @@ module Completion::Completor
       code = "#{preposing}#{target}"
       irb_context = IRB.conf[:MAIN_CONTEXT]
       binding = irb_context.workspace.binding
-      lvars_code = binding.local_variables.map do |name|
-        "#{name}=#{name};"
-      end.join
-      candidates = case analyze lvars_code + "\n" + code, binding
+      candidates = case analyze code, binding
       in [:require | :require_relative => method, name]
         if method == :require
           IRB::InputCompletor.retrieve_files_to_require_from_load_path
@@ -56,6 +53,10 @@ module Completion::Completor
   end
 
   def self.analyze(code, binding = Kernel.binding)
+    lvars_code = binding.local_variables.map do |name|
+      "#{name}="
+    end.join + "nil;\n"
+    code = lvars_code + code
     tokens = RubyLex.ripper_lex_without_warning code
     tokens = TRex.interpolate_ripper_ignored_tokens code, tokens
     last_opens, unclosed_heredocs = TRex.parse(tokens)
@@ -113,9 +114,13 @@ module Completion::Completor
       line_no += 1
       col = 0
     end
+
+    if sexp in [:program, [lvars_exp, *rest_statements]]
+      sexp = [:program, rest_statements]
+    end
+
     *parents, expression, target = find_target sexp, line_no, col
     in_class_module = parents&.any? { _1 in [:class | :module,] }
-    in_method_def = parents&.any? { _1 in [:def,] }
     icvar_available = !in_class_module
     return unless target in [type, String, [Integer, Integer]]
     if target in [:@ivar,]
