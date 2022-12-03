@@ -46,7 +46,7 @@ module TRex
             when :on_lparen, :on_ivar, :on_gvar, :on_cvar
               next_args << :dot
             when :on_kw
-              if t.tok == 'self'
+              if t.tok in 'self' | 'true' | 'false' | 'nil'
                 next_args.push :arg, :dot
               else
                 skip = true
