@@ -124,6 +124,7 @@ module Completion::Types
     end
     def transform() = yield(self)
     def methods() = @module_or_class.methods
+    def all_methods() = methods
     def constants() = @module_or_class.constants
   end
 
@@ -135,6 +136,7 @@ module Completion::Types
     end
     def transform() = yield(self)
     def methods() = @klass.instance_methods
+    def all_methods() = @klass.instance_methods | @klass.private_instance_methods
     def constants() = []
   end
 
@@ -147,6 +149,7 @@ module Completion::Types
     end
     def transform() = yield(self)
     def methods() = Proc.instance_methods
+    def all_methods() = Proc.instance_methods | Proc.private_instance_methods
     def constants() = []
   end
 
@@ -213,6 +216,7 @@ module Completion::Types
     end
 
     def methods() = @types.flat_map(&:methods).uniq
+    def all_methods() = @types.flat_map(&:all_methods).uniq
     def constants() = @types.flat_map(&:constants).uniq
   end
 

@@ -52,8 +52,8 @@ module Completion::TypeSimulator
 
     def dig?(node) = @dig_ids[node.__id__]
     def target?(node) = @target_id == node.__id__
-    def resolve(types)
-      @block.call types
+    def resolve(type, scope)
+      @block.call type, scope
     end
   end
 
@@ -82,6 +82,14 @@ module Completion::TypeSimulator
       )
     end
 
+    def self_type
+      self[SELF]
+    end
+
+    def local_variables
+      @local_variables.to_a
+    end
+
     def self.type_by_name(name)
       if name.start_with? '@@'
         :cvar
@@ -92,7 +100,7 @@ module Completion::TypeSimulator
       elsif name[0].downcase != name[0]
         :const
       else
-        :lvar
+        name == SELF ? :self : :lvar
       end
     end
 
@@ -106,6 +114,8 @@ module Completion::TypeSimulator
         @local_variables.include? name
       when :const
         @binding.eval("#{name};true") rescue false
+      when :self
+        true
       end
     end
   end
@@ -145,6 +155,17 @@ module Completion::TypeSimulator
       else
         @tables.last[name] = type
       end
+    end
+
+    def self_type
+      self[SELF]
+    end
+
+    def local_variables
+      lvar_keys = @tables.flat_map(&:keys).select do |name|
+        BaseScope.type_by_name(name) == :lvar
+      end
+      lvar_keys | @parent.local_variables
     end
 
     def start_branch
@@ -237,7 +258,7 @@ module Completion::TypeSimulator
 
   def self.simulate_evaluate(sexp, scope, jumps, dig_targets, case_target: nil)
     result = simulate_evaluate_inner(sexp, scope, jumps, dig_targets, case_target:)
-    dig_targets.resolve result if dig_targets.target?(sexp)
+    dig_targets.resolve result, scope if dig_targets.target?(sexp)
     result
   end
 
@@ -252,7 +273,7 @@ module Completion::TypeSimulator
         receiver_exp in  [:paren, receiver_exp]
         self_type = simulate_evaluate receiver_exp, scope, jumps, dig_targets
       else
-        current_self_type = scope[SELF]
+        current_self_type = scope.self_type
         current_self_types = (current_self_type in Completion::Types::UnionType) ? current_self_type.types : [current_self_type]
         self_types = current_self_types.map do |type|
           if (type in Completion::Types::SingletonType) && type.module_or_class.is_a?(Class)
@@ -350,7 +371,7 @@ module Completion::TypeSimulator
     in [:var_ref, [:@kw, name,]]
       case name
       in 'self'
-        scope[SELF]
+        scope.self_type
       in 'true'
         Completion::Types::TRUE
       in 'false'
@@ -371,7 +392,7 @@ module Completion::TypeSimulator
         return scope[name]
       end
       receiver, method, args, kwargs, block = retrieve_method_call sexp
-      receiver_type = receiver ? simulate_evaluate(receiver, scope, jumps, dig_targets) : scope[SELF]
+      receiver_type = receiver ? simulate_evaluate(receiver, scope, jumps, dig_targets) : scope.self_type
       args_type = args.map { simulate_evaluate _1, scope, jumps, dig_targets if _1 }
       if block
         if block in [:symbol_literal, [:symbol, [:@ident, block_name,]]]
@@ -920,10 +941,20 @@ module Completion::TypeSimulator
     end
   end
 
+  def self.calculate_binding_scope(binding, parents, target)
+    jumps = JumpPoints.new
+    dig_targets = DigTarget.new(parents, target) do |_types, scope|
+      return scope
+    end
+    scope = Scope.from_binding(binding)
+    simulate_evaluate parents[0], scope, jumps, dig_targets
+    scope
+  end
+
   def self.calculate_receiver(binding, parents, receiver)
     jumps = JumpPoints.new
-    dig_targets = DigTarget.new(parents, receiver) do |types|
-      return types
+    dig_targets = DigTarget.new(parents, receiver) do |type, _scope|
+      return type
     end
     simulate_evaluate parents[0], Scope.from_binding(binding), jumps, dig_targets
     Completion::Types::NIL
