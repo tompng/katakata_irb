@@ -105,7 +105,13 @@ module Completion::Completor
     closings = $/ + closings.reverse.join($/)
     sexp = Ripper.sexp code + suffix + closings
     lines = code.lines
-    *parents, expression, target = find_target sexp, lines.size, lines.last.bytesize
+    line_no = lines.size
+    col = lines.last.bytesize
+    if lines.last.end_with? "\n"
+      line_no += 1
+      col = 0
+    end
+    *parents, expression, target = find_target sexp, line_no, col
     in_class_module = parents&.any? { _1 in [:class | :module,] }
     in_method_def = parents&.any? { _1 in [:def,] }
     icvar_available = !in_class_module
