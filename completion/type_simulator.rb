@@ -371,13 +371,13 @@ module Completion::TypeSimulator
         return scope[name]
       end
       receiver, method, args, kwargs, block = retrieve_method_call sexp
-      receiver_type = simulate_evaluate receiver, scope, jumps, dig_targets if receiver
+      receiver_type = receiver ? simulate_evaluate(receiver, scope, jumps, dig_targets) : scope[SELF]
       args_type = args.map { simulate_evaluate _1, scope, jumps, dig_targets if _1 }
       if block
         if block in [:symbol_literal, [:symbol, [:@ident, block_name,]]]
           call_block_proc = ->(args) do
             block_receiver, *rest = args
-            block_receiver ? simulate_call(block_receiver, block_name, rest, nil, nil) : Completion::Types::OBJECT
+            block_receiver ? simulate_call(block_receiver || Completion::Types::OBJECT, block_name, rest, nil, nil) : Completion::Types::OBJECT
           end
         elsif block in [:do_block | :brace_block => type, block_var, body]
           block_var in [:block_var, params,]
@@ -522,13 +522,10 @@ module Completion::TypeSimulator
       b = scope.conditional { simulate_evaluate statement2, scope, jumps, dig_targets }
       Completion::Types::UnionType[a, b]
     in [:module, module_stmt, body_stmt]
-      return Completion::Types::NIL unless dig_targets.dig?(body_stmt)
       simulate_evaluate body_stmt, Scope.new(scope, { SELF => Completion::Types::MODULE }, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
     in [:sclass, klass_stmt, body_stmt]
-      return Completion::Types::NIL unless dig_targets.dig?(body_stmt)
       simulate_evaluate body_stmt, Scope.new(scope, { SELF => Completion::Types::CLASS }, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
     in [:class, klass_stmt, _superclass_stmt, body_stmt]
-      return Completion::Types::NIL unless dig_targets.dig?(body_stmt)
       simulate_evaluate body_stmt, Scope.new(scope, { SELF => Completion::Types::CLASS }, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
     in [:for, fields, enum, statements]
       fields = [fields] if fields in [:var_field,]
@@ -800,7 +797,6 @@ module Completion::TypeSimulator
   end
 
   def self.simulate_call(receiver, method_name, args, kwargs, block)
-    receiver ||= Completion::Types::SingletonType.new(Kernel) # TODO: self
     methods = Completion::Types.rbs_methods receiver, method_name.to_sym, args, kwargs, !!block
     block_called = false
     type_breaks = methods.map do |method, given_params, method_params|
@@ -864,7 +860,7 @@ module Completion::TypeSimulator
     params => [:params, pre_required, optional, rest, post_required, keywords, keyrest, block]
     size = (pre_required&.size || 0) + (optional&.size || 0) + (post_required&.size || 0) + (rest ? 1 : 0)
     if values.size == 1 && size >= 2
-      to_ary_result = simulate_call values.first, :to_ary, [], nil, nil
+      to_ary_result = simulate_call values.first || Completion::Types::OBJECT, :to_ary, [], nil, nil
       if (to_ary_result in Completion::Types::InstanceType) && to_ary_result.klass == Array
         values = [to_ary_result.params[:Elem] || Completion::Types::OBJECT] * size
       end
