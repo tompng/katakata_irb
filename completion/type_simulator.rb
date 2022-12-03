@@ -304,9 +304,23 @@ class Completion::TypeSimulator
       Completion::Types::RATIONAL
     in [:@imaginary,]
       Completion::Types::COMPLEX
-    in [:symbol_literal | :dyna_symbol,]
+    in [:@tstring_content,]
+      Completion::Types::STRING
+    in [:symbol_literal,]
       Completion::Types::SYMBOL
-    in [:string_literal | :@CHAR, ]
+    in [:dyna_symbol, [:string_content, *statements]]
+      statements.each { simulate_evaluate _1, scope }
+      Completion::Types::SYMBOL
+    in [:@CHAR, ]
+      Completion::Types::STRING
+    in [:string_literal, [:string_content, *statements]]
+      statements.each { simulate_evaluate _1, scope }
+      Completion::Types::STRING
+    in [:xstring_literal, statements]
+      statements.each { simulate_evaluate _1, scope }
+      Completion::Types::STRING
+    in [:string_embexpr, statements]
+      statements.each { simulate_evaluate _1, scope }
       Completion::Types::STRING
     in [:regexp_literal,]
       Completion::Types::REGEXP
@@ -367,7 +381,7 @@ class Completion::TypeSimulator
       statements.map { simulate_evaluate _1, scope }.last
     in [:const_path_ref, receiver, [:@const, name,]]
       r = simulate_evaluate receiver, scope
-      (r in Completion::Types::SingletonType) ? type_of { r.module_or_class.const_get name } : Completion::Types::NIL
+      (r in Completion::Types::SingletonType) ? self.class.type_of { r.module_or_class.const_get name } : Completion::Types::NIL
     in [:__var_ref_or_call, [type, name, pos]]
       sexp = scope.has?(name) ? [:var_ref, [type, name, pos]] : [:vcall, [:@ident, name, pos]]
       simulate_evaluate sexp, scope
@@ -462,7 +476,7 @@ class Completion::TypeSimulator
         end
       end
       Completion::Types::ProcType.new
-    in [:assign, [:var_field, [:@gvar | :@ivar | :@cvar | :@ident, name,]], value]
+    in [:assign, [:var_field, [:@gvar | :@ivar | :@cvar | :@ident | :@const, name,]], value]
       res = simulate_evaluate value, scope
       scope[name] = res
       res
