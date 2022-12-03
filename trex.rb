@@ -45,7 +45,14 @@ module TRex
             case t.event
             when :on_lparen, :on_ivar, :on_gvar, :on_cvar
               next_args << :dot
-            when :on_op, :on_kw
+            when :on_kw
+              if t.tok == 'self'
+                next_args.push :arg, :dot
+              else
+                skip = true
+                next_args << :arg
+              end
+            when :on_op
               skip = true
               next_args << :arg
             when :on_ident, :on_const
