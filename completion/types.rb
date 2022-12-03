@@ -78,7 +78,7 @@ module Completion::Types
       (aa & bb).any?
     end
     return true if atypes[ProcType] && btypes[ProcType]
-    return true if intersect.call(SingletonType, &:class_or_module)
+    return true if intersect.call(SingletonType, &:module_or_class)
     intersect.call(InstanceType, &:klass)
   end
 
