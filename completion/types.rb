@@ -126,6 +126,7 @@ module Completion::Types
     def methods() = @module_or_class.methods
     def all_methods() = methods
     def constants() = @module_or_class.constants
+    def types() = [self]
   end
 
   class InstanceType
@@ -138,6 +139,7 @@ module Completion::Types
     def methods() = @klass.instance_methods
     def all_methods() = @klass.instance_methods | @klass.private_instance_methods
     def constants() = []
+    def types() = [self]
   end
 
   class ProcType
@@ -151,6 +153,7 @@ module Completion::Types
     def methods() = Proc.instance_methods
     def all_methods() = Proc.instance_methods | Proc.private_instance_methods
     def constants() = []
+    def types() = [self]
   end
 
   NIL = InstanceType.new NilClass

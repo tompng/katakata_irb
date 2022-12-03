@@ -273,8 +273,7 @@ module Completion::TypeSimulator
         receiver_exp in  [:paren, receiver_exp]
         self_type = simulate_evaluate receiver_exp, scope, jumps, dig_targets
       else
-        current_self_type = scope.self_type
-        current_self_types = (current_self_type in Completion::Types::UnionType) ? current_self_type.types : [current_self_type]
+        current_self_types = scope.self_type.types
         self_types = current_self_types.map do |type|
           if (type in Completion::Types::SingletonType) && type.module_or_class.is_a?(Class)
             Completion::Types::InstanceType.new type.module_or_class
@@ -380,6 +379,8 @@ module Completion::TypeSimulator
         Completion::Types::NIL
       end
     in [:var_ref, [:@const | :@ivar | :@cvar | :@gvar | :@ident, name,]]
+      scope[name] || Completion::Types::NIL
+    in [:const_ref, [:@const, name,]]
       scope[name] || Completion::Types::NIL
     in [:aref, receiver, args]
       receiver_type = simulate_evaluate receiver, scope, jumps, dig_targets if receiver
@@ -543,11 +544,23 @@ module Completion::TypeSimulator
       b = scope.conditional { simulate_evaluate statement2, scope, jumps, dig_targets }
       Completion::Types::UnionType[a, b]
     in [:module, module_stmt, body_stmt]
-      simulate_evaluate body_stmt, Scope.new(scope, { SELF => Completion::Types::MODULE }, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
+      module_types = simulate_evaluate(module_stmt, scope, jumps, dig_targets).types.grep(Completion::Types::SingletonType)
+      module_types << Completion::Types::MODULE if module_types.empty?
+      simulate_evaluate body_stmt, Scope.new(scope, { SELF => Completion::Types::UnionType[*module_types] }, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
     in [:sclass, klass_stmt, body_stmt]
-      simulate_evaluate body_stmt, Scope.new(scope, { SELF => Completion::Types::CLASS }, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
-    in [:class, klass_stmt, _superclass_stmt, body_stmt]
-      simulate_evaluate body_stmt, Scope.new(scope, { SELF => Completion::Types::CLASS }, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
+      klass_types = simulate_evaluate(klass_stmt, scope, jumps, dig_targets).types.filter_map do |type|
+        Completion::Types::SingletonType.new type.klass if type in Completion::Types::InstanceType
+      end
+      klass_types = [Completion::Types::CLASS] if klass_types.empty?
+      simulate_evaluate body_stmt, Scope.new(scope, { SELF => Completion::Types::UnionType[*klass_types] }, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
+    in [:class, klass_stmt, superclass_stmt, body_stmt]
+      klass_types = simulate_evaluate(klass_stmt, scope, jumps, dig_targets).types
+      klass_types += simulate_evaluate(superclass_stmt, scope, jumps, dig_targets).types if superclass_stmt
+      klass_types = klass_types.select do |type|
+        (type in Completion::Types::SingletonType) && type.module_or_class.is_a?(Class)
+      end
+      klass_types << Completion::Types::CLASS if klass_types.empty?
+      simulate_evaluate body_stmt, Scope.new(scope, { SELF => Completion::Types::UnionType[*klass_types] }, trace_cvar: false, trace_ivar: false, trace_lvar: false), jumps, dig_targets
     in [:for, fields, enum, statements]
       fields = [fields] if fields in [:var_field,]
       params = [:params, fields, nil, nil, nil, nil, nil, nil]
@@ -592,7 +605,7 @@ module Completion::TypeSimulator
   end
 
   def self.match_pattern(target, pattern, scope, jumps, dig_targets)
-  types = (target in Completion::Types::UnionType) ? target.types : [target]
+    types = target.types
     case pattern
     in [:var_field, [:@ident, name,]]
       scope[name] = target
