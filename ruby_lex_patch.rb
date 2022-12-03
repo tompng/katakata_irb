@@ -156,11 +156,8 @@ module RubyLexPatch
 
   def readmultiline(context)
     if @io.respond_to? :check_termination
-      loop do
-        store_prompt_to_irb [], false, 0
-        input = @input.call
-        return input if input
-      end
+      store_prompt_to_irb [], false, 0
+      @input.call
     else
       # nomultiline
       line = ''
@@ -184,6 +181,7 @@ module RubyLexPatch
     loop do
       begin
         line = readmultiline(context)
+        break unless line
         if line != "\n"
           line.force_encoding(@io.encoding)
           yield line, @line_no
