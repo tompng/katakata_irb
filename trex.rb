@@ -100,8 +100,9 @@ module TRex
             opens << [last_tok, :in_method_head, next_args]
           end
         end
-      when :in_for_while_condition
+      when :in_for_while_until_condition
         if t.event == :on_semicolon || t.event == :on_nl || (t.event == :on_kw && t.tok == 'do')
+          skip = true if t.event == :on_kw && t.tok == 'do'
           opens.pop
           opens << [last_tok, nil]
         end
@@ -123,7 +124,7 @@ module TRex
             end
           when 'while', 'until'
             unless t.state.allbits?(Ripper::EXPR_LABEL)
-              opens << [t, :in_while_until_condition]
+              opens << [t, :in_for_while_until_condition]
             end
           when 'ensure', 'rescue'
             unless t.state.allbits?(Ripper::EXPR_LABEL)
@@ -134,7 +135,7 @@ module TRex
             opens.pop
             opens << [t, nil]
           when 'for'
-            opens << [t, :in_for_while_condition]
+            opens << [t, :in_for_while_until_condition]
           when 'in'
             if last_tok&.event == :on_kw && %w[case in].include?(last_tok.tok) && first_token_on_line
               opens.pop
