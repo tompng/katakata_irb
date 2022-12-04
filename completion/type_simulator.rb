@@ -245,6 +245,7 @@ class Completion::TypeSimulator
     to_s: Completion::Types::STRING,
     to_str: Completion::Types::STRING,
     to_a: Completion::Types::ARRAY,
+    to_ary: Completion::Types::ARRAY,
     to_h: Completion::Types::HASH,
     to_hash: Completion::Types::HASH,
     to_i: Completion::Types::INTEGER,
@@ -330,7 +331,7 @@ class Completion::TypeSimulator
         if elem in Completion::Types::Splat
           splat = simulate_evaluate elem.item, scope
           unless (splat in Completion::Types::InstanceType) && splat.klass == Array
-            to_a_result = simulate_call splat, :to_a, [], nil, nil
+            to_a_result = simulate_call splat, :to_a, [], nil, nil, name_match: false
             splat = to_a_result if (to_a_result in Completion::Types::InstanceType) && splat.klass == Array
           end
           if (splat in Completion::Types::InstanceType) && splat.klass == Array
@@ -708,7 +709,7 @@ class Completion::TypeSimulator
 
   def evaluate_massign(sexp, values, scope)
     unless values in Array
-      to_ary_result = simulate_call values, :to_ary, [], nil, nil
+      to_ary_result = simulate_call values, :to_ary, [], nil, nil, name_match: false
       values = to_ary_result if (to_ary_result in Completion::Types::InstanceType) && to_ary_result.klass == Array
       if (values in Completion::Types::InstanceType) && values.klass == Array
         values = [values.params[:Elem] || Completion::Types::OBJECT] * sexp.size
@@ -848,7 +849,7 @@ class Completion::TypeSimulator
     end
   end
 
-  def simulate_call(receiver, method_name, args, kwargs, block)
+  def simulate_call(receiver, method_name, args, kwargs, block, name_match: true)
     methods = Completion::Types.rbs_methods receiver, method_name.to_sym, args, kwargs, !!block
     block_called = false
     type_breaks = methods.map do |method, given_params, method_params|
@@ -868,7 +869,7 @@ class Completion::TypeSimulator
     block&.call [] unless block_called
     types = type_breaks.map(&:first)
     breaks = type_breaks.map(&:last).compact
-    types << OBJECT_METHODS[method_name.to_sym] if OBJECT_METHODS.has_key? method_name.to_sym
+    types << OBJECT_METHODS[method_name.to_sym] if name_match && OBJECT_METHODS.has_key?(method_name.to_sym)
     Completion::Types::UnionType[*types, *breaks]
   end
 
