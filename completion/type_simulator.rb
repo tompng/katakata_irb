@@ -592,17 +592,31 @@ class Completion::TypeSimulator
       end
       enum
     in [:in | :when => mode, pattern, if_statements, else_statement]
-      # TODO: match then if_statements, conditional match then else_statement
-      match_pattern case_target, pattern, scope if mode == :in
+      if mode == :in
+        if_match = -> { match_pattern case_target, pattern, scope }
+        else_match = -> { scope.conditional { if_match.call } }
+      else
+        eval_pattern = lambda do |pattern, *rest|
+          simulate_evaluate pattern, scope
+          scope.conditional { eval_pattern.call(*rest) } if rest.any?
+        end
+        if_match = -> { eval_pattern.call(*pattern) }
+        else_match = -> { pattern.each { simulate_evaluate _1, scope } }
+      end
+      if_branch = lambda do
+        if_match.call
+        if_statements.map { simulate_evaluate _1, scope }.last
+      end
+      else_branch = lambda do
+        else_match.call
+        simulate_evaluate(else_statement, scope, case_target:)
+      end
       if if_statements && else_statement
-        Completion::Types::UnionType[*scope.run_branches(
-          -> { if_statements.map { simulate_evaluate _1, scope }.last },
-          -> { simulate_evaluate(else_statement, scope, case_target:) }
-        )]
+        Completion::Types::UnionType[*scope.run_branches(if_branch, else_branch)]
       elsif if_statements
-        Completion::Types::UnionType[scope.conditional { if_statements.map { simulate_evaluate _1, scope }.last }, Completion::Types::NIL]
+        Completion::Types::UnionType[scope.conditional { if_branch.call }, Completion::Types::NIL]
       elsif else_statement
-        Completion::Types::UnionType[scope.conditional { simulate_evaluate(else_statement, scope, case_target:) }, Completion::Types::NIL]
+        Completion::Types::UnionType[scope.conditional { else_branch.call }, Completion::Types::NIL]
       else
         Completion::Types::NIL
       end
