@@ -324,6 +324,7 @@ class Completion::TypeSimulator
       statements.each { simulate_evaluate _1, scope }
       Completion::Types::STRING
     in [:regexp_literal,]
+      statements.each { simulate_evaluate _1, scope }
       Completion::Types::REGEXP
     in [:array, [:args_add_star,] => star]
       args, kwargs = retrieve_method_args star
@@ -404,7 +405,14 @@ class Completion::TypeSimulator
     in [:aref, receiver, args]
       receiver_type = simulate_evaluate receiver, scope if receiver
       args, kwargs, _block = retrieve_method_args args
-      args_type = args.map { simulate_evaluate _1, scope if _1 }
+      args_type = args.map do |arg|
+        if arg in Completion::Types::Splat
+          simulate_evaluate arg.item, scope
+          nil # TODO: splat
+        else
+          simulate_evaluate arg, scope
+        end
+      end
       simulate_call receiver_type, :[], args_type, kwargs_type(kwargs, scope), nil
     in [:call | :vcall | :command | :command_call | :method_add_arg | :method_add_block,]
       if (sexp in [:vcall, [:@ident, name,]]) && scope.has?(name)
@@ -413,7 +421,15 @@ class Completion::TypeSimulator
       end
       receiver, method, args, kwargs, block = retrieve_method_call sexp
       receiver_type = receiver ? simulate_evaluate(receiver, scope) : scope.self_type
-      args_type = args.map { simulate_evaluate _1, scope if _1 }
+      args_type = args.map do |arg|
+        if arg in Completion::Types::Splat
+          simulate_evaluate arg.item, scope
+          nil # TODO: splat
+        else
+          simulate_evaluate arg, scope
+        end
+      end
+
       if block
         if block in [:symbol_literal, [:symbol, [:@ident, block_name,]]]
           call_block_proc = ->(args) do
@@ -481,6 +497,22 @@ class Completion::TypeSimulator
       res = simulate_evaluate value, scope
       scope[name] = res
       res
+    in [:assign, [:aref_field, receiver, key], value]
+      simulate_evaluate receiver, scope
+      args, kwargs, _block = retrieve_method_args key
+      args.each do |arg|
+        item = ((arg in Completion::Types::Splat) ? arg.item : arg)
+        simulate_evaluate item, scope
+      end
+      kwargs_type kwargs, scope
+      simulate_evaluate value, scope
+    in [:assign, [:field, receiver, period, [:@ident,]], value]
+      simulate_evaluate receiver, scope
+      if period in [:@op, '&.',]
+        scope.conditional { simulate_evaluate value, scope }
+      else
+        simulate_evaluate value, scope
+      end
     in [:opassign, target, [:@op, op,], value]
       op = op.to_s.delete('=').to_sym
       receiver = (target in [:var_field, *field]) ? [:var_ref, *field] : target
@@ -789,6 +821,7 @@ class Completion::TypeSimulator
   end
 
   def retrieve_method_call(sexp)
+    # TODO: &. conditional
     case sexp
     in [:fcall | :vcall, [:@ident | :@const | :@kw | :@op, method,]] # hoge
       [nil, method, [], [], false, nil]
@@ -828,8 +861,8 @@ class Completion::TypeSimulator
     in [:mrhs_new_from_args, args]
       [args, [], nil]
     in [:args_add_block, [:args_add_star,] => args, block_arg]
-      args, = retrieve_method_args args
-      [args, [], block_arg]
+      args, kwargs, = retrieve_method_args args
+      [args, kwargs, block_arg]
     in [:args_add_block, [*args, [:bare_assoc_hash,] => kw], block_arg]
       _, kwargs = retrieve_method_args kw
       [args, kwargs, block_arg]
@@ -867,7 +900,7 @@ class Completion::TypeSimulator
     methods = Completion::Types.rbs_methods receiver, method_name.to_sym, args, kwargs, !!block
     block_called = false
     type_breaks = methods.map do |method, given_params, method_params|
-      receiver_vars = receiver.respond_to?(:params) ? receiver.params : {}
+      receiver_vars = (receiver in Completion::Types::InstanceType) ? receiver.params : {}
       free_vars = method.type.free_variables - receiver_vars.keys.to_set
       vars = receiver_vars.merge Completion::Types.match_free_variables(free_vars, method_params, given_params)
       if block && method.block
