@@ -165,7 +165,8 @@ class Completion::TypeSimulator
       lvar_keys = @tables.flat_map(&:keys).select do |name|
         BaseScope.type_by_name(name) == :lvar
       end
-      lvar_keys | @parent.local_variables
+      lvar_keys |= @parent.local_variables if @trace_lvar
+      lvar_keys
     end
 
     def start_branch
