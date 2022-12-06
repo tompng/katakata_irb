@@ -571,6 +571,11 @@ class Completion::TypeSimulator
       Completion::Types::NIL
     in [:return0]
       @jumps.return Completion::Types::NIL
+    in [:yield, args]
+      evaluate_mrhs args, scope
+      Completion::Types::OBJECT
+    in [:yield0]
+      Completion::Types::OBJECT
     in [:begin, body_stmt]
       simulate_evaluate body_stmt, scope
     in [:bodystmt, statements, rescue_stmt, _unknown, ensure_stmt]
@@ -682,7 +687,7 @@ class Completion::TypeSimulator
     in [:var_field, [:@ident, name,]]
       scope[name] = target
     in [:var_ref,] # in Array, in ^a, in nil
-    in [:@int | :@float | :@rational | :@imaginary | :@symbol_literal | :@string_literal | :@regexp_literal | :@CHAR,]
+    in [:@int | :@float | :@rational | :@imaginary | :@CHAR | :symbol_literal | :string_literal | :regexp_literal,]
     in [:begin, statement] # in (statement)
       simulate_evaluate statement, scope
     in [:binary, lpattern, :'=>', [var_field, [:@ident, name,]]]
