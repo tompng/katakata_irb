@@ -501,14 +501,12 @@ class Completion::TypeSimulator
     in [:lambda, params, statements]
       params in [:paren, params] # ->{}, -> do end
       statements in [:bodystmt, statements, _unknown, _unknown, _unknown] # -> do end
-      if @dig_targets.dig? statements
-        @jumps.with :break, :next, :return do
-          params in [:paren, params]
-          block_scope = Scope.new scope, extract_param_names(params).to_h { [_1, Completion::Types::NIL] }
-          evaluate_assign_params params, [], block_scope
-          block_scope.conditional { evaluate_param_defaults params, block_scope }
-          statements.each { simulate_evaluate _1, block_scope }
-        end
+      @jumps.with :break, :next, :return do
+        params in [:paren, params]
+        block_scope = Scope.new scope, extract_param_names(params).to_h { [_1, Completion::Types::NIL] }
+        evaluate_assign_params params, [], block_scope
+        block_scope.conditional { evaluate_param_defaults params, block_scope }
+        statements.each { simulate_evaluate _1, block_scope }
       end
       Completion::Types::ProcType.new
     in [:assign, [:var_field, [:@gvar | :@ivar | :@cvar | :@ident | :@const, name,]], value]
@@ -585,7 +583,7 @@ class Completion::TypeSimulator
       else
         values, kw = evaluate_mrhs value, scope
         values << kw if kw
-        @jumps.send jump_type, Completion::Types::InstanceType.new(Array, Elem: Completion::Types::UnionType[*values])
+        @jumps.send jump_type, values.size == 1 ? values.first : Completion::Types::InstanceType.new(Array, Elem: Completion::Types::UnionType[*values])
       end
       Completion::Types::NIL
     in [:return0]
@@ -704,7 +702,6 @@ class Completion::TypeSimulator
       Completion::Types::RANGE
     in [:top_const_ref, [:@const, name,]]
       self.class.type_of { Object.const_get name }
-
     else
       STDERR.cooked{
         STDERR.puts
