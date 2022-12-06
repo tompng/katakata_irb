@@ -45,7 +45,7 @@ class Completion::TypeSimulator
 
   class DigTarget
     def initialize(parents, receiver, &block)
-      @dig_ids = parents.to_h { [_1.__id__, true ] }
+      @dig_ids = parents.to_h { [_1.__id__, true] }
       @target_id = receiver.__id__
       @block = block
     end
@@ -419,53 +419,60 @@ class Completion::TypeSimulator
         # workaround for https://bugs.ruby-lang.org/issues/19175
         return scope[name]
       end
-      receiver, method, args, kwargs, block = retrieve_method_call sexp
+      receiver, method, args, kwargs, block, conditional = retrieve_method_call sexp
       receiver_type = receiver ? simulate_evaluate(receiver, scope) : scope.self_type
-      args_type = args.map do |arg|
-        if arg in Completion::Types::Splat
-          simulate_evaluate arg.item, scope
-          nil # TODO: splat
-        else
-          simulate_evaluate arg, scope
-        end
-      end
-
-      if block
-        if block in [:symbol_literal, [:symbol, [:@ident, block_name,]]]
-          call_block_proc = ->(args) do
-            block_receiver, *rest = args
-            block_receiver ? simulate_call(block_receiver || Completion::Types::OBJECT, block_name, rest, nil, nil) : Completion::Types::OBJECT
+      evaluate_method = lambda do
+        args_type = args.map do |arg|
+          if arg in Completion::Types::Splat
+            simulate_evaluate arg.item, scope
+            nil # TODO: splat
+          else
+            simulate_evaluate arg, scope
           end
-        elsif block in [:do_block | :brace_block => type, block_var, body]
-          block_var in [:block_var, params,]
-          call_block_proc = ->(args) do
-            result, breaks, nexts =  scope.conditional do
-              @jumps.with :break, :next do
-                if params
-                  names = extract_param_names(params)
-                else
-                  names = (1..max_numbered_params(body)).map { "_#{_1}" }
-                  params = [:params, names.map { [:@ident, _1, [0, 0]] }, nil, nil, nil, nil, nil, nil]
-                end
-                block_scope = Scope.new scope, names.zip(args).to_h { [_1, _2 || Completion::Types::NIL] }
-                evaluate_assign_params params, args, block_scope
-                block_scope.conditional { evaluate_param_defaults params, block_scope } if params
-                if type == :do_block
-                  simulate_evaluate body, block_scope
-                else
-                  body.map {
-                    simulate_evaluate _1, block_scope
-                  }.last
+        end
+
+        if block
+          if block in [:symbol_literal, [:symbol, [:@ident, block_name,]]]
+            call_block_proc = ->(args) do
+              block_receiver, *rest = args
+              block_receiver ? simulate_call(block_receiver || Completion::Types::OBJECT, block_name, rest, nil, nil) : Completion::Types::OBJECT
+            end
+          elsif block in [:do_block | :brace_block => type, block_var, body]
+            block_var in [:block_var, params,]
+            call_block_proc = ->(args) do
+              result, breaks, nexts =  scope.conditional do
+                @jumps.with :break, :next do
+                  if params
+                    names = extract_param_names(params)
+                  else
+                    names = (1..max_numbered_params(body)).map { "_#{_1}" }
+                    params = [:params, names.map { [:@ident, _1, [0, 0]] }, nil, nil, nil, nil, nil, nil]
+                  end
+                  block_scope = Scope.new scope, names.zip(args).to_h { [_1, _2 || Completion::Types::NIL] }
+                  evaluate_assign_params params, args, block_scope
+                  block_scope.conditional { evaluate_param_defaults params, block_scope } if params
+                  if type == :do_block
+                    simulate_evaluate body, block_scope
+                  else
+                    body.map {
+                      simulate_evaluate _1, block_scope
+                    }.last
+                  end
                 end
               end
+              [Completion::Types::UnionType[result, nexts], breaks]
             end
-            [Completion::Types::UnionType[result, nexts], breaks]
+          else
+            _block_arg = simulate_evaluate block, block_scope
           end
-        else
-          _block_arg = simulate_evaluate block, block_scope
         end
+        simulate_call receiver_type, method, args_type, kwargs_type(kwargs, scope), call_block_proc
       end
-      simulate_call receiver_type, method, args_type, kwargs_type(kwargs, scope), call_block_proc
+      if conditional
+        scope.conditional { evaluate_method.call }
+      else
+        evaluate_method.call
+      end
     in [:binary, a, Symbol => op, b]
       atype = simulate_evaluate a, scope
       case op
@@ -821,27 +828,28 @@ class Completion::TypeSimulator
   end
 
   def retrieve_method_call(sexp)
-    # TODO: &. conditional
+    conditional = -> { _1 in [:@op, '&.',] }
     case sexp
     in [:fcall | :vcall, [:@ident | :@const | :@kw | :@op, method,]] # hoge
-      [nil, method, [], [], false, nil]
-    in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::', :call] # a.()
-      [receiver, :call, [], [], false, nil]
-    in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::', [:@ident | :@const | :@kw | :@op, method,]] # a.hoge
-      [receiver, method, [], [], false, nil]
+      [nil, method, [], [], nil, false]
+    in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::' => dot, :call]
+      [receiver, :call, [], [], nil, conditional[dot]]
+    in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::' => dot, method]
+      method => [:@ident | :@const | :@kw | :@op, method,] unless method == :call
+      [receiver, method, [], [], nil, conditional[dot]]
     in [:command, [:@ident | :@const | :@kw | :@op, method,], args] # hoge 1, 2
       args, kwargs, block = retrieve_method_args args
-      [nil, method, args, kwargs, block]
-    in [:command_call, receiver, [:@period,] | [:@op, '&.',] | :'::', [:@ident | :@const | :@kw | :@op, method,], args] # a.hoge 1; a.hoge 1, 2;
+      [nil, method, args, kwargs, block, false]
+    in [:command_call, receiver, [:@period,] | [:@op, '&.',] | :'::' => dot, [:@ident | :@const | :@kw | :@op, method,], args] # a.hoge 1; a.hoge 1, 2;
       args, kwargs, block = retrieve_method_args args
-      [receiver, method, args, kwargs, block]
+      [receiver, method, args, kwargs, block, conditional[dot]]
     in [:method_add_arg, call, args]
-      receiver, method = retrieve_method_call call
+      receiver, method, _arg, _kwarg, _block, cond = retrieve_method_call call
       args, kwargs, block = retrieve_method_args args
-      [receiver, method, args, kwargs, block]
+      [receiver, method, args, kwargs, block, cond]
     in [:method_add_block, call, block]
-      receiver, method, args, kwargs = retrieve_method_call call
-      [receiver, method, args, kwargs, block]
+      receiver, method, args, kwargs, cond = retrieve_method_call call
+      [receiver, method, args, kwargs, block, cond]
     end
   end
 
