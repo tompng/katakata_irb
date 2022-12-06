@@ -333,7 +333,7 @@ class Completion::TypeSimulator
           splat = simulate_evaluate elem.item, scope
           unless (splat in Completion::Types::InstanceType) && splat.klass == Array
             to_a_result = simulate_call splat, :to_a, [], nil, nil, name_match: false
-            splat = to_a_result if (to_a_result in Completion::Types::InstanceType) && splat.klass == Array
+            splat = to_a_result if (to_a_result in Completion::Types::InstanceType) && to_a_result.klass == Array
           end
           if (splat in Completion::Types::InstanceType) && splat.klass == Array
             splat.params[:Elem] || []
@@ -522,7 +522,15 @@ class Completion::TypeSimulator
       end
     in [:opassign, target, [:@op, op,], value]
       op = op.to_s.delete('=').to_sym
-      receiver = (target in [:var_field, *field]) ? [:var_ref, *field] : target
+      if target in [:var_field, *field]
+        receiver = [:var_ref, *field]
+      elsif target in [:field, *field]
+        receiver = [:call, *field]
+      elsif target in [:aref_field, *field]
+        receiver = [:aref, *field]
+      else
+        receiver = target
+      end
       simulate_evaluate [:assign, target, [:binary, receiver, op, value]], scope
     in [:assign, target, value]
       simulate_evaluate target, scope
@@ -793,7 +801,7 @@ class Completion::TypeSimulator
       in [:@ident, name,]
         # block arg mlhs
         scope[name] = value || Completion::Types::OBJECT
-      in [:var_field, [:@ident, name,]]
+      in [:var_field, [:@ident | :@ivar | :@cvar | :@gvar, name,]]
         # massign
         scope[name] = value || Completion::Types::OBJECT
       in [:mlhs, *mlhs]
