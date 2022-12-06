@@ -579,6 +579,7 @@ class Completion::TypeSimulator
     in [:begin, body_stmt]
       simulate_evaluate body_stmt, scope
     in [:bodystmt, statements, rescue_stmt, _unknown, ensure_stmt]
+      statements = [statements] if statements in [Symbol,] # oneliner-def body
       return_type = statements.map { simulate_evaluate _1, scope }.last
       if rescue_stmt
         return_type = Completion::Types::UnionType[return_type, scope.conditional { simulate_evaluate rescue_stmt, scope }]
