@@ -34,7 +34,7 @@ module Completion::Completor
       in [:gvar, name]
         global_variables
       in [:symbol, name]
-        Symbol.all_symbols.reject { _1.match? '_trex_completion_' }
+        Symbol.all_symbols
       in [:call, type, name, self_call]
         self_call ? type.all_methods : type.methods
       in [:lvar_or_method, name, scope]
