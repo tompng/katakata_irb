@@ -153,6 +153,8 @@ module Completion::Completor
       [dot == :'::' ? :call_or_const : :call, calculate_receiver.call(receiver), name, self_call]
     in [:const_path_ref, receiver, [:@const,]]
       [:const, calculate_receiver.call(receiver), name]
+    in [:top_const_ref, [:@const,]]
+      [:const, Completion::Types::SingletonType.new(Object), name]
     in [:def,] | [:string_content,] | [:var_field,] | [:defs,] | [:rest_param,] | [:kwrest_param,] | [:blockarg,] | [[:@ident,],]
     else
       STDERR.cooked{

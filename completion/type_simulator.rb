@@ -312,8 +312,10 @@ class Completion::TypeSimulator
     in [:dyna_symbol, [:string_content, *statements]]
       statements.each { simulate_evaluate _1, scope }
       Completion::Types::SYMBOL
-    in [:@CHAR, ]
+    in [:@CHAR,]
       Completion::Types::STRING
+    in [:@backref,]
+      Completion::Types::UnionType[Completion::Types::STRING, Completion::Types::NIL]
     in [:string_literal, [:string_content, *statements]]
       statements.each { simulate_evaluate _1, scope }
       Completion::Types::STRING
@@ -322,6 +324,8 @@ class Completion::TypeSimulator
       Completion::Types::STRING
     in [:string_embexpr, statements]
       statements.each { simulate_evaluate _1, scope }
+      Completion::Types::STRING
+    in [:string_dvar,]
       Completion::Types::STRING
     in [:regexp_literal, statements, _regexp_end]
       statements.each { simulate_evaluate _1, scope }
@@ -397,6 +401,12 @@ class Completion::TypeSimulator
         Completion::Types::FALSE
       in 'nil'
         Completion::Types::NIL
+      in '__FILE__'
+        Completion::Types::STRING
+      in '__LINE__'
+        Completion::Types::INTEGER
+      in '__ENCODING__'
+        Completion::Types::InstanceType.new Encoding
       end
     in [:var_ref, [:@const | :@ivar | :@cvar | :@gvar | :@ident, name,]]
       scope[name] || Completion::Types::NIL
@@ -433,14 +443,14 @@ class Completion::TypeSimulator
 
         if block
           if block in [:symbol_literal, [:symbol, [:@ident, block_name,]]]
-            call_block_proc = ->(args) do
-              block_receiver, *rest = args
+            call_block_proc = ->(block_args) do
+              block_receiver, *rest = block_args
               block_receiver ? simulate_call(block_receiver || Completion::Types::OBJECT, block_name, rest, nil, nil) : Completion::Types::OBJECT
             end
           elsif block in [:do_block | :brace_block => type, block_var, body]
             block_var in [:block_var, params,]
-            call_block_proc = ->(args) do
-              result, breaks, nexts =  scope.conditional do
+            call_block_proc = ->(block_args) do
+              result, breaks, nexts = scope.conditional do
                 @jumps.with :break, :next do
                   if params
                     names = extract_param_names(params)
@@ -448,8 +458,8 @@ class Completion::TypeSimulator
                     names = (1..max_numbered_params(body)).map { "_#{_1}" }
                     params = [:params, names.map { [:@ident, _1, [0, 0]] }, nil, nil, nil, nil, nil, nil]
                   end
-                  block_scope = Scope.new scope, names.zip(args).to_h { [_1, _2 || Completion::Types::NIL] }
-                  evaluate_assign_params params, args, block_scope
+                  block_scope = Scope.new scope, names.zip(block_args).to_h { [_1, _2 || Completion::Types::NIL] }
+                  evaluate_assign_params params, block_args, block_scope
                   block_scope.conditional { evaluate_param_defaults params, block_scope } if params
                   if type == :do_block
                     simulate_evaluate body, block_scope
@@ -489,7 +499,8 @@ class Completion::TypeSimulator
     in [:unary, op, receiver]
       simulate_call simulate_evaluate(receiver, scope), op, [], nil, nil
     in [:lambda, params, statements]
-      params in [:paren, params]
+      params in [:paren, params] # ->{}, -> do end
+      statements in [:bodystmt, statements, _unknown, _unknown, _unknown] # -> do end
       if @dig_targets.dig? statements
         @jumps.with :break, :next, :return do
           params in [:paren, params]
@@ -579,10 +590,19 @@ class Completion::TypeSimulator
       Completion::Types::NIL
     in [:return0]
       @jumps.return Completion::Types::NIL
+      Completion::Types::NIL
     in [:yield, args]
       evaluate_mrhs args, scope
       Completion::Types::OBJECT
     in [:yield0]
+      Completion::Types::OBJECT
+    in [:super, args]
+      args, kwargs, _block = retrieve_method_args args
+      args.each do |arg|
+        item = ((arg in Completion::Types::Splat) ? arg.item : arg)
+        simulate_evaluate item, scope
+      end
+      kwargs_type kwargs, scope
       Completion::Types::OBJECT
     in [:begin, body_stmt]
       simulate_evaluate body_stmt, scope
@@ -679,9 +699,12 @@ class Completion::TypeSimulator
     in [:void_stmt]
       Completion::Types::NIL
     in [:dot2 | :dot3, range_beg, range_end]
-      simulate_evaluate range_beg, scope
-      simulate_evaluate range_end, scope
+      simulate_evaluate range_beg, scope if range_beg
+      simulate_evaluate range_end, scope if range_end
       Completion::Types::RANGE
+    in [:top_const_ref, [:@const, name,]]
+      self.class.type_of { Object.const_get name }
+
     else
       STDERR.cooked{
         STDERR.puts
@@ -744,6 +767,9 @@ class Completion::TypeSimulator
       if splat in [:var_field, [:@ident, name,]]
         scope[name] = Completion::Types::InstanceType.new Hash, K: key_type, V: value_type
       end
+    in [:if_mod, cond, ifpattern]
+      simulate_evaluate cond, scope
+      match_pattern target, ifpattern, scope
     in [:dyna_symbol,]
     in [:const_path_ref,]
     else
@@ -1026,12 +1052,14 @@ class Completion::TypeSimulator
       name = label.delete ':'
       scope[name] = value ? simulate_evaluate(value, scope) : Completion::Types::OBJECT
     end
-    if keyrest
-      keyrest => [:kwrest_param, [:@ident, name,]]
-      scope[name] = Completion::Types::HASH
+    case keyrest
+    in [:args_forward] | nil
+    in [:kwrest_param, [:@ident, name,]]
+        scope[name] = Completion::Types::HASH
     end
-    if block
-      block => [:blockarg, [:@ident, name,]]
+    case block
+    in :& | nil
+    in [:blockarg, [:@ident, name,]]
       scope[name] = Completion::Types::PROC
     end
   end
@@ -1065,4 +1093,14 @@ class Completion::TypeSimulator
     new(dig_targets).simulate_evaluate parents[0], Scope.from_binding(binding)
     Completion::Types::NIL
   end
+end
+
+__END__
+class Completion::TypeSimulator::DigTarget
+  def dig?(*) = true
+end
+
+Dir.glob '**/*.rb' do |file|
+  puts file
+  Completion::Completor.analyze File.read(file)+'.hoge'
 end

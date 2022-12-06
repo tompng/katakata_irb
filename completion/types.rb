@@ -260,7 +260,7 @@ module Completion::Types
         end
       end
     when RBS::Types::Union
-      UnionType[*return_type.types.flat_map { from_rbs_type _1, self_type, extra_vars }]
+      UnionType[*return_type.types.map { from_rbs_type _1, self_type, extra_vars }]
     when RBS::Types::Proc
       InstanceType.new Proc
     when RBS::Types::Tuple
@@ -291,9 +291,13 @@ module Completion::Types
         INTEGER
       when :boolish
         UnionType[TRUE, FALSE]
+      when :string
+        STRING
+      else
+        # TODO: ???
+        OBJECT
       end
     when RBS::Types::Interface
-      p return_type
       # unimplemented
       OBJECT
     when RBS::Types::ClassInstance
