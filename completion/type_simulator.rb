@@ -180,7 +180,7 @@ class Completion::TypeSimulator
       target_table = @tables.last
       keys = tables.flat_map(&:keys).uniq
       keys.each do |key|
-        original_value = self[key]
+        original_value = self[key] || Completion::Types::NIL
         target_table[key] = Completion::Types::UnionType[*tables.map { _1[key] || original_value }.uniq]
       end
     end
@@ -323,7 +323,7 @@ class Completion::TypeSimulator
     in [:string_embexpr, statements]
       statements.each { simulate_evaluate _1, scope }
       Completion::Types::STRING
-    in [:regexp_literal,]
+    in [:regexp_literal, statements, _regexp_end]
       statements.each { simulate_evaluate _1, scope }
       Completion::Types::REGEXP
     in [:array, [:args_add_star,] => star]
@@ -463,7 +463,7 @@ class Completion::TypeSimulator
               [Completion::Types::UnionType[result, nexts], breaks]
             end
           else
-            _block_arg = simulate_evaluate block, block_scope
+            simulate_evaluate block, scope
           end
         end
         simulate_call receiver_type, method, args_type, kwargs_type(kwargs, scope), call_block_proc
@@ -678,7 +678,9 @@ class Completion::TypeSimulator
       simulate_evaluate match_exp, scope, case_target: target
     in [:void_stmt]
       Completion::Types::NIL
-    in [:dot2,]
+    in [:dot2 | :dot3, range_beg, range_end]
+      simulate_evaluate range_beg, scope
+      simulate_evaluate range_end, scope
       Completion::Types::RANGE
     else
       STDERR.cooked{
@@ -699,7 +701,10 @@ class Completion::TypeSimulator
     in [:@int | :@float | :@rational | :@imaginary | :@CHAR | :symbol_literal | :string_literal | :regexp_literal,]
     in [:begin, statement] # in (statement)
       simulate_evaluate statement, scope
-    in [:binary, lpattern, :'=>', [var_field, [:@ident, name,]]]
+    in [:binary, lpattern, :|, rpattern]
+      match_pattern target, lpattern, scope
+      match_pattern target, rpattern, scope
+    in [:binary, lpattern, :'=>', [:var_field, [:@ident, name,]] => rpattern]
       if lpattern in [:var_ref, [:@const, const_name,]]
         const_value = simulate_evaluate lpattern, scope
         if (const_value in Completion::Types::SingletonType) && const_value.module_or_class.is_a?(Class)
@@ -739,6 +744,8 @@ class Completion::TypeSimulator
       if splat in [:var_field, [:@ident, name,]]
         scope[name] = Completion::Types::InstanceType.new Hash, K: key_type, V: value_type
       end
+    in [:dyna_symbol,]
+    in [:const_path_ref,]
     else
       puts "Unimplemented match pattern: #{pattern}"
     end
