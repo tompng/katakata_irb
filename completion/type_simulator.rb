@@ -97,10 +97,12 @@ class Completion::TypeSimulator
         :ivar
       elsif name.start_with? '$'
         :gvar
+      elsif name.start_with? '%'
+        :internal
       elsif name[0].downcase != name[0]
         :const
       else
-        name == SELF ? :self : :lvar
+        :lvar
       end
     end
 
@@ -114,7 +116,7 @@ class Completion::TypeSimulator
         @local_variables.include? name
       when :const
         @binding.eval("#{name};true") rescue false
-      when :self
+      when :internal
         true
       end
     end
@@ -133,7 +135,7 @@ class Completion::TypeSimulator
       @trace_lvar = trace_lvar
     end
 
-    def mutable?() = true
+    def mutable? = true
 
     def trace?(name)
       return false unless @parent
@@ -188,14 +190,12 @@ class Completion::TypeSimulator
 
     def ancestors
       scopes = [self]
-      while scopes.last.parent&.mutable?
-        scopes << scopes.last.parent
-      end
+      scopes << scopes.last.parent while scopes.last.parent&.mutable?
       scopes
     end
 
     def conditional(&block)
-      run_branches(block, ->{}).first
+      run_branches(block, -> {}).first
     end
 
     def run_branches(*blocks)
@@ -257,6 +257,7 @@ class Completion::TypeSimulator
   }
 
   SELF = '%self'
+
   def initialize(dig_targets)
     @dig_targets = dig_targets
     @jumps = JumpPoints.new
@@ -562,11 +563,11 @@ class Completion::TypeSimulator
       )
       Completion::Types::UnionType[if_result, else_result]
     in [:while | :until, cond, statements]
-      @jumps.with :break do
+      _result, breaks = @jumps.with :break do
         simulate_evaluate cond, scope
         scope.conditional { statements.each { simulate_evaluate _1, scope } }
       end
-      Completion::Types::NIL
+      breaks ? Completion::Types::UnionType[breaks, Completion::Types::NIL] : Completion::Types::NIL
     in [:while_mod | :until_mod, cond, statement]
       simulate_evaluate cond, scope
       scope.conditional { simulate_evaluate statement, scope }
