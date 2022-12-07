@@ -336,15 +336,8 @@ class Completion::TypeSimulator
       types = args.flat_map do |elem|
         if elem in Completion::Types::Splat
           splat = simulate_evaluate elem.item, scope
-          unless (splat in Completion::Types::InstanceType) && splat.klass == Array
-            to_a_result = simulate_call splat, :to_a, [], nil, nil, name_match: false
-            splat = to_a_result if (to_a_result in Completion::Types::InstanceType) && to_a_result.klass == Array
-          end
-          if (splat in Completion::Types::InstanceType) && splat.klass == Array
-            splat.params[:Elem] || []
-          else
-            splat
-          end
+          array_value = to_array splat, :to_a
+          array_value ? (array_value.params[:Elem] || []) : splat
         else
           simulate_evaluate elem, scope
         end
@@ -805,15 +798,16 @@ class Completion::TypeSimulator
     [values, kw]
   end
 
+  def to_array(value, method)
+    return value if (value in Completion::Types::InstanceType) && value.klass == Array
+    to_array_result = simulate_call value, method, [], nil, nil, name_match: false
+    return to_array_result if (to_array_result in Completion::Types::InstanceType) && to_array_result.klass == Array
+  end
+
   def evaluate_massign(sexp, values, scope)
     unless values in Array
-      to_ary_result = simulate_call values, :to_ary, [], nil, nil, name_match: false
-      values = to_ary_result if (to_ary_result in Completion::Types::InstanceType) && to_ary_result.klass == Array
-      if (values in Completion::Types::InstanceType) && values.klass == Array
-        values = [values.params[:Elem] || Completion::Types::OBJECT] * sexp.size
-      else
-        values = [values]
-      end
+      array_value = to_array values, :to_ary
+      values = array_value ? [array_value.params[:Elem] || Completion::Types::OBJECT] * sexp.size : [values]
     end
 
     rest_index = sexp.find_index { _1 in [:rest_param, ]}
@@ -1013,10 +1007,9 @@ class Completion::TypeSimulator
     params => [:params, pre_required, optional, rest, post_required, keywords, keyrest, block]
     size = (pre_required&.size || 0) + (optional&.size || 0) + (post_required&.size || 0) + (rest ? 1 : 0)
     if values.size == 1 && size >= 2
-      to_ary_result = simulate_call values.first || Completion::Types::OBJECT, :to_ary, [], nil, nil
-      if (to_ary_result in Completion::Types::InstanceType) && to_ary_result.klass == Array
-        values = [to_ary_result.params[:Elem] || Completion::Types::OBJECT] * size
-      end
+      value = values.first
+      array_value = to_array value, :to_ary if value
+      values = [array_value.params[:Elem] || Completion::Types::OBJECT] * size if array_value
     end
     pre_values = values.shift pre_required.size if pre_required
     post_values = values.pop post_required.size if post_required
