@@ -4,45 +4,6 @@ require 'set'
 
 module Completion; end
 class Completion::TypeSimulator
-  class JumpPoints
-    def initialize
-      @returns = []
-      @breaks = []
-      @nexts = []
-    end
-    def return(value) = @returns.last&.<< value
-    def break(value) = @breaks.last&.<< value
-    def next(value) = @nexts.last&.<< value
-
-    def with(*types)
-      accumulators = types.map do |type|
-        ac = []
-        case type
-        in :return
-          @returns << ac
-        in :break
-          @breaks << ac
-        in :next
-          @nexts << ac
-        end
-        ac
-      end
-      result = yield
-      [result, *accumulators.map { Completion::Types::UnionType[*_1] }]
-    ensure
-      types.each do |type|
-        case type
-        in :return
-          @returns.pop
-        in :break
-          @breaks.pop
-        in :next
-          @nexts.pop
-        end
-      end
-    end
-  end
-
   class DigTarget
     def initialize(parents, receiver, &block)
       @dig_ids = parents.to_h { [_1.__id__, true] }
@@ -127,12 +88,13 @@ class Completion::TypeSimulator
 
     def self.from_binding(binding) = new BaseScope.new(binding, binding.eval('self'))
 
-    def initialize(parent, table = {}, trace_cvar: true, trace_ivar: true, trace_lvar: true)
+    def initialize(parent, table = {}, trace_cvar: true, trace_ivar: true, trace_lvar: true, passthrough: false)
       @tables = [table]
       @parent = parent
       @trace_cvar = trace_cvar
       @trace_ivar = trace_ivar
       @trace_lvar = trace_lvar
+      @passthrough = passthrough
     end
 
     def mutable? = true
@@ -151,8 +113,10 @@ class Completion::TypeSimulator
     end
 
     def []=(name, type)
-      raise if type.nil?
-      if trace?(name) && @parent.mutable? && !@tables.any? { _1.key? name } && @parent.has?(name)
+      raise if type.nil? # TODO: delete this assertion
+      if @passthrough && !BaseScope.type_by_name(name) == :internal
+        @parent[name] = type
+      elsif trace?(name) && @parent.mutable? && !@tables.any? { _1.key? name } && @parent.has?(name)
         @parent[name] = type
       else
         @tables.last[name] = type
@@ -257,10 +221,12 @@ class Completion::TypeSimulator
   }
 
   SELF = '%self'
+  BREAK_RESULT = '%break'
+  NEXT_RESULT = '%next'
+  RETURN_RESULT = '%return'
 
   def initialize(dig_targets)
     @dig_targets = dig_targets
-    @jumps = JumpPoints.new
   end
 
   def simulate_evaluate(sexp, scope, case_target: nil)
@@ -446,26 +412,24 @@ class Completion::TypeSimulator
             block_var in [:block_var, params,]
             call_block_proc = ->(block_args) do
               result, breaks, nexts = scope.conditional do
-                @jumps.with :break, :next do
-                  if params
-                    names = extract_param_names(params)
-                  else
-                    names = (1..max_numbered_params(body)).map { "_#{_1}" }
-                    params = [:params, names.map { [:@ident, _1, [0, 0]] }, nil, nil, nil, nil, nil, nil]
-                  end
-                  block_scope = Scope.new scope, names.zip(block_args).to_h { [_1, _2 || Completion::Types::NIL] }
-                  evaluate_assign_params params, block_args, block_scope
-                  block_scope.conditional { evaluate_param_defaults params, block_scope } if params
-                  if type == :do_block
-                    simulate_evaluate body, block_scope
-                  else
-                    body.map {
-                      simulate_evaluate _1, block_scope
-                    }.last
-                  end
+                if params
+                  names = extract_param_names(params)
+                else
+                  names = (1..max_numbered_params(body)).map { "_#{_1}" }
+                  params = [:params, names.map { [:@ident, _1, [0, 0]] }, nil, nil, nil, nil, nil, nil]
                 end
+                params_table = names.zip(block_args).to_h { [_1, _2 || Completion::Types::NIL] }
+                block_scope = Scope.new scope, { **params_table, BREAK_RESULT => nil, NEXT_RESULT => nil }
+                evaluate_assign_params params, block_args, block_scope
+                block_scope.conditional { evaluate_param_defaults params, block_scope } if params
+                if type == :do_block
+                  result = simulate_evaluate body, block_scope
+                else
+                  result = body.map { simulate_evaluate _1, block_scope }.last
+                end
+                [result, block_scope[BREAK_RESULT], block_scope[NEXT_RESULT]]
               end
-              [Completion::Types::UnionType[result, nexts], breaks]
+              [Completion::Types::UnionType[result, *nexts], breaks]
             end
           else
             simulate_evaluate block, scope
@@ -496,13 +460,12 @@ class Completion::TypeSimulator
     in [:lambda, params, statements]
       params in [:paren, params] # ->{}, -> do end
       statements in [:bodystmt, statements, _unknown, _unknown, _unknown] # -> do end
-      @jumps.with :break, :next, :return do
-        params in [:paren, params]
-        block_scope = Scope.new scope, extract_param_names(params).to_h { [_1, Completion::Types::NIL] }
-        evaluate_assign_params params, [], block_scope
-        block_scope.conditional { evaluate_param_defaults params, block_scope }
-        statements.each { simulate_evaluate _1, block_scope }
-      end
+      params in [:paren, params]
+      params_table = extract_param_names(params).to_h { [_1, Completion::Types::NIL] }
+      block_scope = Scope.new scope, { **params_table, BREAK_RESULT => nil, NEXT_RESULT => nil, RETURN_RESULT => nil }
+      evaluate_assign_params params, [], block_scope
+      block_scope.conditional { evaluate_param_defaults params, block_scope }
+      statements.each { simulate_evaluate _1, block_scope }
       Completion::Types::ProcType.new
     in [:assign, [:var_field, [:@gvar | :@ivar | :@cvar | :@ident | :@const, name,]], value]
       res = simulate_evaluate value, scope
@@ -563,26 +526,27 @@ class Completion::TypeSimulator
       )
       Completion::Types::UnionType[if_result, else_result]
     in [:while | :until, cond, statements]
-      _result, breaks = @jumps.with :break do
-        simulate_evaluate cond, scope
-        scope.conditional { statements.each { simulate_evaluate _1, scope } }
-      end
+      inner_scope = Scope.new scope, { BREAK_RESULT => nil }, passthrough: true
+      simulate_evaluate cond, inner_scope
+      scope.conditional { statements.each { simulate_evaluate _1, inner_scope } }
+      breaks = inner_scope[BREAK_RESULT]
       breaks ? Completion::Types::UnionType[breaks, Completion::Types::NIL] : Completion::Types::NIL
     in [:while_mod | :until_mod, cond, statement]
       simulate_evaluate cond, scope
       scope.conditional { simulate_evaluate statement, scope }
       Completion::Types::NIL
     in [:break | :next | :return => jump_type, value]
+      internal_key = jump_type == :break ? BREAK_RESULT : jump_type == :next ? NEXT_RESULT : RETURN_RESULT
       if value.empty?
-        @jumps.send jump_type, Completion::Types::NIL
+        scope[internal_key] = Completion::Types::NIL
       else
         values, kw = evaluate_mrhs value, scope
         values << kw if kw
-        @jumps.send jump_type, values.size == 1 ? values.first : Completion::Types::InstanceType.new(Array, Elem: Completion::Types::UnionType[*values])
+        scope[internal_key] = values.size == 1 ? values.first : Completion::Types::InstanceType.new(Array, Elem: Completion::Types::UnionType[*values])
       end
       Completion::Types::NIL
     in [:return0]
-      @jumps.return Completion::Types::NIL
+      scope[RETURN_RESULT] = Completion::Types::NIL
       Completion::Types::NIL
     in [:yield, args]
       evaluate_mrhs args, scope
