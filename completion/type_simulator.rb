@@ -84,7 +84,7 @@ class Completion::TypeSimulator
   end
 
   class Scope
-    attr_reader :parent
+    attr_reader :parent, :jump_branches
 
     def self.from_binding(binding) = new BaseScope.new(binding, binding.eval('self'))
 
@@ -95,9 +95,29 @@ class Completion::TypeSimulator
       @trace_ivar = trace_ivar
       @trace_lvar = trace_lvar
       @passthrough = passthrough
+      @terminated = false
+      @jump_branches = []
     end
 
     def mutable? = true
+
+    def terminated?
+      @terminated
+    end
+
+    def terminate_with(type)
+      scopes = ancestors.select(&:mutable?)
+      scope = scopes.find { _1.has_own? type } || scopes.last
+      index = scopes.index scope
+      scope.jump_branches << scopes.drop(index).map(&:branch_table_clone)
+      terminate
+    end
+
+    def terminate
+      @terminated = true
+    end
+
+    def branch_table_clone() = @tables.last.dup
 
     def trace?(name)
       return false unless @parent
@@ -113,7 +133,7 @@ class Completion::TypeSimulator
     end
 
     def []=(name, type)
-      raise if type.nil? # TODO: delete this assertion
+      # return if terminated?
       if @passthrough && !BaseScope.type_by_name(name) == :internal
         @parent[name] = type
       elsif trace?(name) && @parent.mutable? && !@tables.any? { _1.key? name } && @parent.has?(name)
@@ -143,6 +163,14 @@ class Completion::TypeSimulator
       @tables.pop
     end
 
+    def merge_jumps
+      if terminated?
+        merge @jump_branches
+      else
+        merge [*@jump_branches, [{}] * ancestors.size]
+      end
+    end
+
     def merge_branch(tables)
       target_table = @tables.last
       keys = tables.flat_map(&:keys).uniq
@@ -159,20 +187,28 @@ class Completion::TypeSimulator
     end
 
     def conditional(&block)
-      run_branches(block, -> {}).first
+      run_branches(block, -> {}).first || Completion::Types::NIL
     end
 
     def run_branches(*blocks)
-      results = blocks.map { branch(&_1) }
-      merge results.map(&:last)
-      results.map(&:first)
+      results = blocks.map { branch(&_1) }.reject(&:last)
+      merge results.map { _2 }
+      if results.empty?
+        terminate
+        []
+      else
+        results.map(&:first)
+      end
     end
 
     def branch
       scopes = ancestors
       scopes.each(&:start_branch)
+      @terminated = false
       result = yield
-      [result, scopes.map(&:end_branch)]
+      terminated = @terminated
+      @terminated = false
+      [result, scopes.map(&:end_branch), terminated]
     end
 
     def merge(branches)
@@ -186,8 +222,12 @@ class Completion::TypeSimulator
       @parent&.mutable? ? @parent.base_scope : @parent
     end
 
+    def has_own?(name)
+      @tables.any? { _1.key? name }
+    end
+
     def has?(name)
-      @tables.any? { _1.key? name } || (trace?(name) && @parent.has?(name))
+      has_own?(name) || (trace?(name) && @parent.has?(name))
     end
   end
 
@@ -427,6 +467,8 @@ class Completion::TypeSimulator
                 else
                   result = body.map { simulate_evaluate _1, block_scope }.last
                 end
+                block_scope.merge_jumps
+                result = Completion::Types::NIL if block_scope.terminated?
                 [result, block_scope[BREAK_RESULT], block_scope[NEXT_RESULT]]
               end
               [Completion::Types::UnionType[result, *nexts], breaks]
@@ -466,6 +508,7 @@ class Completion::TypeSimulator
       evaluate_assign_params params, [], block_scope
       block_scope.conditional { evaluate_param_defaults params, block_scope }
       statements.each { simulate_evaluate _1, block_scope }
+      block_scope.merge_jumps
       Completion::Types::ProcType.new
     in [:assign, [:var_field, [:@gvar | :@ivar | :@cvar | :@ident | :@const, name,]], value]
       res = simulate_evaluate value, scope
@@ -520,16 +563,17 @@ class Completion::TypeSimulator
       Completion::Types::UnionType[scope.conditional { simulate_evaluate statement, scope }, Completion::Types::NIL]
     in [:if | :unless | :elsif, cond, statements, else_statement]
       simulate_evaluate cond, scope
-      if_result, else_result = scope.run_branches(
+      results = scope.run_branches(
         -> { statements.map { simulate_evaluate _1, scope }.last },
         -> { else_statement ? simulate_evaluate(else_statement, scope) : Completion::Types::NIL }
       )
-      Completion::Types::UnionType[if_result, else_result]
+      results.empty? ? Completion::Types::NIL : Completion::Types::UnionType[*results]
     in [:while | :until, cond, statements]
       inner_scope = Scope.new scope, { BREAK_RESULT => nil }, passthrough: true
       simulate_evaluate cond, inner_scope
       scope.conditional { statements.each { simulate_evaluate _1, inner_scope } }
       breaks = inner_scope[BREAK_RESULT]
+      inner_scope.merge_jumps
       breaks ? Completion::Types::UnionType[breaks, Completion::Types::NIL] : Completion::Types::NIL
     in [:while_mod | :until_mod, cond, statement]
       simulate_evaluate cond, scope
@@ -544,9 +588,11 @@ class Completion::TypeSimulator
         values << kw if kw
         scope[internal_key] = values.size == 1 ? values.first : Completion::Types::InstanceType.new(Array, Elem: Completion::Types::UnionType[*values])
       end
+      scope.terminate_with internal_key
       Completion::Types::NIL
     in [:return0]
       scope[RETURN_RESULT] = Completion::Types::NIL
+      scope.terminate_with RETURN_RESULT
       Completion::Types::NIL
     in [:yield, args]
       evaluate_mrhs args, scope
