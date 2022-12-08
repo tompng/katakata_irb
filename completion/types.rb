@@ -82,14 +82,6 @@ module Completion::Types
     intersect.call(InstanceType, &:klass)
   end
 
-  def self.rbs_method_response(receiver_type, method_name, args_types, kwargs_type, has_block)
-    methods = rbs_methods(receiver_type, method_name, args_types, kwargs_type, has_block)
-    types = methods.map do |method,|
-      from_rbs_type method.type.return_type, receiver_type
-    end
-    UnionType[*types]
-  end
-
   def self.type_from_object(object, max_level: 4)
     max_level -= 1
     case object
@@ -301,14 +293,19 @@ module Completion::Types
       # unimplemented
       OBJECT
     when RBS::Types::ClassInstance
-      klass = Object.const_get(return_type.name.name)
-      return OBJECT unless klass in Class
+      classes = self_type.types.filter_map do |type|
+        type.module_or_class if (type in SingletonType) && type.module_or_class.is_a?(Class)
+      end
+      if classes.empty?
+        klass = Object.const_get(return_type.name.name)
+        classes << klass if klass in Class
+      end
       if return_type.args
         args = return_type.args.map { from_rbs_type _1, self_type, extra_vars }
         names = rbs_builder.build_singleton(return_type.name).type_params
         params = names.map.with_index { [_1, args[_2] || OBJECT] }.to_h
       end
-      InstanceType.new(klass, params || {})
+      UnionType[*classes.map { InstanceType.new _1, params || {} }]
     end
   end
 
