@@ -1,9 +1,9 @@
-PATCHED_IRB_RELINE_PATH = File.expand_path "~/Documents/github/ruby"
-if Dir.exist? PATCHED_IRB_RELINE_PATH
+PATCHED_RELINE_PATH = File.expand_path "~/Documents/github/ruby/reline"
+if Dir.exist? PATCHED_RELINE_PATH
   Kernel.prepend Module.new {
     def require(name)
-      if name =~ /^(irb|reline)(\/|$)/
-        name = PATCHED_IRB_RELINE_PATH + "/#$1/lib/" + name
+      if name =~ /^reline(\/|$)/
+        name = PATCHED_RELINE_PATH + '/lib/' + name
       end
       super(name)
     end
