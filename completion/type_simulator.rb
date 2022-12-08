@@ -352,8 +352,21 @@ class Completion::TypeSimulator
       types << kwargs_type(kwargs, scope) if kwargs && kwargs.any?
       Completion::Types::InstanceType.new Array, Elem: Completion::Types::UnionType[*types]
     in [:array, statements]
-      elem = statements ? Completion::Types::UnionType[*statements.map { simulate_evaluate _1, scope }] : Completion::Types::NIL
-      Completion::Types::InstanceType.new Array, Elem: elem
+      if statements.empty?
+        Completion::Types::ARRAY
+      elsif statements.all? { _1 in [Symbol,] }
+        # normal array
+        elem = statements ? Completion::Types::UnionType[*statements.map { simulate_evaluate _1, scope }] : Completion::Types::NIL
+        Completion::Types::InstanceType.new Array, Elem: elem
+      else
+        # %I[] or %W[]
+        statements.each do |sub_statements|
+          sub_statements.each { simulate_evaluate _1, scope }
+        end
+        # TODO: use AST because Ripper.sexp('%I[a]') == Ripper.sexp('%W[a]')
+        elem = Completion::Types::UnionType[Completion::Types::STRING, Completion::Types::SYMBOL]
+        Completion::Types::InstanceType.new Array, Elem: elem
+      end
     in [:bare_assoc_hash, args]
       simulate_evaluate [:hash, [:assoclist_from_args, args]], scope
     in [:hash, [:assoclist_from_args, args]]

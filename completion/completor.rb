@@ -64,15 +64,15 @@ module Completion::Completor
       case t.tok
       when /\A%.[<>]\z/
         '>'
-      when '{', '#{', /\A%.[{}]\z/
+      when '{', '#{', /\A%.?[{}]\z/
         '}'
-      when '(', /\A%.[()]\z/
+      when '(', /\A%.?[()]\z/
         ')'
-      when '[', /\A%.[\[\]]\z/
+      when '[', /\A%.?[\[\]]\z/
         ']'
       when /\A%.?(.)\z/
         $1
-      when '"', "'"
+      when '"', "'", '/', '`'
         t.tok
       when /\A<<(?:"(?<s>.+)"|'(?<s>.+)'|(?<s>.+))/
         $3
@@ -156,6 +156,7 @@ module Completion::Completor
     in [:top_const_ref, [:@const,]]
       [:const, Completion::Types::SingletonType.new(Object), name]
     in [:def,] | [:string_content,] | [:var_field,] | [:defs,] | [:rest_param,] | [:kwrest_param,] | [:blockarg,] | [[:@ident,],]
+    in [Array,] # `xstring`, /regexp/
     else
       STDERR.cooked{
         STDERR.puts
