@@ -1,0 +1,30 @@
+PATH
+  remote: .
+  specs:
+    katakata_irb (0.1.0)
+      irb
+      rbs
+      reline
+
+GEM
+  remote: https://rubygems.org/
+  specs:
+    io-console (0.5.11)
+    irb (1.4.2)
+      reline (>= 0.3.0)
+    minitest (5.16.3)
+    rake (13.0.6)
+    rbs (2.7.0)
+    reline (0.3.1)
+      io-console (~> 0.5)
+
+PLATFORMS
+  x86_64-darwin-20
+
+DEPENDENCIES
+  katakata_irb!
+  minitest (~> 5.0)
+  rake (~> 13.0)
+
+BUNDLED WITH
+   2.4.0.dev

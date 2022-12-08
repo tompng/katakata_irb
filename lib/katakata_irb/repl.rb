@@ -12,9 +12,13 @@ end
 
 require 'irb'
 require_relative 'ruby_lex_patch'
-require_relative 'completion/completor.rb'
+require_relative 'completor'
 
-RubyLexPatch.patch_to_ruby_lex
-Completion::Completor.patch_to_completor
-IRB.conf[:USE_RELINE] = false if ARGV.include? '--nomultiline'
-IRB.start(__FILE__)
+module KatakataIrb::REPL
+  def self.start
+    KatakataIrb::RubyLexPatch.patch_to_ruby_lex
+    KatakataIrb::Completor.patch_to_completor
+    IRB.conf[:USE_RELINE] = false if ARGV.include? '--nomultiline'
+    IRB.start(__FILE__)
+  end
+end

@@ -1,11 +1,10 @@
-require_relative '../trex'
+require_relative 'trex'
 require_relative 'type_simulator'
 require 'rbs'
 require 'rbs/cli'
 require 'irb'
-module Completion; end
-module Completion::Completor
-  using Completion::TypeSimulator::LexerElemMatcher
+module KatakataIrb::Completor
+  using KatakataIrb::TypeSimulator::LexerElemMatcher
 
   def self.patch_to_completor
     completion_proc = ->(target, preposing = nil, postposing = nil) do
@@ -58,8 +57,8 @@ module Completion::Completor
     end.join + "nil;\n"
     code = lvars_code + code
     tokens = RubyLex.ripper_lex_without_warning code
-    tokens = TRex.interpolate_ripper_ignored_tokens code, tokens
-    last_opens, unclosed_heredocs = TRex.parse(tokens)
+    tokens = KatakataIrb::TRex.interpolate_ripper_ignored_tokens code, tokens
+    last_opens, unclosed_heredocs = KatakataIrb::TRex.parse(tokens)
     closings = (last_opens + unclosed_heredocs).map do |t,|
       case t.tok
       when /\A%.[<>]\z/
@@ -132,8 +131,8 @@ module Completion::Completor
     if (target in [:@tstring_content,]) && (parents[-4] in [:command, [:@ident, 'require' | 'require_relative' => require_method,],])
       return [require_method.to_sym, name.rstrip]
     end
-    calculate_scope = -> { Completion::TypeSimulator.calculate_binding_scope binding, parents, expression }
-    calculate_receiver = -> receiver { Completion::TypeSimulator.calculate_receiver binding, parents, receiver }
+    calculate_scope = -> { KatakataIrb::TypeSimulator.calculate_binding_scope binding, parents, expression }
+    calculate_receiver = -> receiver { KatakataIrb::TypeSimulator.calculate_receiver binding, parents, receiver }
     case expression
     in [:vcall | :var_ref, [:@ident,]]
       [:lvar_or_method, name, calculate_scope.call]
@@ -141,7 +140,7 @@ module Completion::Completor
       [:symbol, name]
     in [:var_ref | :const_ref, [:@const,]]
       # TODO
-      [:const, Completion::Types::SingletonType.new(Object), name]
+      [:const, KatakataIrb::Types::SingletonType.new(Object), name]
     in [:var_ref, [:@gvar,]]
       [:gvar, name]
     in [:var_ref, [:@ivar,]]
@@ -154,7 +153,7 @@ module Completion::Completor
     in [:const_path_ref, receiver, [:@const,]]
       [:const, calculate_receiver.call(receiver), name]
     in [:top_const_ref, [:@const,]]
-      [:const, Completion::Types::SingletonType.new(Object), name]
+      [:const, KatakataIrb::Types::SingletonType.new(Object), name]
     in [:def,] | [:string_content,] | [:var_field,] | [:defs,] | [:rest_param,] | [:kwrest_param,] | [:blockarg,] | [[:@ident,],]
     in [Array,] # `xstring`, /regexp/
     else
@@ -189,14 +188,14 @@ end
 if $0 == __FILE__
 =begin
   classes = ObjectSpace.each_object(Class)
-  Completion::Completor.class_eval do
+  KatakataIrb::Completor.class_eval do
     return_types = []
     method_types = []
     classes.each do |klass|
       next unless klass.name
       type_name = RBS::TypeName(klass.name).absolute!
-      mdefinition = Completion::Types.rbs_builder.build_singleton type_name rescue nil
-      idefinition = Completion::Types.rbs_builder.build_instance type_name rescue nil
+      mdefinition = KatakataIrb::Types.rbs_builder.build_singleton type_name rescue nil
+      idefinition = KatakataIrb::Types.rbs_builder.build_instance type_name rescue nil
       [mdefinition, idefinition].compact.each do |definition|
         definition.methods.each_value do |method|
           method.method_types.each do
@@ -225,5 +224,5 @@ if $0 == __FILE__
         %[].aa
         '$hello'.to_s.size.times.map.to_a.hoge.to_a.hoge
   RUBY
-  p Completion::Completor.analyze code
+  p KatakataIrb::Completor.analyze code
 end

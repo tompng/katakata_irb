@@ -1,6 +1,6 @@
 require_relative 'trex'
 
-module RubyLexPatch
+module KatakataIrb::RubyLexPatch
   def self.patch_to_ruby_lex
     (RubyLex.instance_methods(false) - [:initialize_input, :set_prompt, :process_continue]).each { RubyLex.remove_method _1 }
     RubyLex.prepend self
@@ -8,7 +8,7 @@ module RubyLexPatch
 
   def self.complete_tokens(code, context: nil)
     incomplete_tokens = RubyLex.ripper_lex_without_warning(code, context: context)
-    TRex.interpolate_ripper_ignored_tokens(code, incomplete_tokens)
+    KatakataIrb::TRex.interpolate_ripper_ignored_tokens(code, incomplete_tokens)
   end
 
   def calc_nesting_depth(tokens)
@@ -37,13 +37,13 @@ module RubyLexPatch
   end
 
   def process_indent_level(tokens)
-    opens, heredocs = TRex.parse(tokens)
+    opens, heredocs = KatakataIrb::TRex.parse(tokens)
     indent, _nesting = calc_nesting_depth(opens.map(&:first) + heredocs)
     indent * 2
   end
 
   def check_corresponding_token_depth(tokens, line_index)
-    lines, = TRex.parse_line(tokens)
+    lines, = KatakataIrb::TRex.parse_line(tokens)
     result = lines[line_index]
     return unless result
     _tokens, prev, opens, min_depth = result
@@ -76,8 +76,8 @@ module RubyLexPatch
   end
 
   def check_termination(code, context: nil)
-    tokens = RubyLexPatch.complete_tokens(code, context: context)
-    opens, heredocs = TRex.parse(tokens)
+    tokens = KatakataIrb::RubyLexPatch.complete_tokens(code, context: context)
+    opens, heredocs = KatakataIrb::TRex.parse(tokens)
     opens.empty? && heredocs.empty? && !process_continue(tokens)
   end
 
@@ -106,8 +106,8 @@ module RubyLexPatch
       @io.dynamic_prompt do |lines|
         lines << '' if lines.empty?
         code = lines.map{ |l| l + "\n" }.join
-        tokens = RubyLexPatch.complete_tokens code, context: context
-        lines, _unclosed_heredocs = TRex.parse_line(tokens)
+        tokens = KatakataIrb::RubyLexPatch.complete_tokens code, context: context
+        lines, _unclosed_heredocs = KatakataIrb::TRex.parse_line(tokens)
         continue = false
         lines.map.with_index do |(line, _prev_opens, next_opens), line_num_offset|
           unless (c = process_continue(line.map(&:first))).nil?
@@ -131,13 +131,13 @@ module RubyLexPatch
     if @io.respond_to?(:auto_indent) and context.auto_indent_mode
       @io.auto_indent do |lines, line_index, byte_pointer, is_newline|
         if is_newline
-          tokens = RubyLexPatch.complete_tokens(lines[0..line_index].join("\n"), context: context)
+          tokens = KatakataIrb::RubyLexPatch.complete_tokens(lines[0..line_index].join("\n"), context: context)
           process_indent_level tokens
         else
           code = line_index.zero? ? '' : lines[0..(line_index - 1)].map{ |l| l + "\n" }.join
           last_line = lines[line_index]&.byteslice(0, byte_pointer)
           code += last_line if last_line
-          tokens = RubyLexPatch.complete_tokens(code, context: context)
+          tokens = KatakataIrb::RubyLexPatch.complete_tokens(code, context: context)
           check_corresponding_token_depth(tokens, line_index)
         end
       end
@@ -167,8 +167,8 @@ module RubyLexPatch
         l = @input.call
         next if l.nil?
         line << l
-        tokens = RubyLexPatch.complete_tokens(line, context: context)
-        _line, _prev_opens, next_opens = TRex.parse_line(tokens).first.last
+        tokens = KatakataIrb::RubyLexPatch.complete_tokens(line, context: context)
+        _line, _prev_opens, next_opens = KatakataIrb::TRex.parse_line(tokens).first.last
         return line if next_opens.empty?
         line_offset += 1
         store_prompt_to_irb next_opens, true, line_offset
