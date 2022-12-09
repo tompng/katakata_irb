@@ -23,12 +23,14 @@ irb(main):001:0> [1,'a'].sample.a█
 
 ```
 % kirb
-irb(main):001:0> a=10
+irb(main):001:0> a = 10
 => 10
-irb(main):002:1* a.times.map {
-irb(main):003:1*   _1.to_s
-irb(main):004:0> }.first.a█
-                |}.first.ascii_only?|
+irb(main):002:1* if true
+irb(main):003:2*   b = a.times.map do
+irb(main):004:2*     _1.to_s
+irb(main):005:1*   end
+irb(main):006:1*   b[0].a█
+                  |b[0].ascii_only?|
 ```
 
 ```ruby
