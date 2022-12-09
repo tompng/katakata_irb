@@ -1,3 +1,4 @@
+module KatakataIrb; end
 module KatakataIrb::RelinePatch
   module RelinePatchIseqLoader; end
   def self.require_patched_reline

@@ -1,3 +1,4 @@
+module KatakataIrb; end
 module KatakataIrb::TRex
   def self.interpolate_ripper_ignored_tokens(code, tokens)
     line_positions = code.lines.reduce([0]) { _1 << _1.last + _2.bytesize }

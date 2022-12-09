@@ -1,39 +1,49 @@
-# KatakataIrb
+# KatakataIrb: IRB with Kata(型 Type) completion
 
-Welcome to your new gem! In this directory, you'll find the files you need to be able to package up your Ruby library into a gem. Put your Ruby code in the file `lib/katakata_irb`. To experiment with that code, run `bin/console` for an interactive prompt.
-
-TODO: Delete this and the text above, and describe your gem
+KatakataIrb might provide a better autocompletion based on type analysis to irb.
 
 ## Installation
 
-Add this line to your application's Gemfile:
-
-```ruby
-gem 'katakata_irb'
+```sh
+% gem install 'katakata_irb'
 ```
-
-And then execute:
-
-    $ bundle install
-
-Or install it yourself as:
-
-    $ gem install katakata_irb
-
 ## Usage
 
-TODO: Write usage instructions here
+```
+% kirb
+irb(main):001:0> [1,'a'].sample.a
+                |[1,'a'].sample.abs        |
+                |[1,'a'].sample.abs2       |
+                |[1,'a'].sample.allbits?   |
+                |[1,'a'].sample.angle      |
+                |[1,'a'].sample.anybits?   |
+                |[1,'a'].sample.arg        |
+                |[1,'a'].sample.ascii_only?|
+```
 
-## Development
+```
+% kirb
+irb(main):001:0> a=10
+=> 10
+irb(main):002:1* a.times.map {
+irb(main):003:1*   _1.to_s
+irb(main):004:0> }.first.a
+                |}.first.ascii_only?|
+```
 
-After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake test` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
+```ruby
+require 'katakata_irb/completor'
+KatakataIrb::Completor.patch_to_completor
+10.times do |i|
+  binding.irb
+end
+```
 
-To install this gem onto your local machine, run `bundle exec rake install`. To release a new version, update the version number in `version.rb`, and then run `bundle exec rake release`, which will create a git tag for the version, push git commits and the created tag, and push the `.gem` file to [rubygems.org](https://rubygems.org).
+## Options
 
-## Contributing
+### `kirb --debug-output`
+Show debug output if it meets unimplemented syntax or something
 
-Bug reports and pull requests are welcome on GitHub at https://github.com/[USERNAME]/katakata_irb.
-
-## License
-
-The gem is available as open source under the terms of the [MIT License](https://opensource.org/licenses/MIT).
+### `kirb --without-patch`
+`kirb` will apply some patches to reline and irb/ruby-lex.rb by default. This option will disable it.
+See `lib/katakata_irb/ruby_lex_patch.rb` and `lib/katakata_irb/reline_patches/*.patch`

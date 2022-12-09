@@ -4,6 +4,7 @@ require_relative '../lib/katakata_irb/reline_patch'
 KatakataIrb::RelinePatch.require_patched_reline
 KatakataIrb.log_output = STDERR
 require 'bundler/setup'
+require 'katakata_irb'
 require 'katakata_irb/ruby_lex_patch'
 KatakataIrb::RubyLexPatch.patch_to_ruby_lex
 KatakataIrb.repl

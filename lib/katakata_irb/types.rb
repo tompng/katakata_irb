@@ -1,6 +1,7 @@
 require 'rbs'
 require 'rbs/cli'
 
+module KatakataIrb; end
 module KatakataIrb::Types
   def self.rbs_builder
     @rbs_builder ||= RBS::DefinitionBuilder.new(

@@ -3,6 +3,7 @@ require_relative 'type_simulator'
 require 'rbs'
 require 'rbs/cli'
 require 'irb'
+
 module KatakataIrb::Completor
   using KatakataIrb::TypeSimulator::LexerElemMatcher
 
