@@ -720,11 +720,9 @@ class KatakataIrb::TypeSimulator
     in [:top_const_ref, [:@const, name,]]
       self.class.type_of { Object.const_get name }
     else
-      STDERR.cooked{
-        STDERR.puts
-        STDERR.puts :NOMATCH
-        STDERR.puts sexp.inspect
-      }
+      KatakataIrb.log_puts
+      KatakataIrb.log_puts :NOMATCH
+      KatakataIrb.log_puts sexp.inspect
       KatakataIrb::Types::NIL
     end
   end
@@ -787,7 +785,7 @@ class KatakataIrb::TypeSimulator
     in [:dyna_symbol,]
     in [:const_path_ref,]
     else
-      puts "Unimplemented match pattern: #{pattern}"
+      KatakataIrb.log_puts "Unimplemented match pattern: #{pattern}"
     end
   end
 

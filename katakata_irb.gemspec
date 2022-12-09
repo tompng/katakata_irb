@@ -12,7 +12,7 @@ Gem::Specification.new do |spec|
   spec.description = "IRB with Typed Completion"
   spec.homepage = "http://github.com/tompng/katakata_irb"
   spec.license = "MIT"
-  spec.required_ruby_version = ">= 2.6.0"
+  spec.required_ruby_version = ">= 3.1.0"
 
   spec.metadata["allowed_push_host"] = "TODO: Set to your gem server 'https://example.com'"
 

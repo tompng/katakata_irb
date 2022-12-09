@@ -157,11 +157,9 @@ module KatakataIrb::Completor
     in [:def,] | [:string_content,] | [:var_field,] | [:defs,] | [:rest_param,] | [:kwrest_param,] | [:blockarg,] | [[:@ident,],]
     in [Array,] # `xstring`, /regexp/
     else
-      STDERR.cooked{
-        STDERR.puts
-        STDERR.puts [:NEW_EXPRESSION, expression].inspect
-        STDERR.puts
-      }
+      KatakataIrb.log_puts
+      KatakataIrb.log_puts [:NEW_EXPRESSION, expression].inspect
+      KatakataIrb.log_puts
     end
   end
 
@@ -183,46 +181,4 @@ module KatakataIrb::Completor
     end
     nil
   end
-end
-
-if $0 == __FILE__
-=begin
-  classes = ObjectSpace.each_object(Class)
-  KatakataIrb::Completor.class_eval do
-    return_types = []
-    method_types = []
-    classes.each do |klass|
-      next unless klass.name
-      type_name = RBS::TypeName(klass.name).absolute!
-      mdefinition = KatakataIrb::Types.rbs_builder.build_singleton type_name rescue nil
-      idefinition = KatakataIrb::Types.rbs_builder.build_instance type_name rescue nil
-      [mdefinition, idefinition].compact.each do |definition|
-        definition.methods.each_value do |method|
-          method.method_types.each do
-            method_types << _1.type
-            return_types << _1.type.return_type
-          end
-        end
-      end
-    end
-    return_types.uniq!
-    binding.irb
-  end
-=end
-  code = <<~'RUBY'.chomp
-    a = 1
-    def geso()
-      p 1
-      10.times do |i|
-        ([1, 2, ((3+(i.times.map{}.size+4)*5.to_i).itself
-        hoge
-        %[]
-        %w[]; %W[]; %Q[]; %s[]; %i[]; %I[]+A::DATA
-        .times do
-        end[0].a(1).b{2}.c[3].d{4}[5].e
-        123.to_f.hoge
-        %[].aa
-        '$hello'.to_s.size.times.map.to_a.hoge.to_a.hoge
-  RUBY
-  p KatakataIrb::Completor.analyze code
 end

@@ -1,8 +1,10 @@
 #!/usr/bin/env ruby
 require_relative '../lib/katakata_irb'
-require_relative '../lib/katakata_irb/reline_patch'
-KatakataIrb::RelinePatch.require_patched_reline
-require 'irb'
-require 'katakata_irb/ruby_lex_patch'
-KatakataIrb::RubyLexPatch.patch_to_ruby_lex
+unless ARGV.delete '--without-patch'
+  require_relative '../lib/katakata_irb/reline_patch'
+  KatakataIrb::RelinePatch.require_patched_reline
+  require 'katakata_irb/ruby_lex_patch'
+  KatakataIrb::RubyLexPatch.patch_to_ruby_lex
+end
+KatakataIrb.log_output = STDERR if ARGV.delete '--debug-output'
 KatakataIrb.repl
