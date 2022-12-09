@@ -5,6 +5,6 @@ unless ARGV.delete '--without-patch'
   require 'katakata_irb/ruby_lex_patch'
   KatakataIrb::RubyLexPatch.patch_to_ruby_lex
 end
-KatakataIrb.log_output = STDERR if ARGV.delete '--debug-output'
 require 'katakata_irb'
+KatakataIrb.log_output = STDERR if ARGV.delete '--debug-output'
 KatakataIrb.repl
