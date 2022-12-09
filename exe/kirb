@@ -2,7 +2,7 @@
 require_relative '../lib/katakata_irb'
 require_relative '../lib/katakata_irb/reline_patch'
 KatakataIrb::RelinePatch.require_patched_reline
-require 'bundler/setup'
+require 'irb'
 require 'katakata_irb/ruby_lex_patch'
 KatakataIrb::RubyLexPatch.patch_to_ruby_lex
 KatakataIrb.repl

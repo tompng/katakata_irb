@@ -1,8 +1,7 @@
-# frozen_string_literal: true
-
-require_relative "katakata_irb/version"
-
 module KatakataIrb
-  class Error < StandardError; end
-  # Your code goes here...
+  def self.repl
+    require 'katakata_irb/completor'
+    KatakataIrb::Completor.patch_to_completor
+    IRB.start(__FILE__)
+  end
 end

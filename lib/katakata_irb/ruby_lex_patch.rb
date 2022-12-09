@@ -1,8 +1,9 @@
+require 'irb'
 require_relative 'trex'
 
 module KatakataIrb::RubyLexPatch
   def self.patch_to_ruby_lex
-    (RubyLex.instance_methods(false) - [:initialize_input, :set_prompt, :process_continue]).each { RubyLex.remove_method _1 }
+    (RubyLex.instance_methods(false) - [:initialize_input, :set_prompt, :process_continue, :check_code_block]).each { RubyLex.remove_method _1 }
     RubyLex.prepend self
   end
 
@@ -151,7 +152,7 @@ module KatakataIrb::RubyLexPatch
   end
 
   def store_prompt_to_irb(...)
-    prompt(...) # TODO: do not use store, change API. example: @input.call(prompt)
+    prompt(...) # TODO: do not use this. change the api. example: @input.call(prompt)
   end
 
   def readmultiline(context)

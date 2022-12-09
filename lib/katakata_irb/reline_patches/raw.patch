@@ -1,0 +1,95 @@
+diff --git a/lib/reline.rb b/lib/reline.rb
+index f22b573..8716a0c 100644
+--- a/lib/reline.rb
++++ b/lib/reline.rb
+@@ -281,19 +281,21 @@ module Reline
+     Reline::DEFAULT_DIALOG_CONTEXT = Array.new
+ 
+     def readmultiline(prompt = '', add_hist = false, &confirm_multiline_termination)
+-      unless confirm_multiline_termination
+-        raise ArgumentError.new('#readmultiline needs block to confirm multiline termination')
+-      end
+-      inner_readline(prompt, add_hist, true, &confirm_multiline_termination)
++      Reline::IOGate.with_raw_input do
++        unless confirm_multiline_termination
++          raise ArgumentError.new('#readmultiline needs block to confirm multiline termination')
++        end
++        inner_readline(prompt, add_hist, true, &confirm_multiline_termination)
+ 
+-      whole_buffer = line_editor.whole_buffer.dup
+-      whole_buffer.taint if RUBY_VERSION < '2.7'
+-      if add_hist and whole_buffer and whole_buffer.chomp("\n").size > 0
+-        Reline::HISTORY << whole_buffer
+-      end
++        whole_buffer = line_editor.whole_buffer.dup
++        whole_buffer.taint if RUBY_VERSION < '2.7'
++        if add_hist and whole_buffer and whole_buffer.chomp("\n").size > 0
++          Reline::HISTORY << whole_buffer
++        end
+ 
+-      line_editor.reset_line if line_editor.whole_buffer.nil?
+-      whole_buffer
++        line_editor.reset_line if line_editor.whole_buffer.nil?
++        whole_buffer
++      end
+     end
+ 
+     def readline(prompt = '', add_hist = false)
+diff --git a/lib/reline/ansi.rb b/lib/reline/ansi.rb
+index ab147a6..ccebe15 100644
+--- a/lib/reline/ansi.rb
++++ b/lib/reline/ansi.rb
+@@ -142,6 +142,10 @@ class Reline::ANSI
+     @@output = val
+   end
+ 
++  def self.with_raw_input
++    @@input.raw { yield }
++  end
++
+   @@buf = []
+   def self.inner_getc
+     unless @@buf.empty?
+diff --git a/lib/reline/general_io.rb b/lib/reline/general_io.rb
+index 92c76cb..9929846 100644
+--- a/lib/reline/general_io.rb
++++ b/lib/reline/general_io.rb
+@@ -31,6 +31,10 @@ class Reline::GeneralIO
+     @@input = val
+   end
+ 
++  def self.with_raw_input
++    yield
++  end
++
+   def self.getc
+     unless @@buf.empty?
+       return @@buf.shift
+diff --git a/lib/reline/line_editor.rb b/lib/reline/line_editor.rb
+index 6acf969..e3985a3 100644
+--- a/lib/reline/line_editor.rb
++++ b/lib/reline/line_editor.rb
+@@ -452,7 +452,7 @@ class Reline::LineEditor
+       new_lines = whole_lines
+       prompt, prompt_width, prompt_list = check_multiline_prompt(new_lines)
+       modify_lines(new_lines).each_with_index do |line, index|
+-        @output.write "#{prompt_list ? prompt_list[index] : prompt}#{line}\n"
++        @output.write "#{prompt_list ? prompt_list[index] : prompt}#{line}\r\n"
+         Reline::IOGate.erase_after_cursor
+       end
+       @output.flush
+diff --git a/lib/reline/windows.rb b/lib/reline/windows.rb
+index b952329..7ea2a00 100644
+--- a/lib/reline/windows.rb
++++ b/lib/reline/windows.rb
+@@ -291,6 +291,10 @@ class Reline::Windows
+     end
+   end
+ 
++  def self.with_raw_input
++    yield
++  end
++
+   def self.getc
+     check_input_event
+     @@output_buf.shift
