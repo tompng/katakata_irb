@@ -331,9 +331,10 @@ module KatakataIrb::Types
     in [RBS::Types::Tuple, InstanceType] if value.klass == Array
       v = value.params[:Elem]
       rbs_type.types.each do |t|
-        _match_free_variable vars, t, v
+        _match_free_variable vars, t, v, accumulator
       end
     in [RBS::Types::Record, InstanceType] if value.klass == Hash
+      # TODO
     else
     end
   end

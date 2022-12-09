@@ -1106,13 +1106,3 @@ class KatakataIrb::TypeSimulator
     KatakataIrb::Types::NIL
   end
 end
-
-__END__
-class KatakataIrb::TypeSimulator::DigTarget
-  def dig?(*) = true
-end
-
-Dir.glob '**/*.rb' do |file|
-  puts file
-  KatakataIrb::Completor.analyze File.read(file)+'.hoge'
-end

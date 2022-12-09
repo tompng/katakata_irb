@@ -1,13 +1,15 @@
 # frozen_string_literal: true
-
-require "test_helper"
+require 'katakata_irb/completor'
+require 'test_helper'
 
 class TestKatakataIrb < Minitest::Test
-  def test_that_it_has_a_version_number
-    refute_nil ::KatakataIrb::VERSION
-  end
-
-  def test_it_does_something_useful
-    assert false
+  def test_analyze_does_not_raise_error
+    KatakataIrb::TypeSimulator::DigTarget.class_eval do
+      def dig?(*) = true
+    end
+    KatakataIrb.define_singleton_method(:log_puts) {|*| raise }
+    Dir.glob '**/*.rb' do |file|
+      assert KatakataIrb::Completor.analyze(File.read(file) + '.hoge'), "analyzing #{file}"
+    end
   end
 end
