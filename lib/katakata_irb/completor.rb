@@ -7,6 +7,8 @@ require 'irb'
 module KatakataIrb::Completor
   using KatakataIrb::TypeSimulator::LexerElemMatcher
 
+  HIDDEN_METHODS = %w[Namespace TypeName] # defined by rbs, should be hidden
+
   def self.patch_to_completor
     completion_proc = ->(target, preposing = nil, postposing = nil) do
       code = "#{preposing}#{target}"
@@ -20,7 +22,7 @@ module KatakataIrb::Completor
           IRB::InputCompletor.retrieve_files_to_require_relative_from_current_dir
         end
       in [:call_or_const, type, name, self_call]
-        (self_call ? type.all_methods : type.methods) | type.constants
+        ((self_call ? type.all_methods: type.methods).map(&:to_s) - HIDDEN_METHODS) | type.constants
       in [:const, type, name]
         type.constants
       in [:ivar, name, _scope]
@@ -36,7 +38,7 @@ module KatakataIrb::Completor
       in [:symbol, name]
         Symbol.all_symbols
       in [:call, type, name, self_call]
-        self_call ? type.all_methods : type.methods
+        (self_call ? type.all_methods : type.methods).map(&:to_s) - HIDDEN_METHODS
       in [:lvar_or_method, name, scope]
         scope.self_type.all_methods.map(&:to_s) | scope.local_variables
       else
