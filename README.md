@@ -5,7 +5,7 @@ KatakataIrb might provide a better autocompletion based on type analysis to irb.
 ## Installation
 
 ```
-gem install katakata_irb (not published yet)
+gem install katakata_irb
 ```
 ## Usage
 
