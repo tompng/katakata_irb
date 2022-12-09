@@ -4,8 +4,8 @@ KatakataIrb might provide a better autocompletion based on type analysis to irb.
 
 ## Installation
 
-```sh
-% gem install 'katakata_irb'
+```
+gem install katakata_irb (not published yet)
 ```
 ## Usage
 
