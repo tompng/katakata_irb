@@ -33,7 +33,7 @@ irb(main):004:0> }.first.a█
 
 ```ruby
 require 'katakata_irb/completor'
-KatakataIrb::Completor.patch_to_completor
+KatakataIrb::Completor.setup
 10.times do |i|
   binding.irb
 end

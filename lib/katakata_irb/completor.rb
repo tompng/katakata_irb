@@ -9,7 +9,7 @@ module KatakataIrb::Completor
 
   HIDDEN_METHODS = %w[Namespace TypeName] # defined by rbs, should be hidden
 
-  def self.patch_to_completor
+  def self.setup
     completion_proc = ->(target, preposing = nil, postposing = nil) do
       code = "#{preposing}#{target}"
       irb_context = IRB.conf[:MAIN_CONTEXT]

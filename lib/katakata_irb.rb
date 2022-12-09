@@ -1,7 +1,7 @@
 module KatakataIrb
   def self.repl
     require 'katakata_irb/completor'
-    KatakataIrb::Completor.patch_to_completor
+    KatakataIrb::Completor.setup
     IRB.start(__FILE__)
   end
 
