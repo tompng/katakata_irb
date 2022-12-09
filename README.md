@@ -11,7 +11,7 @@ gem install katakata_irb (not published yet)
 
 ```
 % kirb
-irb(main):001:0> [1,'a'].sample.a
+irb(main):001:0> [1,'a'].sample.a█
                 |[1,'a'].sample.abs        |
                 |[1,'a'].sample.abs2       |
                 |[1,'a'].sample.allbits?   |
@@ -27,7 +27,7 @@ irb(main):001:0> a=10
 => 10
 irb(main):002:1* a.times.map {
 irb(main):003:1*   _1.to_s
-irb(main):004:0> }.first.a
+irb(main):004:0> }.first.a█
                 |}.first.ascii_only?|
 ```
 
