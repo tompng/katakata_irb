@@ -76,8 +76,8 @@ module KatakataIrb::Completor
         $1
       when '"', "'", '/', '`'
         t.tok
-      when /\A<<(?:"(?<s>.+)"|'(?<s>.+)'|(?<s>.+))/
-        $3
+      when /\A<<[~-]?(?:"(?<s>.+)"|'(?<s>.+)'|(?<s>.+))/
+        $1 || $2 || $3
       else
         'end'
       end
