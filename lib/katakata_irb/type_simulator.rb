@@ -706,6 +706,7 @@ class KatakataIrb::TypeSimulator
       elsif else_statement
         KatakataIrb::Types::UnionType[scope.conditional { else_branch.call }, KatakataIrb::Types::NIL]
       else
+        scope.conditional { if_match.call }
         KatakataIrb::Types::NIL
       end
     in [:case, target_exp, match_exp]
