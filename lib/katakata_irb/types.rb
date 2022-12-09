@@ -1,7 +1,8 @@
 require 'rbs'
 require 'rbs/cli'
-module Completion; end
-module Completion::Types
+
+module KatakataIrb; end
+module KatakataIrb::Types
   def self.rbs_builder
     @rbs_builder ||= RBS::DefinitionBuilder.new(
       env: RBS::Environment.from_loader(RBS::CLI::LibraryOptions.new.loader).resolve_type_names
@@ -330,9 +331,10 @@ module Completion::Types
     in [RBS::Types::Tuple, InstanceType] if value.klass == Array
       v = value.params[:Elem]
       rbs_type.types.each do |t|
-        _match_free_variable vars, t, v
+        _match_free_variable vars, t, v, accumulator
       end
     in [RBS::Types::Record, InstanceType] if value.klass == Hash
+      # TODO
     else
     end
   end

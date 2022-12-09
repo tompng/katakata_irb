@@ -1,0 +1,23 @@
+PATH
+  remote: .
+  specs:
+    katakata_irb (0.1.0)
+      rbs
+
+GEM
+  remote: https://rubygems.org/
+  specs:
+    minitest (5.16.3)
+    rake (13.0.6)
+    rbs (2.7.0)
+
+PLATFORMS
+  x86_64-darwin-20
+
+DEPENDENCIES
+  katakata_irb!
+  minitest (~> 5.0)
+  rake (~> 13.0)
+
+BUNDLED WITH
+   2.4.0.dev

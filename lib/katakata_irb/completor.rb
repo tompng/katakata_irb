@@ -1,11 +1,13 @@
-require_relative '../trex'
+require_relative 'trex'
 require_relative 'type_simulator'
 require 'rbs'
 require 'rbs/cli'
 require 'irb'
-module Completion; end
-module Completion::Completor
-  using Completion::TypeSimulator::LexerElemMatcher
+
+module KatakataIrb::Completor
+  using KatakataIrb::TypeSimulator::LexerElemMatcher
+
+  HIDDEN_METHODS = %w[Namespace TypeName] # defined by rbs, should be hidden
 
   def self.patch_to_completor
     completion_proc = ->(target, preposing = nil, postposing = nil) do
@@ -20,7 +22,7 @@ module Completion::Completor
           IRB::InputCompletor.retrieve_files_to_require_relative_from_current_dir
         end
       in [:call_or_const, type, name, self_call]
-        (self_call ? type.all_methods : type.methods) | type.constants
+        ((self_call ? type.all_methods: type.methods).map(&:to_s) - HIDDEN_METHODS) | type.constants
       in [:const, type, name]
         type.constants
       in [:ivar, name, _scope]
@@ -36,7 +38,7 @@ module Completion::Completor
       in [:symbol, name]
         Symbol.all_symbols
       in [:call, type, name, self_call]
-        self_call ? type.all_methods : type.methods
+        (self_call ? type.all_methods : type.methods).map(&:to_s) - HIDDEN_METHODS
       in [:lvar_or_method, name, scope]
         scope.self_type.all_methods.map(&:to_s) | scope.local_variables
       else
@@ -58,8 +60,8 @@ module Completion::Completor
     end.join + "nil;\n"
     code = lvars_code + code
     tokens = RubyLex.ripper_lex_without_warning code
-    tokens = TRex.interpolate_ripper_ignored_tokens code, tokens
-    last_opens, unclosed_heredocs = TRex.parse(tokens)
+    tokens = KatakataIrb::TRex.interpolate_ripper_ignored_tokens code, tokens
+    last_opens, unclosed_heredocs = KatakataIrb::TRex.parse(tokens)
     closings = (last_opens + unclosed_heredocs).map do |t,|
       case t.tok
       when /\A%.[<>]\z/
@@ -132,8 +134,8 @@ module Completion::Completor
     if (target in [:@tstring_content,]) && (parents[-4] in [:command, [:@ident, 'require' | 'require_relative' => require_method,],])
       return [require_method.to_sym, name.rstrip]
     end
-    calculate_scope = -> { Completion::TypeSimulator.calculate_binding_scope binding, parents, expression }
-    calculate_receiver = -> receiver { Completion::TypeSimulator.calculate_receiver binding, parents, receiver }
+    calculate_scope = -> { KatakataIrb::TypeSimulator.calculate_binding_scope binding, parents, expression }
+    calculate_receiver = -> receiver { KatakataIrb::TypeSimulator.calculate_receiver binding, parents, receiver }
     case expression
     in [:vcall | :var_ref, [:@ident,]]
       [:lvar_or_method, name, calculate_scope.call]
@@ -141,7 +143,7 @@ module Completion::Completor
       [:symbol, name]
     in [:var_ref | :const_ref, [:@const,]]
       # TODO
-      [:const, Completion::Types::SingletonType.new(Object), name]
+      [:const, KatakataIrb::Types::SingletonType.new(Object), name]
     in [:var_ref, [:@gvar,]]
       [:gvar, name]
     in [:var_ref, [:@ivar,]]
@@ -154,15 +156,13 @@ module Completion::Completor
     in [:const_path_ref, receiver, [:@const,]]
       [:const, calculate_receiver.call(receiver), name]
     in [:top_const_ref, [:@const,]]
-      [:const, Completion::Types::SingletonType.new(Object), name]
+      [:const, KatakataIrb::Types::SingletonType.new(Object), name]
     in [:def,] | [:string_content,] | [:var_field,] | [:defs,] | [:rest_param,] | [:kwrest_param,] | [:blockarg,] | [[:@ident,],]
     in [Array,] # `xstring`, /regexp/
     else
-      STDERR.cooked{
-        STDERR.puts
-        STDERR.puts [:NEW_EXPRESSION, expression].inspect
-        STDERR.puts
-      }
+      KatakataIrb.log_puts
+      KatakataIrb.log_puts [:NEW_EXPRESSION, expression].inspect
+      KatakataIrb.log_puts
     end
   end
 
@@ -184,46 +184,4 @@ module Completion::Completor
     end
     nil
   end
-end
-
-if $0 == __FILE__
-=begin
-  classes = ObjectSpace.each_object(Class)
-  Completion::Completor.class_eval do
-    return_types = []
-    method_types = []
-    classes.each do |klass|
-      next unless klass.name
-      type_name = RBS::TypeName(klass.name).absolute!
-      mdefinition = Completion::Types.rbs_builder.build_singleton type_name rescue nil
-      idefinition = Completion::Types.rbs_builder.build_instance type_name rescue nil
-      [mdefinition, idefinition].compact.each do |definition|
-        definition.methods.each_value do |method|
-          method.method_types.each do
-            method_types << _1.type
-            return_types << _1.type.return_type
-          end
-        end
-      end
-    end
-    return_types.uniq!
-    binding.irb
-  end
-=end
-  code = <<~'RUBY'.chomp
-    a = 1
-    def geso()
-      p 1
-      10.times do |i|
-        ([1, 2, ((3+(i.times.map{}.size+4)*5.to_i).itself
-        hoge
-        %[]
-        %w[]; %W[]; %Q[]; %s[]; %i[]; %I[]+A::DATA
-        .times do
-        end[0].a(1).b{2}.c[3].d{4}[5].e
-        123.to_f.hoge
-        %[].aa
-        '$hello'.to_s.size.times.map.to_a.hoge.to_a.hoge
-  RUBY
-  p Completion::Completor.analyze code
 end

@@ -1,4 +1,5 @@
-module TRex
+module KatakataIrb; end
+module KatakataIrb::TRex
   def self.interpolate_ripper_ignored_tokens(code, tokens)
     line_positions = code.lines.reduce([0]) { _1 << _1.last + _2.bytesize }
     prev_byte_pos = 0
@@ -183,7 +184,7 @@ module TRex
     prev_opens = []
     min_depth = 0
     output = []
-    last_opens, unclosed_heredocs = TRex.parse(tokens) do |t, _index, opens|
+    last_opens, unclosed_heredocs = KatakataIrb::TRex.parse(tokens) do |t, _index, opens|
       depth = t == opens.last&.first ? opens.size - 1 : opens.size
       min_depth = depth if depth < min_depth
       if t.tok.include? "\n"
