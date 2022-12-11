@@ -16,14 +16,17 @@ module KatakataIrb::RelinePatch
         diff.split(/^@@.+\n/).drop(1).map(&:lines).each do |lines|
           target = lines.reject { _1[0] == '+' }.map { _1[1..] }.join
           replace = lines.reject { _1[0] == '-' }.map { _1[1..] }.join
-          raise unless code.include? target
-          code.sub! target, replace
+          if code.include? target
+            code = code.sub target, replace
+          elsif !code.include?(replace)
+            raise
+          end
         end
         current_patched[path] = code
       end
       patched.update current_patched
     rescue
-      puts "Failed to apply katakata_irb/reline_patches/#{patch_name}.patch to reline"
+      KatakataIrb.log_puts "Failed to apply katakata_irb/reline_patches/#{patch_name}.patch to reline"
     end
 
     RelinePatchIseqLoader.define_method :load_iseq do |fname|

@@ -1,4 +1,6 @@
 #!/usr/bin/env ruby
+require_relative '../lib/katakata_irb'
+KatakataIrb.log_output = STDERR if ARGV.delete '--debug-output'
 unless ARGV.delete '--without-patch'
   require_relative '../lib/katakata_irb/reline_patch'
   KatakataIrb::RelinePatch.require_patched_reline
@@ -6,5 +8,4 @@ unless ARGV.delete '--without-patch'
   KatakataIrb::RubyLexPatch.patch_to_ruby_lex
 end
 require 'katakata_irb'
-KatakataIrb.log_output = STDERR if ARGV.delete '--debug-output'
 KatakataIrb.repl

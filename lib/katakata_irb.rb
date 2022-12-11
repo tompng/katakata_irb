@@ -1,3 +1,4 @@
+require 'io/console'
 module KatakataIrb
   def self.repl
     require 'katakata_irb/completor'
