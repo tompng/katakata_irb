@@ -65,21 +65,22 @@ module KatakataIrb::Completor
     closings = (last_opens + unclosed_heredocs).map do |t,|
       case t.tok
       when /\A%.[<>]\z/
-        '>'
+        $/ + '>'
       when '{', '#{', /\A%.?[{}]\z/
-        '}'
+        $/ + '}'
       when '(', /\A%.?[()]\z/
+        # do not insert \n before closing paren. workaround to avoid syntax error of "a in ^(b\n)"
         ')'
       when '[', /\A%.?[\[\]]\z/
-        ']'
+        $/ + ']'
       when /\A%.?(.)\z/
         $1
       when '"', "'", '/', '`'
         t.tok
       when /\A<<[~-]?(?:"(?<s>.+)"|'(?<s>.+)'|(?<s>.+))/
-        $1 || $2 || $3
+        $/ + ($1 || $2 || $3) + $/
       else
-        'end'
+        $/ + 'end'
       end
     end
 
@@ -107,8 +108,7 @@ module KatakataIrb::Completor
       return
     end
 
-    closings = $/ + closings.reverse.join($/)
-    sexp = Ripper.sexp code + suffix + closings
+    sexp = Ripper.sexp code + suffix + closings.reverse.join
     lines = code.lines
     line_no = lines.size
     col = lines.last.bytesize
