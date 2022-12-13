@@ -620,6 +620,8 @@ class KatakataIrb::TypeSimulator
       KatakataIrb::Types::OBJECT
     in [:yield0]
       KatakataIrb::Types::OBJECT
+    in [:redo | :retry]
+      scope.terminate
     in [:super, args]
       args, kwargs, _block = retrieve_method_args args
       args.each do |arg|
