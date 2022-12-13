@@ -290,8 +290,8 @@ class KatakataIrb::TypeSimulator
     in [:program, statements]
       statements.map { simulate_evaluate _1, scope }.last
     in [:def | :defs,]
-      sexp in [:def, method_name_exp, params, body_stmt]
-      sexp in [:defs, receiver_exp, dot_exp, method_name_exp, params, body_stmt]
+      sexp in [:def, _method_name_exp, params, body_stmt]
+      sexp in [:defs, receiver_exp, _dot_exp, _method_name_exp, params, body_stmt]
       if receiver_exp
         receiver_exp in  [:paren, receiver_exp]
         self_type = simulate_evaluate receiver_exp, scope
@@ -699,7 +699,7 @@ class KatakataIrb::TypeSimulator
         statements.each { simulate_evaluate _1, scope }
       end
       enum
-    in [:when => mode, pattern, if_statements, else_statement]
+    in [:when, pattern, if_statements, else_statement]
       eval_pattern = lambda do |pattern, *rest|
         simulate_evaluate pattern, scope
         scope.conditional { eval_pattern.call(*rest) } if rest.any?
@@ -769,7 +769,7 @@ class KatakataIrb::TypeSimulator
       scope.conditional { match_pattern target, rpattern, scope }
       breakable.call
     in [:binary, lpattern, :'=>', [:var_field, [:@ident, name,]] => rpattern]
-      if lpattern in [:var_ref, [:@const, const_name,]]
+      if lpattern in [:var_ref, [:@const, _const_name,]]
         const_value = simulate_evaluate lpattern, scope
         if (const_value in KatakataIrb::Types::SingletonType) && const_value.module_or_class.is_a?(Class)
           scope[name] = KatakataIrb::Types::InstanceType.new const_value.module_or_class
@@ -1059,7 +1059,7 @@ class KatakataIrb::TypeSimulator
 
   def evaluate_assign_params(params, values, scope)
     values = values.dup
-    params => [:params, pre_required, optional, rest, post_required, keywords, keyrest, block]
+    params => [:params, pre_required, optional, rest, post_required, _keywords, keyrest, block]
     size = (pre_required&.size || 0) + (optional&.size || 0) + (post_required&.size || 0) + (rest ? 1 : 0)
     if values.size == 1 && size >= 2
       value = values.first
@@ -1076,6 +1076,7 @@ class KatakataIrb::TypeSimulator
       scope[name] = KatakataIrb::Types::InstanceType.new Array, Elem: KatakataIrb::Types::UnionType[*rest_values]
     end
     evaluate_massign post_required, post_values, scope if post_required
+    # TODO: assign keywords
     if keyrest in [:kwrest_param, [:@ident, name,]]
       scope[name] = KatakataIrb::Types::InstanceType.new Hash, K: KatakataIrb::Types::SYMBOL, V: KatakataIrb::Types::OBJECT
     end

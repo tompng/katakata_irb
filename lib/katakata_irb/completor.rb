@@ -117,14 +117,14 @@ module KatakataIrb::Completor
       col = 0
     end
 
-    if sexp in [:program, [lvars_exp, *rest_statements]]
+    if sexp in [:program, [_lvars_exp, *rest_statements]]
       sexp = [:program, rest_statements]
     end
 
     *parents, expression, target = find_target sexp, line_no, col
     in_class_module = parents&.any? { _1 in [:class | :module,] }
     icvar_available = !in_class_module
-    return unless target in [type, String, [Integer, Integer]]
+    return unless target in [_type, String, [Integer, Integer]]
     if target in [:@ivar,]
       return [:ivar, name] if icvar_available
     elsif target in [:@cvar,]
