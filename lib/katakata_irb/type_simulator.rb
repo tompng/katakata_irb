@@ -138,7 +138,7 @@ class KatakataIrb::TypeSimulator
 
     def []=(name, type)
       # return if terminated?
-      if @passthrough && !BaseScope.type_by_name(name) == :internal
+      if @passthrough && BaseScope.type_by_name(name) != :internal
         @parent[name] = type
       elsif trace?(name) && @parent.mutable? && !@tables.any? { _1.key? name } && @parent.has?(name)
         @parent[name] = type
@@ -273,6 +273,7 @@ class KatakataIrb::TypeSimulator
   NEXT_RESULT = '%next'
   RETURN_RESULT = '%return'
   PATTERNMATCH_BREAK = '%match'
+  RAISE_BREAK = '%raise'
 
   def initialize(dig_targets)
     @dig_targets = dig_targets
@@ -453,6 +454,10 @@ class KatakataIrb::TypeSimulator
         return scope[name]
       end
       receiver, method, args, kwargs, block, conditional = retrieve_method_call sexp
+      if receiver.nil? && method == 'raise'
+        scope.terminate_with RAISE_BREAK, KatakataIrb::Types::TRUE
+        return KatakataIrb::Types::NIL
+      end
       receiver_type = receiver ? simulate_evaluate(receiver, scope) : scope.self_type
       evaluate_method = lambda do
         args_type = args.map do |arg|
@@ -634,7 +639,9 @@ class KatakataIrb::TypeSimulator
       simulate_evaluate body_stmt, scope
     in [:bodystmt, statements, rescue_stmt, _unknown, ensure_stmt]
       statements = [statements] if statements in [Symbol,] # oneliner-def body
-      return_type = statements.map { simulate_evaluate _1, scope }.last
+      rescue_scope = Scope.new scope, { RAISE_BREAK => nil }, passthrough: true if rescue_stmt
+      return_type = statements.map { simulate_evaluate _1, rescue_scope || scope }.last
+      rescue_scope&.merge_jumps
       if rescue_stmt
         return_type = KatakataIrb::Types::UnionType[return_type, scope.conditional { simulate_evaluate rescue_stmt, scope }]
       end
@@ -658,7 +665,9 @@ class KatakataIrb::TypeSimulator
       end
       return_type
     in [:rescue_mod, statement1, statement2]
-      a = simulate_evaluate statement1, scope
+      rescue_scope = Scope.new scope, { RAISE_BREAK => nil }, passthrough: true
+      a = simulate_evaluate statement1, rescue_scope
+      rescue_scope.merge_jumps
       b = scope.conditional { simulate_evaluate statement2, scope }
       KatakataIrb::Types::UnionType[a, b]
     in [:module, module_stmt, body_stmt]
