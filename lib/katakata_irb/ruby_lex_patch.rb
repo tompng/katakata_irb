@@ -110,10 +110,10 @@ module KatakataIrb::RubyLexPatch
         tokens = KatakataIrb::RubyLexPatch.complete_tokens code, context: context
         line_results, _unclosed_heredocs = KatakataIrb::TRex.parse_line(tokens)
         continue = false
-        line_num_offset = []
+        tokens_until_line = []
         line_results.map.with_index do |(line, _prev_opens, next_opens), line_num_offset|
-          line_num_offset.push(*line.map(&:first))
-          unless (c = process_continue(line_num_offset)).nil?
+          tokens_until_line.push(*line.map(&:first))
+          unless (c = process_continue(tokens_until_line)).nil?
             continue = c
           end
           prompt next_opens, continue, line_num_offset
