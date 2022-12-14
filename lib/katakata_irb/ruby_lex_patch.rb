@@ -3,7 +3,7 @@ require_relative 'trex'
 
 module KatakataIrb::RubyLexPatch
   def self.patch_to_ruby_lex
-    (RubyLex.instance_methods(false) - [:initialize_input, :set_prompt, :process_continue, :check_code_block]).each { RubyLex.remove_method _1 }
+    (RubyLex.instance_methods(false) - [:set_prompt, :process_continue, :check_code_block]).each { RubyLex.remove_method _1 }
     RubyLex.prepend self
   end
 
@@ -183,7 +183,6 @@ module KatakataIrb::RubyLexPatch
   end
 
   def each_top_level_statement(context = nil)
-    initialize_input
     loop do
       begin
         line = readmultiline(context)
@@ -193,9 +192,7 @@ module KatakataIrb::RubyLexPatch
           yield line, @line_no
         end
         @line_no += line.count("\n")
-        raise RubyLex::TerminateLineInput if @io.eof?
       rescue RubyLex::TerminateLineInput
-        initialize_input
       end
     end
   end
