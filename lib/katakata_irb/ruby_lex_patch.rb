@@ -12,13 +12,13 @@ module KatakataIrb::RubyLexPatch
     KatakataIrb::TRex.interpolate_ripper_ignored_tokens(code, incomplete_tokens)
   end
 
-  def calc_nesting_depth(tokens)
+  def calc_nesting_depth(opens)
     indent_level = 0
     nesting_level = 0
-    tokens.each_with_index do |t, index|
+    opens.each_with_index do |t, index|
       case t.event
       when :on_heredoc_beg
-        if tokens[index + 1]&.event != :on_heredoc_beg
+        if opens[index + 1]&.event != :on_heredoc_beg
           if t.tok.start_with?('<<~')
             indent_level += 1
           else
