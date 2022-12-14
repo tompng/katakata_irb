@@ -168,7 +168,10 @@ module KatakataIrb::RubyLexPatch
       store_prompt_to_irb [], false, 0
       loop do
         l = @input.call
-        next if l.nil?
+        unless l
+          return if line.empty?
+          next
+        end
         line << l
         tokens = KatakataIrb::RubyLexPatch.complete_tokens(line, context: context)
         _line, _prev_opens, next_opens = KatakataIrb::TRex.parse_line(tokens).first.last
