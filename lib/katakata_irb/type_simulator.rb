@@ -105,6 +105,7 @@ class KatakataIrb::TypeSimulator
     end
 
     def terminate_with(type, value)
+      return if terminated?
       self[type] = value
       store_jump type
       terminate
