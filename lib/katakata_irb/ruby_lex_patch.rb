@@ -25,7 +25,7 @@ module KatakataIrb::RubyLexPatch
             indent_level = 0
           end
         end
-      when :on_tstring_beg, :on_regexp_beg
+      when :on_tstring_beg, :on_regexp_beg, :on_symbeg
         indent_level += 1 if t.tok[0] == '%'
       when :on_embdoc_beg
         indent_level = 0
@@ -44,8 +44,8 @@ module KatakataIrb::RubyLexPatch
   end
 
   def check_corresponding_token_depth(tokens, line_index)
-    lines, = KatakataIrb::TRex.parse_line(tokens)
-    result = lines[line_index]
+    line_results, = KatakataIrb::TRex.parse_line(tokens)
+    result = line_results[line_index]
     return unless result
     _tokens, prev, opens, min_depth = result
     depth, = calc_nesting_depth(opens.take(min_depth).map(&:first))
@@ -108,10 +108,12 @@ module KatakataIrb::RubyLexPatch
         lines << '' if lines.empty?
         code = lines.map{ |l| l + "\n" }.join
         tokens = KatakataIrb::RubyLexPatch.complete_tokens code, context: context
-        lines, _unclosed_heredocs = KatakataIrb::TRex.parse_line(tokens)
+        line_results, _unclosed_heredocs = KatakataIrb::TRex.parse_line(tokens)
         continue = false
-        lines.map.with_index do |(line, _prev_opens, next_opens), line_num_offset|
-          unless (c = process_continue(line.map(&:first))).nil?
+        line_num_offset = []
+        line_results.map.with_index do |(line, _prev_opens, next_opens), line_num_offset|
+          line_num_offset.push(*line.map(&:first))
+          unless (c = process_continue(line_num_offset)).nil?
             continue = c
           end
           prompt next_opens, continue, line_num_offset
