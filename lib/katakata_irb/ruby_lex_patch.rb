@@ -62,9 +62,9 @@ module KatakataIrb::RubyLexPatch
       ?'
     when ?", /^<</, /^%.$/, /^%Q.$/
       ?"
-    when ":'", ':"', ':', /^%s$/
+    when ":'", ':"', ':', /^%s.$/
       ':'
-    when /^%[iwIW]$/
+    when /^%[iwIW].$/
       ']'
     when '/', /^%r.$/
       '/'
