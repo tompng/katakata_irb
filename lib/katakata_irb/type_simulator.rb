@@ -137,7 +137,6 @@ class KatakataIrb::TypeSimulator
     end
 
     def []=(name, type)
-      # return if terminated?
       if @passthrough && BaseScope.type_by_name(name) != :internal
         @parent[name] = type
       elsif trace?(name) && @parent.mutable? && !@tables.any? { _1.key? name } && @parent.has?(name)
@@ -599,13 +598,16 @@ class KatakataIrb::TypeSimulator
       inner_scope = Scope.new scope, { BREAK_RESULT => nil }, passthrough: true
       simulate_evaluate cond, inner_scope
       scope.conditional { statements.each { simulate_evaluate _1, inner_scope } }
-      breaks = inner_scope[BREAK_RESULT]
       inner_scope.merge_jumps
+      breaks = inner_scope[BREAK_RESULT]
       breaks ? KatakataIrb::Types::UnionType[breaks, KatakataIrb::Types::NIL] : KatakataIrb::Types::NIL
     in [:while_mod | :until_mod, cond, statement]
-      simulate_evaluate cond, scope
-      scope.conditional { simulate_evaluate statement, scope }
-      KatakataIrb::Types::NIL
+      inner_scope = Scope.new scope, { BREAK_RESULT => nil }, passthrough: true
+      simulate_evaluate cond, inner_scope
+      scope.conditional { simulate_evaluate statement, inner_scope }
+      inner_scope.merge_jumps
+      breaks = inner_scope[BREAK_RESULT]
+      breaks ? KatakataIrb::Types::UnionType[breaks, KatakataIrb::Types::NIL] : KatakataIrb::Types::NIL
     in [:break | :next | :return => jump_type, value]
       internal_key = jump_type == :break ? BREAK_RESULT : jump_type == :next ? NEXT_RESULT : RETURN_RESULT
       if value.empty?
@@ -695,10 +697,13 @@ class KatakataIrb::TypeSimulator
       extract_param_names(params).each { scope[_1] = KatakataIrb::Types::NIL }
       response = simulate_call enum, :first, [], nil, nil
       evaluate_assign_params params, [response], scope
+      inner_scope = Scope.new scope, { BREAK_RESULT => nil }, passthrough: true
       scope.conditional do
-        statements.each { simulate_evaluate _1, scope }
+        statements.each { simulate_evaluate _1, inner_scope }
       end
-      enum
+      inner_scope.merge_jumps
+      breaks = inner_scope[BREAK_RESULT]
+      breaks ? KatakataIrb::Types::UnionType[breaks, enum] : enum
     in [:when, pattern, if_statements, else_statement]
       eval_pattern = lambda do |pattern, *rest|
         simulate_evaluate pattern, scope
