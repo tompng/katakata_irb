@@ -176,7 +176,7 @@ module KatakataIrb::TRex
       end
       yield t, index, opens if block_given?
     end
-    [opens, pending_heredocs.reverse]
+    opens.map(&:first) + pending_heredocs.reverse
   end
 
   def self.parse_line(tokens)
@@ -184,14 +184,14 @@ module KatakataIrb::TRex
     prev_opens = []
     min_depth = 0
     output = []
-    last_opens, unclosed_heredocs = KatakataIrb::TRex.parse(tokens) do |t, _index, opens|
+    last_opens = KatakataIrb::TRex.parse(tokens) do |t, _index, opens|
       depth = t == opens.last&.first ? opens.size - 1 : opens.size
       min_depth = depth if depth < min_depth
       if t.tok.include? "\n"
         t.tok.each_line do |line|
           line_tokens << [t, line]
           next if line[-1] != "\n"
-          next_opens = opens.dup
+          next_opens = opens.map(&:first)
           output << [line_tokens, prev_opens, next_opens, min_depth]
           prev_opens = next_opens
           min_depth = prev_opens.size
@@ -202,6 +202,6 @@ module KatakataIrb::TRex
       end
     end
     output << [line_tokens, prev_opens, last_opens, min_depth] if line_tokens.any?
-    [output, unclosed_heredocs]
+    output
   end
 end

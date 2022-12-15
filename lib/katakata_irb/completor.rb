@@ -61,8 +61,8 @@ module KatakataIrb::Completor
     code = lvars_code + code
     tokens = RubyLex.ripper_lex_without_warning code
     tokens = KatakataIrb::TRex.interpolate_ripper_ignored_tokens code, tokens
-    last_opens, unclosed_heredocs = KatakataIrb::TRex.parse(tokens)
-    closings = (last_opens + unclosed_heredocs).map do |t,|
+    last_opens = KatakataIrb::TRex.parse(tokens)
+    closings = last_opens.map do |t|
       case t.tok
       when /\A%.[<>]\z/
         $/ + '>'
