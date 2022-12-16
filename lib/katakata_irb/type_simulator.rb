@@ -1105,14 +1105,10 @@ class KatakataIrb::TypeSimulator
       name = label.delete ':'
       scope[name] = value ? simulate_evaluate(value, scope) : KatakataIrb::Types::OBJECT
     end
-    case keyrest
-    in [:args_forward] | nil
-    in [:kwrest_param, [:@ident, name,]]
+    if keyrest in [:kwrest_param, [:@ident, name,]]
         scope[name] = KatakataIrb::Types::HASH
     end
-    case block
-    in :& | nil
-    in [:blockarg, [:@ident, name,]]
+    if block in [:blockarg, [:@ident, name,]]
       scope[name] = KatakataIrb::Types::PROC
     end
   end
