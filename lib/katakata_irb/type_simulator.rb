@@ -501,6 +501,7 @@ class KatakataIrb::TypeSimulator
               [KatakataIrb::Types::UnionType[result, *nexts], breaks]
             end
           else
+            call_block_proc = ->(_block_args) { KatakataIrb::Types::OBJECT }
             simulate_evaluate block, scope
           end
         end
@@ -970,11 +971,14 @@ class KatakataIrb::TypeSimulator
       [args, [], nil]
     in [:args_add_block, [:args_add_star,] => args, block_arg]
       args, kwargs, = retrieve_method_args args
+      block_arg = [:void_stmt] if block_arg.nil? # method(*splat, &)
       [args, kwargs, block_arg]
     in [:args_add_block, [*args, [:bare_assoc_hash,] => kw], block_arg]
+      block_arg = [:void_stmt] if block_arg.nil? # method(**splat, &)
       _, kwargs = retrieve_method_args kw
       [args, kwargs, block_arg]
     in [:args_add_block, [*args], block_arg]
+      block_arg = [:void_stmt] if block_arg.nil? # method(arg, &)
       [args, [], block_arg]
     in [:bare_assoc_hash, kws]
       kwargs = []
