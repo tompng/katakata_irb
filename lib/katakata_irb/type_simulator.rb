@@ -893,6 +893,8 @@ class KatakataIrb::TypeSimulator
         scope[name] = value || KatakataIrb::Types::OBJECT
       in [:mlhs, *mlhs]
         evaluate_massign mlhs, value || [], scope
+      in nil
+        # a, *, b = value
       end
     end
   end
