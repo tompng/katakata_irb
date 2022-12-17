@@ -984,7 +984,7 @@ class KatakataIrb::TypeSimulator
       kwargs = []
       kws.each do |kw|
         if kw in [:assoc_splat, value,]
-          kwargs << KatakataIrb::Types::Splat.new(value)
+          kwargs << KatakataIrb::Types::Splat.new(value) if value
         elsif kw in [:assoc_new, [:@label, label,] => key, nil]
           name = label.delete ':'
           kwargs << [key, [:__var_ref_or_call, [name =~ /\A[A-Z]/ ? :@const : :@ident, name, [0, 0]]]]
@@ -999,7 +999,7 @@ class KatakataIrb::TypeSimulator
       [args, kwargs, nil]
     in [:args_add_star, pre_args, star_arg, *post_args]
       pre_args, = retrieve_method_args pre_args if pre_args in [:args_add_star,]
-      args = [*pre_args, KatakataIrb::Types::Splat.new(star_arg), *post_args]
+      args = star_arg ? [*pre_args, KatakataIrb::Types::Splat.new(star_arg), *post_args] : pre_args + post_args
       [args, [], nil]
     in [:arg_paren, args]
       args ? retrieve_method_args(args) : [[], [], nil]
