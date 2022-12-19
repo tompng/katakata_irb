@@ -298,7 +298,11 @@ module KatakataIrb::Types
         type.module_or_class if (type in SingletonType) && type.module_or_class.is_a?(Class)
       end
       if classes.empty?
-        klass = Object.const_get(return_type.name.name)
+        begin
+          klass = return_type.name.to_namespace.path.reduce(Object) { _1.const_get _2 }
+        rescue => e
+          KatakataIrb.log_puts e
+        end
         classes << klass if klass in Class
       end
       if return_type.args
