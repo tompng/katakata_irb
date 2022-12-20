@@ -12,4 +12,16 @@ class TestKatakataIrb < Minitest::Test
       assert KatakataIrb::Completor.analyze(File.read(file) + '.hoge'), "analyzing #{file}"
     end
   end
+
+  def syntax
+    a[i], b[j, k], *, c.d = value
+    for a[i], b[j, k], *, c.d in array
+    end
+    def f(*,**,&)
+      f(&)
+    end
+    def f(...)
+      f(...)
+    end
+  end
 end
