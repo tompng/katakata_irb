@@ -893,8 +893,12 @@ class KatakataIrb::TypeSimulator
         scope[name] = value || KatakataIrb::Types::OBJECT
       in [:mlhs, *mlhs]
         evaluate_massign mlhs, value || [], scope
-      in [:field | :aref_field,]
-        # a.b, c[i] = value
+      in [:field, receiver,]
+        # (a=x).b, c = value
+        simulate_evaluate receiver, scope
+      in [:aref_field, *field]
+        # (a=x)[i=y, j=z], b = value
+        simulate_evaluate [:aref, *field], scope
       in nil
         # a, *, b = value
       end
