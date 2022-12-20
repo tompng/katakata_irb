@@ -693,7 +693,7 @@ class KatakataIrb::TypeSimulator
       klass_types << KatakataIrb::Types::CLASS if klass_types.empty?
       simulate_evaluate body_stmt, Scope.new(scope, { SELF => KatakataIrb::Types::UnionType[*klass_types], BREAK_RESULT => nil, NEXT_RESULT => nil, RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
     in [:for, fields, enum, statements]
-      fields = [fields] if fields in [:var_field,]
+      fields = [fields] if fields in [:var_field | :field | :aref_field,]
       params = [:params, fields, nil, nil, nil, nil, nil, nil]
       enum = simulate_evaluate enum, scope
       extract_param_names(params).each { scope[_1] = KatakataIrb::Types::NIL }
@@ -893,6 +893,8 @@ class KatakataIrb::TypeSimulator
         scope[name] = value || KatakataIrb::Types::OBJECT
       in [:mlhs, *mlhs]
         evaluate_massign mlhs, value || [], scope
+      in [:field | :aref_field,]
+        # a.b, c[i] = value
       in nil
         # a, *, b = value
       end
@@ -1047,6 +1049,8 @@ class KatakataIrb::TypeSimulator
         items.each(&extract_mlhs)
       in [:rest_param, item]
         extract_mlhs.call item if item
+      in [:field | :aref_field,]
+        # a.b, c[i] = value
       in [:excessed_comma]
       end
     end
