@@ -51,6 +51,11 @@ module KatakataIrb::Completor
     end
     IRB::InputCompletor::CompletionProc.define_singleton_method :call do |*args|
       completion_proc.call(*args)
+    rescue => e
+      $error = e
+      KatakataIrb.log_puts
+      KatakataIrb.log_puts "#{e.inspect} stored to $error"
+      KatakataIrb.log_puts
     end
   end
 
