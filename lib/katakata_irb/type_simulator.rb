@@ -293,7 +293,7 @@ class KatakataIrb::TypeSimulator
       sexp in [:def, _method_name_exp, params, body_stmt]
       sexp in [:defs, receiver_exp, _dot_exp, _method_name_exp, params, body_stmt]
       if receiver_exp
-        receiver_exp in  [:paren, receiver_exp]
+        receiver_exp in [:paren, receiver_exp]
         self_type = simulate_evaluate receiver_exp, scope
       else
         current_self_types = scope.self_type.types
@@ -407,6 +407,9 @@ class KatakataIrb::TypeSimulator
       KatakataIrb::Types::InstanceType.new Hash, K: KatakataIrb::Types::UnionType[*keys], V: KatakataIrb::Types::UnionType[*values]
     in [:hash, nil]
       KatakataIrb::Types::InstanceType.new Hash
+    in [:paren, [Symbol,] => statement]
+      # workaround for `p (foo), (bar), (baz)` #=> [[:paren, foo], [:paren, [bar]], [:paren, [baz]]]
+      simulate_evaluate statement, scope
     in [:paren | :ensure | :else, statements]
       statements.map { simulate_evaluate _1, scope }.last
     in [:const_path_ref, receiver, [:@const, name,]]

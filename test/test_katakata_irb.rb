@@ -23,5 +23,6 @@ class TestKatakataIrb < Minitest::Test
     def f(...)
       f(...)
     end
+    p (1.method)
   end
 end
