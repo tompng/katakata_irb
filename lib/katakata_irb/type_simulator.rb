@@ -407,9 +407,9 @@ class KatakataIrb::TypeSimulator
       KatakataIrb::Types::InstanceType.new Hash, K: KatakataIrb::Types::UnionType[*keys], V: KatakataIrb::Types::UnionType[*values]
     in [:hash, nil]
       KatakataIrb::Types::InstanceType.new Hash
-    in [:paren, [Symbol,] => statement]
-      # workaround for `p (foo), (bar), (baz)` #=> [[:paren, foo], [:paren, [bar]], [:paren, [baz]]]
-      simulate_evaluate statement, scope
+    in [:paren, [Symbol,] | false => statement]
+      # workaround for `p ()` and `p (foo)`
+      simulate_evaluate statement, scope if statement
     in [:paren | :ensure | :else, statements]
       statements.map { simulate_evaluate _1, scope }.last
     in [:const_path_ref, receiver, [:@const, name,]]
