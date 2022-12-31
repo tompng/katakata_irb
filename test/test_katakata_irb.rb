@@ -25,5 +25,6 @@ class TestKatakataIrb < Minitest::Test
     end
     p ()
     p (1.method)
+    (a,b)=1
   end
 end

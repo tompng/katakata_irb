@@ -577,6 +577,7 @@ class KatakataIrb::TypeSimulator
       simulate_evaluate target, scope
       simulate_evaluate value, scope
     in [:massign, targets, value]
+      targets in [:mlhs, *targets] # (a,b) = value
       rhs = simulate_evaluate value, scope
       evaluate_massign targets, rhs, scope
       rhs
