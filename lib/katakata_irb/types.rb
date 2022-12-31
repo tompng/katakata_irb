@@ -85,23 +85,26 @@ module KatakataIrb::Types
 
   def self.type_from_object(object, max_level: 4)
     max_level -= 1
+    sample_size = 1000
     case object
     when Array
+      values = object.size > sample_size ? object.sample(sample_size) : object
       if max_level > 0
-        values = object.map { type_from_object(_1, max_level:) }
-        InstanceType.new Array, { Elem: UnionType[*values] }
+        InstanceType.new Array, { Elem: UnionType[*values.map { type_from_object(_1, max_level:) }] }
       else
-        InstanceType.new Array, { Elem: UnionType[*object.map(&:class).uniq.map { InstanceType.new _1 }] }
+        InstanceType.new Array, { Elem: UnionType[*values.map(&:class).uniq.map { InstanceType.new _1 }] }
       end
     when Hash
+      keys = object.size > sample_size ? object.keys.sample(sample_size) : object.keys
+      values = object.size > sample_size ? object.values.sample(sample_size) : object.values
       if max_level > 0
-        keys = object.keys.map { type_from_object(_1, max_level:) }
-        values = object.values.map { type_from_object(_1, max_level:) }
-        InstanceType.new Hash, { K: UnionType[*keys], V: UnionType[*values] }
+        key_types = keys.map { type_from_object(_1, max_level:) }
+        value_types = values.map { type_from_object(_1, max_level:) }
+        InstanceType.new Hash, { K: UnionType[*key_types], V: UnionType[*value_types] }
       else
-        keys = object.keys.map(&:class).uniq.map { InstanceType.new _1 }
-        values = object.values.map(&:class).uniq.map { InstanceType.new _1 }
-        InstanceType.new Hash, { K: UnionType[*keys], V: UnionType[*values] }
+        key_types = keys.map(&:class).uniq.map { InstanceType.new _1 }
+        value_types = values.map(&:class).uniq.map { InstanceType.new _1 }
+        InstanceType.new Hash, { K: UnionType[*key_types], V: UnionType[*value_types] }
       end
     when Module
       SingletonType.new object
