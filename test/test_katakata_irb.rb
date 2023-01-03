@@ -26,5 +26,10 @@ class TestKatakataIrb < Minitest::Test
     p ()
     p (1.method)
     (a,b)=1
+    def f() #comment
+=begin
+embdoc
+=end
+      = 1
   end
 end

@@ -39,7 +39,7 @@ module KatakataIrb::TRex
         opens.pop
         skip = true if %i[on_ident on_const on_op on_cvar on_ivar on_gvar on_kw on_int on_backtick].include? t.event
       when :in_method_head
-        unless %i[on_sp on_ignored_nl].include?(t.event)
+        unless %i[on_sp on_ignored_nl on_comment on_embdoc_beg on_embdoc on_embdoc_end].include?(t.event)
           next_args = []
           body = nil
           if args.include? :receiver
