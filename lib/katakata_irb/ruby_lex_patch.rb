@@ -84,16 +84,16 @@ module KatakataIrb::RubyLexPatch
 
     if first_token && first_token.state != Ripper::EXPR_DOT
       tokens_without_last_line = tokens[0..index]
-      if check_termination(tokens_without_last_line)
+      if check_termination(tokens_without_last_line.map(&:tok).join, context: context)
         return last_line_tokens.map(&:tok).join
       end
     end
     false
   end
 
-  def check_termination(tokens)
-    opens = KatakataIrb::TRex.parse(tokens)
-    opens.empty? && !process_continue(tokens)
+  def check_termination(code, context: nil)
+    tokens = KatakataIrb::RubyLexPatch.complete_tokens(code, context: context)
+    !process_continue(tokens) && !check_code_block(code, tokens)
   end
 
   def set_input(io, p = nil, context: nil, &block)
@@ -101,8 +101,7 @@ module KatakataIrb::RubyLexPatch
     if @io.respond_to?(:check_termination)
       @io.check_termination do |code|
         if Reline::IOGate.in_pasting?
-          lex = RubyLex.new
-          rest = lex.check_termination_in_prev_line(code, context: context)
+          rest = check_termination_in_prev_line(code, context: context)
           if rest
             Reline.delete_text
             rest.bytes.reverse_each do |c|
@@ -113,8 +112,7 @@ module KatakataIrb::RubyLexPatch
             false
           end
         else
-          tokens = KatakataIrb::RubyLexPatch.complete_tokens(code, context: context)
-          check_termination(tokens)
+          check_termination(code, context: context)
         end
       end
     end
