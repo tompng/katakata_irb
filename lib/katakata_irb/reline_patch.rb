@@ -3,7 +3,7 @@ module KatakataIrb::RelinePatch
   module RelinePatchIseqLoader; end
   def self.require_patched_reline
     # Apply patches of unmerged pull-request to reline
-    patches = %w[wholelines escapeseq indent fullwidth raw scrollbar]
+    patches = %w[wholelines escapeseq indent raw scrollbar]
     patched = {}
     require 'reline/version.rb' # result of $LOAD_PATH.resolve_feature_path will change after this require
     patches.each do |patch_name|
