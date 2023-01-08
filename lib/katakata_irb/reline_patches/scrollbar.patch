@@ -1,18 +1,8 @@
 diff --git a/lib/reline/line_editor.rb b/lib/reline/line_editor.rb
-index e3985a3..8d785db 100644
+index 8153aab..50a063a 100644
 --- a/lib/reline/line_editor.rb
 +++ b/lib/reline/line_editor.rb
-@@ -680,6 +680,9 @@ class Reline::LineEditor
-     end
-     height = dialog_render_info.height || DIALOG_DEFAULT_HEIGHT
-     height = dialog.contents.size if dialog.contents.size < height
-+    if dialog.scroll_top >= dialog.contents.size - height
-+      dialog.scroll_top = dialog.contents.size - height
-+    end
-     if dialog.contents.size > height
-       if dialog.pointer
-         if dialog.pointer < 0
-@@ -690,17 +693,20 @@ class Reline::LineEditor
+@@ -703,17 +703,17 @@ class Reline::LineEditor
            dialog.scroll_top = dialog.pointer
          end
          pointer = dialog.pointer - dialog.scroll_top
@@ -23,9 +13,7 @@ index e3985a3..8d785db 100644
      end
 -    if dialog.contents and dialog.scroll_top >= dialog.contents.size
 -      dialog.scroll_top = dialog.contents.size - height
-+    if dialog_render_info.contents and dialog.scroll_top > dialog_render_info.contents.size - height
-+      dialog.scroll_top = dialog_render_info.contents.size - height
-     end
+-    end
      if dialog_render_info.scrollbar and dialog_render_info.contents.size > height
        bar_max_height = height * 2
        moving_distance = (dialog_render_info.contents.size - height) * 2
@@ -35,7 +23,10 @@ index e3985a3..8d785db 100644
        dialog.scrollbar_pos = ((bar_max_height - bar_height) * position_ratio).floor.to_i
      else
        dialog.scrollbar_pos = nil
-@@ -745,4 +751,4 @@ class Reline::LineEditor
+@@ -755,7 +755,7 @@ class Reline::LineEditor
+       str_width = dialog.width - (dialog.scrollbar_pos.nil? ? 0 : @block_elem_width)
+       str = padding_space_with_escape_sequences(Reline::Unicode.take_range(item, 0, str_width), str_width)
+       @output.write "\e[#{bg_color}m\e[#{fg_color}m#{str}"
 -      if dialog.scrollbar_pos and (dialog.scrollbar_pos != old_dialog.scrollbar_pos or dialog.column != old_dialog.column)
 +      if dialog.scrollbar_pos
          @output.write "\e[37m"
