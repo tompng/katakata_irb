@@ -37,75 +37,92 @@ module KatakataIrb::TRex
       case state
       when :in_unquoted_symbol
         opens.pop
-        skip = true if %i[on_ident on_const on_op on_cvar on_ivar on_gvar on_kw on_int on_backtick].include? t.event
+        skip = true if %i[on_ident on_const on_op on_cvar on_ivar on_gvar on_kw on_int on_backtick].include?(t.event)
       when :in_method_head
         unless %i[on_sp on_ignored_nl on_comment on_embdoc_beg on_embdoc on_embdoc_end].include?(t.event)
           next_args = []
           body = nil
-          if args.include? :receiver
+          if args.include?(:receiver)
             case t.event
             when :on_lparen, :on_ivar, :on_gvar, :on_cvar
+              # def (receiver). | def @ivar. | def $gvar. | def @@cvar.
               next_args << :dot
             when :on_kw
-              if t.tok in 'self' | 'true' | 'false' | 'nil'
-                next_args.push :arg, :dot
+              case t.tok
+              when 'self', 'true', 'false', 'nil'
+                # def self(arg) | def self.
+                next_args.push(:arg, :dot)
               else
+                # def if(arg)
                 skip = true
                 next_args << :arg
               end
-            when :on_op
+            when :on_op, :on_backtick
+              # def +(arg)
               skip = true
               next_args << :arg
             when :on_ident, :on_const
-              next_args.push :arg, :dot
+              # def a(arg) | def a.
+              next_args.push(:arg, :dot)
             end
           end
-          if args.include? :dot
+          if args.include?(:dot)
+            # def receiver.name
             next_args << :name if t.event == :on_period || (t.event == :on_op && t.tok == '::')
           end
-          if args.include? :name
-            if %i[on_ident on_const on_op on_kw].include? t.event
+          if args.include?(:name)
+            if %i[on_ident on_const on_op on_kw on_backtick].include?(t.event)
+              # def name(arg) | def receiver.name(arg)
               next_args << :arg
               skip = true
             end
           end
-          if args.include? :arg
+          if args.include?(:arg)
             case t.event
-            when :on_op
-              body = :oneliner if t.tok == '='
             when :on_nl, :on_semicolon
+              # def recever.f;
               body = :normal
             when :on_lparen
+              # def recever.f()
               next_args << :eq
             else
-              next_args << :arg_without_paren
+              if t.event == :on_op && t.tok == '='
+                # def receiver.f =
+                body = :oneliner
+              else
+                # def recever.f arg
+                next_args << :arg_without_paren
+              end
             end
           end
-          if args.include? :eq
+          if args.include?(:eq)
             if t.event == :on_op && t.tok == '='
               body = :oneliner
-            elsif t.event != :on_embdoc_beg
+            else
               body = :normal
             end
           end
-          if args.include? :args_without_paren
-            body = :normal if %i[on_semicolon on_nl].include? t.event
+          if args.include?(:arg_without_paren)
+            if %i[on_semicolon on_nl].include?(t.event)
+              # def f a;
+              body = :normal
+            else
+              # def f a, b
+              next_args << :arg_without_paren
+            end
           end
           if body == :oneliner
             opens.pop
           elsif body
-            opens.pop
-            opens << [last_tok, nil]
+            opens[-1] = [last_tok, nil]
           else
-            opens.pop
-            opens << [last_tok, :in_method_head, next_args]
+            opens[-1] = [last_tok, :in_method_head, next_args]
           end
         end
       when :in_for_while_until_condition
         if t.event == :on_semicolon || t.event == :on_nl || (t.event == :on_kw && t.tok == 'do')
           skip = true if t.event == :on_kw && t.tok == 'do'
-          opens.pop
-          opens << [last_tok, nil]
+          opens[-1] = [last_tok, nil]
         end
       end
 
@@ -184,10 +201,10 @@ module KatakataIrb::TRex
     prev_opens = []
     min_depth = 0
     output = []
-    last_opens = KatakataIrb::TRex.parse(tokens) do |t, _index, opens|
+    last_opens = parse(tokens) do |t, _index, opens|
       depth = t == opens.last&.first ? opens.size - 1 : opens.size
       min_depth = depth if depth < min_depth
-      if t.tok.include? "\n"
+      if t.tok.include?("\n")
         t.tok.each_line do |line|
           line_tokens << [t, line]
           next if line[-1] != "\n"

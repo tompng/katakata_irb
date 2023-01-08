@@ -93,7 +93,8 @@ module KatakataIrb::RubyLexPatch
 
   def check_termination(code, context: nil)
     tokens = KatakataIrb::RubyLexPatch.complete_tokens(code, context: context)
-    !process_continue(tokens) && !check_code_block(code, tokens)
+    opens = KatakataIrb::TRex.parse(tokens)
+    opens.empty? && !process_continue(tokens) && !check_code_block(code, tokens)
   end
 
   def set_input(io, p = nil, context: nil, &block)
@@ -112,6 +113,13 @@ module KatakataIrb::RubyLexPatch
             false
           end
         else
+          # Accept any single-line input for symbol aliases or commands that transform args
+          command = code.split(/\s/, 2).first
+          if context.symbol_alias?(command) || context.transform_args?(command)
+            next true
+          end
+
+          code.gsub!(/\s*\z/, '').concat("\n")
           check_termination(code, context: context)
         end
       end
@@ -128,9 +136,7 @@ module KatakataIrb::RubyLexPatch
           line_tokens.each do |token, _s|
             tokens_until_line << token if token != tokens_until_line.last
           end
-          unless (c = process_continue(tokens_until_line)).nil?
-            continue = c
-          end
+          continue = process_continue(tokens_until_line)
           prompt next_opens, continue, line_num_offset
         end
       end
@@ -150,7 +156,7 @@ module KatakataIrb::RubyLexPatch
       @io.auto_indent do |lines, line_index, byte_pointer, is_newline|
         if is_newline
           tokens = KatakataIrb::RubyLexPatch.complete_tokens(lines[0..line_index].join("\n"), context: context)
-          process_indent_level tokens
+          process_indent_level(tokens)
         else
           code = line_index.zero? ? '' : lines[0..(line_index - 1)].map{ |l| l + "\n" }.join
           last_line = lines[line_index]&.byteslice(0, byte_pointer)
@@ -168,19 +174,20 @@ module KatakataIrb::RubyLexPatch
     @prompt.call(ltype, nesting_level, opens.any? || continue, @line_no + line_num_offset)
   end
 
-  def store_prompt_to_irb(...)
-    prompt(...) # TODO: do not use this. change the api. example: @input.call(prompt)
+  # TODO: do not use this. change the api. example: @input.call(prompt)
+  def store_prompt_to_irb(opens, continue, line_num_offset)
+    prompt(opens, continue, line_num_offset)
   end
 
   def readmultiline(context)
     if @io.respond_to? :check_termination
-      store_prompt_to_irb [], false, 0
+      store_prompt_to_irb([], false, 0)
       @input.call
     else
       # nomultiline
       line = ''
       line_offset = 0
-      store_prompt_to_irb [], false, 0
+      store_prompt_to_irb([], false, 0)
       loop do
         l = @input.call
         unless l
@@ -192,7 +199,7 @@ module KatakataIrb::RubyLexPatch
         _line_tokens, _prev_opens, next_opens = KatakataIrb::TRex.parse_line(tokens).last
         return line if next_opens.empty?
         line_offset += 1
-        store_prompt_to_irb next_opens, true, line_offset
+        store_prompt_to_irb(next_opens, true, line_offset)
       end
     end
   end
