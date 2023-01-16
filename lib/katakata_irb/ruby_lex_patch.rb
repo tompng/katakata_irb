@@ -1,5 +1,5 @@
 require 'irb'
-require_relative 'trex'
+require_relative 'nesting_parser'
 
 module KatakataIrb::RubyLexPatch
   def self.patch_to_ruby_lex
@@ -9,7 +9,7 @@ module KatakataIrb::RubyLexPatch
 
   def self.complete_tokens(code, context: nil)
     incomplete_tokens = RubyLex.ripper_lex_without_warning(code, context: context)
-    KatakataIrb::TRex.interpolate_ripper_ignored_tokens(code, incomplete_tokens)
+    KatakataIrb::NestingParser.interpolate_ripper_ignored_tokens(code, incomplete_tokens)
   end
 
   def calc_nesting_depth(opens)
@@ -38,13 +38,13 @@ module KatakataIrb::RubyLexPatch
   end
 
   def process_indent_level(tokens)
-    opens = KatakataIrb::TRex.parse(tokens)
+    opens = KatakataIrb::NestingParser.parse(tokens)
     indent, _nesting = calc_nesting_depth(opens)
     indent * 2
   end
 
   def check_corresponding_token_depth(tokens, line_index)
-    line_results = KatakataIrb::TRex.parse_line(tokens)
+    line_results = KatakataIrb::NestingParser.parse_line(tokens)
     result = line_results[line_index]
     return unless result
     _tokens, prev, opens, min_depth = result
@@ -93,7 +93,7 @@ module KatakataIrb::RubyLexPatch
 
   def check_termination(code, context: nil)
     tokens = KatakataIrb::RubyLexPatch.complete_tokens(code, context: context)
-    opens = KatakataIrb::TRex.parse(tokens)
+    opens = KatakataIrb::NestingParser.parse(tokens)
     opens.empty? && !process_continue(tokens) && !check_code_block(code, tokens)
   end
 
@@ -129,7 +129,7 @@ module KatakataIrb::RubyLexPatch
         lines << '' if lines.empty?
         code = lines.map{ |l| l + "\n" }.join
         tokens = KatakataIrb::RubyLexPatch.complete_tokens code, context: context
-        line_results = KatakataIrb::TRex.parse_line(tokens)
+        line_results = KatakataIrb::NestingParser.parse_line(tokens)
         continue = false
         tokens_until_line = []
         line_results.map.with_index do |(line_tokens, _prev_opens, next_opens), line_num_offset|
@@ -196,7 +196,7 @@ module KatakataIrb::RubyLexPatch
         end
         line << l
         tokens = KatakataIrb::RubyLexPatch.complete_tokens(line, context: context)
-        _line_tokens, _prev_opens, next_opens = KatakataIrb::TRex.parse_line(tokens).last
+        _line_tokens, _prev_opens, next_opens = KatakataIrb::NestingParser.parse_line(tokens).last
         return line if next_opens.empty?
         line_offset += 1
         store_prompt_to_irb(next_opens, true, line_offset)

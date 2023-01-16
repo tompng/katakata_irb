@@ -1,5 +1,4 @@
-module KatakataIrb; end
-module KatakataIrb::TRex
+module KatakataIrb::NestingParser
   def self.interpolate_ripper_ignored_tokens(code, tokens)
     line_positions = code.lines.reduce([0]) { _1 << _1.last + _2.bytesize }
     prev_byte_pos = 0
@@ -31,13 +30,17 @@ module KatakataIrb::TRex
     opens = []
     pending_heredocs = []
     first_token_on_line = true
-    tokens.each_with_index do |t, index|
+    tokens.each do |t|
       skip = false
       last_tok, state, args = opens.last
       case state
       when :in_unquoted_symbol
-        opens.pop
-        skip = true if %i[on_ident on_const on_op on_cvar on_ivar on_gvar on_kw on_int on_backtick].include?(t.event)
+        unless t.event == :on_sp
+          opens.pop
+          skip = true
+        end
+      when :in_lambda_head
+        opens.pop if t.event == :on_tlambeg || (t.event == :on_kw && t.tok == 'do')
       when :in_method_head
         unless %i[on_sp on_ignored_nl on_comment on_embdoc_beg on_embdoc on_embdoc_end].include?(t.event)
           next_args = []
@@ -160,6 +163,8 @@ module KatakataIrb::TRex
               opens << [t, nil]
             end
           end
+        when :on_tlambda
+          opens << [t, :in_lambda_head]
         when :on_lparen, :on_lbracket, :on_lbrace, :on_tlambeg, :on_embexpr_beg, :on_embdoc_beg
           opens << [t, nil]
         when :on_rparen, :on_rbracket, :on_rbrace, :on_embexpr_end, :on_embdoc_end
@@ -188,10 +193,10 @@ module KatakataIrb::TRex
         first_token_on_line = false
       end
       if pending_heredocs.any? && t.tok.include?("\n")
-        pending_heredocs.reverse_each { opens << [_1, nil] }
+        pending_heredocs.reverse_each { |t| opens << [t, nil] }
         pending_heredocs = []
       end
-      yield t, index, opens if block_given?
+      yield t, opens if block_given?
     end
     opens.map(&:first) + pending_heredocs.reverse
   end
@@ -201,7 +206,7 @@ module KatakataIrb::TRex
     prev_opens = []
     min_depth = 0
     output = []
-    last_opens = parse(tokens) do |t, _index, opens|
+    last_opens = parse(tokens) do |t, opens|
       depth = t == opens.last&.first ? opens.size - 1 : opens.size
       min_depth = depth if depth < min_depth
       if t.tok.include?("\n")

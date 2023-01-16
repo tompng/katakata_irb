@@ -1,4 +1,4 @@
-require_relative 'trex'
+require_relative 'nesting_parser'
 require_relative 'type_simulator'
 require 'rbs'
 require 'rbs/cli'
@@ -65,8 +65,8 @@ module KatakataIrb::Completor
     end.join + "nil;\n"
     code = lvars_code + code
     tokens = RubyLex.ripper_lex_without_warning code
-    tokens = KatakataIrb::TRex.interpolate_ripper_ignored_tokens code, tokens
-    last_opens = KatakataIrb::TRex.parse(tokens)
+    tokens = KatakataIrb::NestingParser.interpolate_ripper_ignored_tokens code, tokens
+    last_opens = KatakataIrb::NestingParser.parse(tokens)
     closings = last_opens.map do |t|
       case t.tok
       when /\A%.[<>]\z/
