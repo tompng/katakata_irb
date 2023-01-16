@@ -19,7 +19,7 @@ module KatakataIrb::RubyLexPatch
       case t.event
       when :on_heredoc_beg
         if opens[index + 1]&.event != :on_heredoc_beg
-          if t.tok.start_with?('<<~')
+          if t.tok.match?(/^<<[~-]/)
             indent_level += 1
           else
             indent_level = 0
@@ -37,43 +37,31 @@ module KatakataIrb::RubyLexPatch
     [indent_level, nesting_level]
   end
 
-  def free_indent_token(opens, line_index)
-    last_token = opens.last
-    return unless last_token
-    if last_token.event == :on_heredoc_beg && last_token.pos.first < line_index + 1
-      # accept extra indent spaces inside heredoc
-      last_token
-    end
-  end
-
-  def process_indent_level(tokens, lines)
-    opens = KatakataIrb::NestingParser.parse(tokens)
-    depth, _nesting = calc_nesting_depth(opens)
-    indent = depth * 2
-    line_index = lines.size - 2
-    if free_indent_token(opens, line_index)
-      return [indent, lines[line_index][/^ */].length].max
-    end
-    indent
-  end
-
-  def check_corresponding_token_depth(tokens, lines, line_index)
+  def process_indent_level(tokens, lines, line_index, is_newline)
     line_results = KatakataIrb::NestingParser.parse_line(tokens)
     result = line_results[line_index]
     return unless result
-    _tokens, prev_opens, opens, min_depth = result
-    depth, = calc_nesting_depth(opens.take(min_depth))
-    depth = 0 if prev_opens.last&.tok =~ /<<[^~]/
-    indent = depth * 2
-    free_indent_tok = free_indent_token(opens, line_index)
-    prev_line_free_indent_tok = free_indent_token(prev_opens, line_index - 1)
-    if prev_line_free_indent_tok && prev_line_free_indent_tok != free_indent_tok
-      return indent
-    elsif free_indent_tok
-      return [indent, lines[line_index][/^ */].length].max
-    end
+    _tokens, prev_opens, next_opens, min_depth = result
+    depth, = calc_nesting_depth(prev_opens.take(min_depth))
     prev_depth, = calc_nesting_depth(prev_opens)
-    indent if depth < prev_depth
+    indent = 2 * [depth, prev_depth].min
+    is_newline = false unless lines[line_index].empty?
+    if prev_opens.last&.event == :on_heredoc_beg
+      if prev_opens.size < next_opens.size || prev_opens.last == next_opens.last
+        if is_newline && lines[line_index].empty? && line_results[line_index - 1][1].last != prev_opens.last
+          # first line in heredoc
+          indent
+        else
+          # accept extra indent spaces inside heredoc
+          [indent, lines[line_index - (is_newline ? 1 : 0)][/^ */].length].max
+        end
+      else
+        # heredoc close
+        prev_opens.last.tok.match?(/^<<[~-]/) ? 2 * (prev_depth - 1) : 0
+      end
+    else
+      indent
+    end
   end
 
   def ltype_from_open_tokens(opens)
@@ -178,16 +166,11 @@ module KatakataIrb::RubyLexPatch
   def set_auto_indent(_context = nil)
     if @io.respond_to?(:auto_indent) and @context.auto_indent_mode
       @io.auto_indent do |lines, line_index, byte_pointer, is_newline|
-        if is_newline
-          tokens = KatakataIrb::RubyLexPatch.complete_tokens(lines[0..line_index].join("\n"), context: @context)
-          process_indent_level(tokens, lines)
-        else
-          code = line_index.zero? ? '' : lines[0..(line_index - 1)].map{ |l| l + "\n" }.join
-          last_line = lines[line_index]&.byteslice(0, byte_pointer)
-          code += last_line if last_line
-          tokens = KatakataIrb::RubyLexPatch.complete_tokens(code, context: @context)
-          check_corresponding_token_depth(tokens, lines, line_index)
-        end
+        next nil if !is_newline && lines[line_index]&.byteslice(0, byte_pointer)&.match?(/\A\s*\z/)
+        code = lines[0..line_index].map { |l| "#{l}\n" }.join
+        next nil if code == "\n"
+        tokens = KatakataIrb::RubyLexPatch.complete_tokens(code, context: @context)
+        process_indent_level(tokens, lines, line_index, is_newline)
       end
     end
   end
