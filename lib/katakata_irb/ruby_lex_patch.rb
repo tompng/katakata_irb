@@ -114,7 +114,7 @@ module KatakataIrb::RubyLexPatch
     if first_token && first_token.state != Ripper::EXPR_DOT
       tokens_without_last_line = tokens[0..index]
       code_without_last_line = tokens_without_last_line.map(&:tok).join
-      opens_without_last_line = NestingParser.parse(tokens_without_last_line)
+      opens_without_last_line = KatakataIrb::NestingParser.parse(tokens_without_last_line)
       if opens_without_last_line.empty? && !process_continue(tokens_without_last_line) && !check_code_block(code_without_last_line, tokens_without_last_line)
         return last_line_tokens.map(&:tok).join
       end
