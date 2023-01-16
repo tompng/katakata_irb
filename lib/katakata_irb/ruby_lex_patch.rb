@@ -37,20 +37,43 @@ module KatakataIrb::RubyLexPatch
     [indent_level, nesting_level]
   end
 
-  def process_indent_level(tokens)
-    opens = KatakataIrb::NestingParser.parse(tokens)
-    indent, _nesting = calc_nesting_depth(opens)
-    indent * 2
+  def free_indent_token(opens, line_index)
+    last_token = opens.last
+    return unless last_token
+    if last_token.event == :on_heredoc_beg && last_token.pos.first < line_index + 1
+      # accept extra indent spaces inside heredoc
+      last_token
+    end
   end
 
-  def check_corresponding_token_depth(tokens, line_index)
+  def process_indent_level(tokens, lines)
+    opens = KatakataIrb::NestingParser.parse(tokens)
+    depth, _nesting = calc_nesting_depth(opens)
+    indent = depth * 2
+    line_index = lines.size - 2
+    if free_indent_token(opens, line_index)
+      return [indent, lines[line_index][/^ */].length].max
+    end
+    indent
+  end
+
+  def check_corresponding_token_depth(tokens, lines, line_index)
     line_results = KatakataIrb::NestingParser.parse_line(tokens)
     result = line_results[line_index]
     return unless result
-    _tokens, prev, opens, min_depth = result
+    _tokens, prev_opens, opens, min_depth = result
     depth, = calc_nesting_depth(opens.take(min_depth))
-    prev_depth, = calc_nesting_depth(prev)
-    depth * 2 if depth < prev_depth
+    depth = 0 if prev_opens.last&.tok =~ /<<[^~]/
+    indent = depth * 2
+    free_indent_tok = free_indent_token(opens, line_index)
+    prev_line_free_indent_tok = free_indent_token(prev_opens, line_index - 1)
+    if prev_line_free_indent_tok && prev_line_free_indent_tok != free_indent_tok
+      return indent
+    elsif free_indent_tok
+      return [indent, lines[line_index][/^ */].length].max
+    end
+    prev_depth, = calc_nesting_depth(prev_opens)
+    indent if depth < prev_depth
   end
 
   def ltype_from_open_tokens(opens)
@@ -71,8 +94,14 @@ module KatakataIrb::RubyLexPatch
     end
   end
 
-  def check_termination_in_prev_line(code, context: nil)
-    tokens = self.class.ripper_lex_without_warning(code, context: context)
+  def terminated?(code)
+    tokens = KatakataIrb::RubyLexPatch.complete_tokens(code, context: @context)
+    opens = KatakataIrb::NestingParser.parse(tokens)
+    opens.empty? && !process_continue(tokens) && !check_code_block(code, tokens)
+  end
+
+  def check_termination_in_prev_line(code)
+    tokens = KatakataIrb::RubyLexPatch.complete_tokens(code, context: @context)
     last_newline_index = tokens.rindex { |t| t.tok.include?("\n") }
     index = (0...last_newline_index).reverse_each.find { |i| tokens[i].tok.include?("\n") }
     return false unless index
@@ -84,25 +113,28 @@ module KatakataIrb::RubyLexPatch
 
     if first_token && first_token.state != Ripper::EXPR_DOT
       tokens_without_last_line = tokens[0..index]
-      if check_termination(tokens_without_last_line.map(&:tok).join, context: context)
+      code_without_last_line = tokens_without_last_line.map(&:tok).join
+      opens_without_last_line = NestingParser.parse(tokens_without_last_line)
+      if opens_without_last_line.empty? && !process_continue(tokens_without_last_line) && !check_code_block(code_without_last_line, tokens_without_last_line)
         return last_line_tokens.map(&:tok).join
       end
     end
     false
   end
 
-  def check_termination(code, context: nil)
-    tokens = KatakataIrb::RubyLexPatch.complete_tokens(code, context: context)
-    opens = KatakataIrb::NestingParser.parse(tokens)
-    opens.empty? && !process_continue(tokens) && !check_code_block(code, tokens)
+  def command?(code)
+    # Accept any single-line input for symbol aliases or commands that transform args
+    command = code.split(/\s/, 2).first
+    @context.symbol_alias?(command) || @context.transform_args?(command)
   end
 
-  def set_input(io, p = nil, context: nil, &block)
+  def set_input(io, context: nil, &block)
+    @context ||= context
     @io = io
     if @io.respond_to?(:check_termination)
       @io.check_termination do |code|
         if Reline::IOGate.in_pasting?
-          rest = check_termination_in_prev_line(code, context: context)
+          rest = check_termination_in_prev_line(code)
           if rest
             Reline.delete_text
             rest.bytes.reverse_each do |c|
@@ -112,57 +144,49 @@ module KatakataIrb::RubyLexPatch
           else
             false
           end
+        elsif command?(code)
+          true
         else
-          # Accept any single-line input for symbol aliases or commands that transform args
-          command = code.split(/\s/, 2).first
-          if context.symbol_alias?(command) || context.transform_args?(command)
-            next true
-          end
-
           code.gsub!(/\s*\z/, '').concat("\n")
-          check_termination(code, context: context)
+          terminated?(code)
         end
       end
     end
     if @io.respond_to?(:dynamic_prompt)
       @io.dynamic_prompt do |lines|
         lines << '' if lines.empty?
-        code = lines.map{ |l| l + "\n" }.join
-        tokens = KatakataIrb::RubyLexPatch.complete_tokens code, context: context
+        tokens = KatakataIrb::RubyLexPatch.complete_tokens(lines.map{ |l| l + "\n" }.join, context: @context)
         line_results = KatakataIrb::NestingParser.parse_line(tokens)
-        continue = false
         tokens_until_line = []
         line_results.map.with_index do |(line_tokens, _prev_opens, next_opens), line_num_offset|
           line_tokens.each do |token, _s|
             tokens_until_line << token if token != tokens_until_line.last
           end
           continue = process_continue(tokens_until_line)
-          prompt next_opens, continue, line_num_offset
+          prompt(next_opens, continue, line_num_offset)
         end
       end
     end
 
-    if p.respond_to?(:call)
-      @input = p
-    elsif block_given?
+    if block_given?
       @input = block
     else
       @input = Proc.new{@io.gets}
     end
   end
 
-  def set_auto_indent(context)
-    if @io.respond_to?(:auto_indent) and context.auto_indent_mode
+  def set_auto_indent(_context = nil)
+    if @io.respond_to?(:auto_indent) and @context.auto_indent_mode
       @io.auto_indent do |lines, line_index, byte_pointer, is_newline|
         if is_newline
-          tokens = KatakataIrb::RubyLexPatch.complete_tokens(lines[0..line_index].join("\n"), context: context)
-          process_indent_level(tokens)
+          tokens = KatakataIrb::RubyLexPatch.complete_tokens(lines[0..line_index].join("\n"), context: @context)
+          process_indent_level(tokens, lines)
         else
           code = line_index.zero? ? '' : lines[0..(line_index - 1)].map{ |l| l + "\n" }.join
           last_line = lines[line_index]&.byteslice(0, byte_pointer)
           code += last_line if last_line
-          tokens = KatakataIrb::RubyLexPatch.complete_tokens(code, context: context)
-          check_corresponding_token_depth(tokens, line_index)
+          tokens = KatakataIrb::RubyLexPatch.complete_tokens(code, context: @context)
+          check_corresponding_token_depth(tokens, lines, line_index)
         end
       end
     end
@@ -179,41 +203,43 @@ module KatakataIrb::RubyLexPatch
     prompt(opens, continue, line_num_offset)
   end
 
-  def readmultiline(context)
+  def readmultiline
     if @io.respond_to? :check_termination
       store_prompt_to_irb([], false, 0)
       @input.call
     else
       # nomultiline
-      line = ''
+      code = ''
       line_offset = 0
-      store_prompt_to_irb([], false, 0)
+      save_prompt_to_context_io([], false, 0)
       loop do
         l = @input.call
         unless l
-          return if line.empty?
-          next
+          return code.empty? ? nil : code
         end
-        line << l
-        tokens = KatakataIrb::RubyLexPatch.complete_tokens(line, context: context)
-        _line_tokens, _prev_opens, next_opens = KatakataIrb::NestingParser.parse_line(tokens).last
-        return line if next_opens.empty?
+        code << l
+        return code if command?(code)
+        check_target_code = code.gsub(/\s*\z/, '').concat("\n")
+        tokens = KatakataIrb::RubyLexPatch.complete_tokens(check_target_code, context: @context)
+        opens = KatakataIrb::NestingParser.parse(tokens)
+        continue = process_continue(tokens)
+        return code if opens.empty? && !continue && !check_code_block(check_target_code, tokens)
         line_offset += 1
-        store_prompt_to_irb(next_opens, true, line_offset)
+        save_prompt_to_context_io(opens, continue, line_offset)
       end
     end
   end
 
-  def each_top_level_statement(context = nil)
+  def each_top_level_statement(_context = nil)
     loop do
       begin
-        line = readmultiline(context)
-        break unless line
-        if line != "\n"
-          line.force_encoding(@io.encoding)
-          yield line, @line_no
+        code = readmultiline
+        break unless code
+        if code != "\n"
+          code.force_encoding(@io.encoding)
+          yield code, @line_no
         end
-        @line_no += line.count("\n")
+        @line_no += code.count("\n")
       rescue RubyLex::TerminateLineInput
       end
     end
