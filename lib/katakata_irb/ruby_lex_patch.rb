@@ -46,7 +46,9 @@ module KatakataIrb::RubyLexPatch
     prev_depth, = calc_nesting_depth(prev_opens)
     indent = 2 * [depth, prev_depth].min
     is_newline = false unless lines[line_index].empty?
-    if prev_opens.last&.event == :on_heredoc_beg
+    if next_opens.last&.event == :on_embdoc_beg
+      0
+    elsif prev_opens.last&.event == :on_heredoc_beg
       if prev_opens.size < next_opens.size || prev_opens.last == next_opens.last
         if is_newline && lines[line_index].empty? && line_results[line_index - 1][1].last != prev_opens.last
           # first line in heredoc
