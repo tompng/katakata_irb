@@ -46,8 +46,14 @@ module KatakataIrb::RubyLexPatch
     prev_depth, = calc_nesting_depth(prev_opens)
     indent = 2 * [depth, prev_depth].min
     is_newline = false unless lines[line_index].empty?
-    if next_opens.last&.event == :on_embdoc_beg
-      0
+    if prev_opens.last&.event == :on_embdoc_beg || next_opens.last&.event == :on_embdoc_beg
+      if prev_opens.last.event == next_opens.last.event
+        # accept extra indent spaces inside embdoc content
+        lines[line_index - (is_newline ? 1 : 0)][/^ */].length
+      else
+        # =begin or =end
+        0
+      end
     elsif prev_opens.last&.event == :on_heredoc_beg
       if prev_opens.size < next_opens.size || prev_opens.last == next_opens.last
         if is_newline && lines[line_index].empty? && line_results[line_index - 1][1].last != prev_opens.last
