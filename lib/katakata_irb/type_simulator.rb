@@ -31,13 +31,13 @@ class KatakataIrb::TypeSimulator
         fallback = KatakataIrb::Types::NIL
         case BaseScope.type_by_name name
         when :cvar
-          KatakataIrb::TypeSimulator.type_of(fallback:) { @self_object.class_variable_get name }
+          KatakataIrb::TypeSimulator.type_of(fallback: fallback) { @self_object.class_variable_get name }
         when :ivar
-          KatakataIrb::TypeSimulator.type_of(fallback:) { @self_object.instance_variable_get name }
+          KatakataIrb::TypeSimulator.type_of(fallback: fallback) { @self_object.instance_variable_get name }
         when :lvar
-          KatakataIrb::TypeSimulator.type_of(fallback:) { @binding.local_variable_get(name) }
+          KatakataIrb::TypeSimulator.type_of(fallback: fallback) { @binding.local_variable_get(name) }
         when :const
-          KatakataIrb::TypeSimulator.type_of(fallback:) { @binding.eval name }
+          KatakataIrb::TypeSimulator.type_of(fallback: fallback) { @binding.eval name }
         end
       )
     end
@@ -85,7 +85,7 @@ class KatakataIrb::TypeSimulator
   class Scope
     attr_reader :parent, :jump_branches
 
-    def self.from_binding(binding) = new BaseScope.new(binding, binding.eval('self'))
+    def self.from_binding(binding) = new(BaseScope.new(binding, binding.eval('self')))
 
     def initialize(parent, table = {}, trace_cvar: true, trace_ivar: true, trace_lvar: true, passthrough: false)
       @tables = [table]
@@ -243,8 +243,8 @@ class KatakataIrb::TypeSimulator
     refine Ripper::Lexer::Elem do
       def deconstruct_keys(_keys)
         {
-          tok:,
-          event:,
+          tok: tok,
+          event: event,
           label: state.allbits?(Ripper::EXPR_LABEL),
           beg: state.allbits?(Ripper::EXPR_BEG),
           dot: state.allbits?(Ripper::EXPR_DOT)
@@ -280,7 +280,7 @@ class KatakataIrb::TypeSimulator
   end
 
   def simulate_evaluate(sexp, scope, case_target: nil)
-    result = simulate_evaluate_inner(sexp, scope, case_target:)
+    result = simulate_evaluate_inner(sexp, scope, case_target: case_target)
     @dig_targets.resolve result, scope if @dig_targets.target?(sexp)
     result
   end
@@ -723,7 +723,7 @@ class KatakataIrb::TypeSimulator
       end
       else_branch = lambda do
         pattern.each { simulate_evaluate _1, scope }
-        simulate_evaluate(else_statement, scope, case_target:)
+        simulate_evaluate(else_statement, scope, case_target: case_target)
       end
       if if_statements && else_statement
         KatakataIrb::Types::UnionType[*scope.run_branches(if_branch, else_branch)]
@@ -743,7 +743,7 @@ class KatakataIrb::TypeSimulator
         },
         -> {
           pattern_scope.merge_jumps
-          else_statement ? simulate_evaluate(else_statement, scope, case_target:) : KatakataIrb::Types::NIL
+          else_statement ? simulate_evaluate(else_statement, scope, case_target: case_target) : KatakataIrb::Types::NIL
         }
       )
       KatakataIrb::Types::UnionType[*results]
