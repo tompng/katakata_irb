@@ -9,7 +9,7 @@ class TestKatakataIrb < Minitest::Test
     end
     KatakataIrb.define_singleton_method(:log_puts) {|*| raise }
     Dir.glob '**/*.rb' do |file|
-      assert KatakataIrb::Completor.analyze(File.read(file) + '.hoge'), "analyzing #{file}"
+      assert KatakataIrb::Completor.analyze("(\n#{File.read(file)}\n).hoge"), "analyzing #{file}"
     end
   end
 
