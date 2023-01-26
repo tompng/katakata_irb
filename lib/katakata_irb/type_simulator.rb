@@ -1043,6 +1043,14 @@ class KatakataIrb::TypeSimulator
     types = type_breaks.map(&:first)
     breaks = type_breaks.map(&:last).compact
     types << OBJECT_METHODS[method_name.to_sym] if name_match && OBJECT_METHODS.has_key?(method_name.to_sym)
+
+    if method_name.to_sym == :new
+      receiver.types.each do |type|
+        if (type in KatakataIrb::Types::SingletonType) && type.module_or_class.is_a?(Class)
+          types << KatakataIrb::Types::InstanceType.new(type.module_or_class)
+        end
+      end
+    end
     KatakataIrb::Types::UnionType[*types, *breaks]
   end
 

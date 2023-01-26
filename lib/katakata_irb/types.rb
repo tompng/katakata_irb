@@ -120,7 +120,7 @@ module KatakataIrb::Types
     end
     def transform() = yield(self)
     def methods() = @module_or_class.methods
-    def all_methods() = methods
+    def all_methods() = methods | Kernel.methods
     def constants() = @module_or_class.constants
     def types() = [self]
   end
@@ -297,19 +297,13 @@ module KatakataIrb::Types
       # unimplemented
       OBJECT
     when RBS::Types::ClassInstance
-      classes = self_type.types.filter_map do |type|
-        type.module_or_class if (type in SingletonType) && type.module_or_class.is_a?(Class)
-      end
-      if classes.empty?
-        klass = return_type.name.to_namespace.path.reduce(Object) { _1.const_get _2 }
-        classes << klass if klass in Class
-      end
+      klass = return_type.name.to_namespace.path.reduce(Object) { _1.const_get _2 }
       if return_type.args
         args = return_type.args.map { from_rbs_type _1, self_type, extra_vars }
         names = rbs_builder.build_singleton(return_type.name).type_params
         params = names.map.with_index { [_1, args[_2] || OBJECT] }.to_h
       end
-      UnionType[*classes.map { InstanceType.new _1, params || {} }]
+      InstanceType.new klass, params || {}
     end
   end
 
