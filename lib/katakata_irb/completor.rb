@@ -6,15 +6,17 @@ require 'irb'
 
 module KatakataIrb::Completor
   using KatakataIrb::TypeSimulator::LexerElemMatcher
-
   HIDDEN_METHODS = %w[Namespace TypeName] # defined by rbs, should be hidden
+  singleton_class.attr_accessor :prev_analyze_result
 
   def self.setup
     completion_proc = ->(target, preposing = nil, postposing = nil) do
       code = "#{preposing}#{target}"
       irb_context = IRB.conf[:MAIN_CONTEXT]
       binding = irb_context.workspace.binding
-      candidates = case analyze code, binding
+      result = analyze code, binding
+      KatakataIrb::Completor.prev_analyze_result = result
+      candidates = case result
       in [:require | :require_relative => method, name]
         if method == :require
           IRB::InputCompletor.retrieve_files_to_require_from_load_path
@@ -57,6 +59,44 @@ module KatakataIrb::Completor
       KatakataIrb.log_puts "#{e.inspect} stored to $error"
       KatakataIrb.log_puts
     end
+
+    IRB::InputCompletor.singleton_class.prepend Module.new{
+      def retrieve_completion_data(input, _bind: IRB.conf[:MAIN_CONTEXT].workspace.binding, doc_namespace: false)
+        return super unless doc_namespace
+        name = input[/[a-zA-Z_0-9]+[!?=]?\z/]
+        method_doc = -> type do
+          type = type.types.find { _1.all_methods.include? name.to_sym }
+          if type in KatakataIrb::Types::SingletonType
+            "#{type.module_or_class.name}.#{name}"
+          elsif type in KatakataIrb::Types::InstanceType
+            "#{type.klass.name}##{name}"
+          end
+        end
+        call_or_const_doc = -> type do
+          if name =~ /\A[A-Z]/
+            type = type.types.grep(KatakataIrb::Types::SingletonType).find { _1.module_or_class.const_defined?(name) }
+            type.module_or_class == Object ? name : "#{type.module_or_class.name}::#{name}" if type
+          else
+            method_doc.call(type)
+          end
+        end
+
+        case KatakataIrb::Completor.prev_analyze_result
+        in [:call_or_const, type, _name, _self_call]
+          call_or_const_doc.call type
+        in [:const, type, _name]
+          # when prev_analyze_result is const, current analyze result might be call
+          call_or_const_doc.call type
+        in [:gvar, _name]
+          name
+        in [:call, type, _name, _self_call]
+          method_doc.call type
+        in [:lvar_or_method, _name, scope]
+          method_doc.call scope.self_type unless scope.local_variables.include?(name)
+        else
+        end
+      end
+    }
   end
 
   def self.analyze(code, binding = Kernel.binding)
@@ -89,7 +129,6 @@ module KatakataIrb::Completor
       end
     end
 
-    return if code =~ /[!?]\z/
     case tokens.last
     in { event: :on_ignored_by_ripper, tok: '.' }
       suffix = 'method'
