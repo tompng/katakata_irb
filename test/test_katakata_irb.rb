@@ -1,5 +1,4 @@
 # frozen_string_literal: true
-require 'katakata_irb/completor'
 require 'test_helper'
 
 class TestKatakataIrb < Minitest::Test
