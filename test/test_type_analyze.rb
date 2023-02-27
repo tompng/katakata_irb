@@ -3,8 +3,14 @@ require 'test_helper'
 class TestTypeAnalyzeIrb < Minitest::Test
   def empty_binding() = binding
 
-  def analyze(code, binding = empty_binding)
+  def analyze(code, binding: empty_binding)
     KatakataIrb::Completor.analyze(code, binding)
+  end
+
+  def assert_analyze_type(code, type, token = nil, binding: empty_binding)
+    result_type, result_token = analyze(code, binding:)
+    assert_equal type, result_type
+    assert_equal token, result_token if token
   end
 
   def assert_call(code, include: nil, exclude: nil)
@@ -13,6 +19,16 @@ class TestTypeAnalyzeIrb < Minitest::Test
     klasses = type.types.map { _1.klass }
     assert_empty include - klasses if include
     assert_empty klasses & exclude if exclude
+  end
+
+  def test_lvar_ivar_gvar_cvar
+    assert_analyze_type('puts(x', :lvar_or_method, 'x')
+    assert_analyze_type('puts($', :gvar, '$')
+    assert_analyze_type('puts($x', :gvar, '$x')
+    assert_analyze_type('puts(@', :ivar, '@')
+    assert_analyze_type('puts(@x', :ivar, '@x')
+    assert_analyze_type('puts(@@', :cvar, '@@')
+    assert_analyze_type('puts(@@x', :cvar, '@@x')
   end
 
   def test_local_variable_assign

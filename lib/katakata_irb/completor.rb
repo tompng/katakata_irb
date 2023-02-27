@@ -27,12 +27,12 @@ module KatakataIrb::Completor
         ((self_call ? type.all_methods: type.methods).map(&:to_s) - HIDDEN_METHODS) | type.constants
       in [:const, type, name]
         type.constants
-      in [:ivar, name, _scope]
+      in [:ivar, name, *_scope]
         # TODO: scope
         ivars = binding.eval('self').instance_variables rescue []
         cvars = (binding.eval('self').class_variables rescue nil) if name == '@'
         ivars | (cvars || [])
-      in [:cvar, name, _scope]
+      in [:cvar, name, *_scope]
         # TODO: scope
         binding.eval('self').class_variables rescue []
       in [:gvar, name]
@@ -129,6 +129,9 @@ module KatakataIrb::Completor
       end
     end
 
+    # remove error tokens
+    tokens.pop while tokens&.last&.tok&.empty?
+
     case tokens.last
     in { event: :on_ignored_by_ripper, tok: '.' }
       suffix = 'method'
@@ -148,6 +151,18 @@ module KatakataIrb::Completor
       return unless code.delete_suffix! tok
       suffix = 'string'
       name = tok.rstrip
+    in { event: :on_gvar, tok: }
+      return unless code.delete_suffix! tok
+      suffix = '$gvar'
+      name = tok
+    in { event: :on_ivar, tok: }
+      return unless code.delete_suffix! tok
+      suffix = '@ivar'
+      name = tok
+    in { event: :on_cvar, tok: }
+      return unless code.delete_suffix! tok
+      suffix = '@@cvar'
+      name = tok
     else
       return
     end
