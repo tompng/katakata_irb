@@ -99,7 +99,11 @@ module KatakataIrb::Completor
     }
   end
 
-  def self.analyze(code, binding = Kernel.binding)
+  def self.empty_binding()
+    Kernel.binding
+  end
+
+  def self.analyze(code, binding = empty_binding)
     lvars_code = binding.local_variables.map do |name|
       "#{name}="
     end.join + "nil;\n"
@@ -124,6 +128,8 @@ module KatakataIrb::Completor
         t.tok
       when /\A<<[~-]?(?:"(?<s>.+)"|'(?<s>.+)'|(?<s>.+))/
         $/ + ($1 || $2 || $3) + $/
+      when ':"', ":'", ':'
+        t.tok[1]
       else
         $/ + 'end'
       end
@@ -138,6 +144,9 @@ module KatakataIrb::Completor
       name = ''
     in { dot: true }
       suffix = 'method'
+      name = ''
+    in { event: :on_symbeg }
+      suffix = 'symbol'
       name = ''
     in { event: :on_ident | :on_kw, tok: }
       return unless code.delete_suffix! tok
@@ -166,7 +175,6 @@ module KatakataIrb::Completor
     else
       return
     end
-
     sexp = Ripper.sexp code + suffix + closings.reverse.join
     lines = code.lines
     line_no = lines.size
@@ -190,16 +198,26 @@ module KatakataIrb::Completor
       return [:cvar, name] if icvar_available
     end
     return unless expression
-    if (target in [:@tstring_content,]) && (parents[-4] in [:command, [:@ident, 'require' | 'require_relative' => require_method,],])
-      return [require_method.to_sym, name.rstrip]
-    end
     calculate_scope = -> { KatakataIrb::TypeSimulator.calculate_binding_scope binding, parents, expression }
     calculate_receiver = -> receiver { KatakataIrb::TypeSimulator.calculate_receiver binding, parents, receiver }
+
+    if (target in [:@tstring_content,]) && (parents[-4] in [:command, [:@ident, 'require' | 'require_relative' => require_method,],])
+      # `require 'target'`
+      return [require_method.to_sym, name.rstrip]
+    end
+    if (target in [:@ident,]) && (expression in [:symbol,]) && (parents[-2] in [:args_add_block, Array => args, [:symbol_literal, ^expression]])
+      # `method(&:target)`
+      receiver_ref = [:var_ref, [:@ident, '_1', [0, 0]]]
+      block_statements = [receiver_ref]
+      parents[-1] = parents[-2][-1] = [:brace_block, nil, block_statements]
+      parents << block_statements
+      return [:call, calculate_receiver.call(receiver_ref), name, false]
+    end
     case expression
     in [:vcall | :var_ref, [:@ident,]]
       [:lvar_or_method, name, calculate_scope.call]
     in [:symbol, [:@ident | :@const | :@op | :@kw,]]
-      [:symbol, name]
+      [:symbol, name] unless name.empty?
     in [:var_ref | :const_ref, [:@const,]]
       # TODO
       [:const, KatakataIrb::Types::SingletonType.new(Object), name]

@@ -36,6 +36,11 @@ class TestTypeAnalyzeIrb < Minitest::Test
     assert_call('1 => a; a.', include: [Integer])
   end
 
+  def test_block_symbol
+    assert_call('1.times.map(&:', include: [Integer])
+    assert_call('1.to_s.tap(&:', include: [String])
+  end
+
   def test_conditional_assign
     assert_call('a = 1; a = "" if cond; a.', include: [String, Integer])
     assert_call(<<~RUBY, include: [String, Symbol], exclude: [Integer])
