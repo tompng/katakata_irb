@@ -88,7 +88,8 @@ module KatakataIrb::Types
     when Array, Hash, Module
       type_from_object_recursive(object, max_level: 4)
     else
-      InstanceType.new object.singleton_class
+      klass = object.singleton_class rescue object.class
+      InstanceType.new klass
     end
   end
 

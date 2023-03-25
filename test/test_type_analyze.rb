@@ -3,8 +3,8 @@ require 'test_helper'
 class TestTypeAnalyzeIrb < Minitest::Test
   def empty_binding() = binding
 
-  def analyze(code, binding: empty_binding)
-    KatakataIrb::Completor.analyze(code, binding)
+  def analyze(code, binding: nil)
+    KatakataIrb::Completor.analyze(code, binding || empty_binding)
   end
 
   def assert_analyze_type(code, type, token = nil, binding: empty_binding)
@@ -13,9 +13,9 @@ class TestTypeAnalyzeIrb < Minitest::Test
     assert_equal token, result_token if token
   end
 
-  def assert_call(code, include: nil, exclude: nil)
+  def assert_call(code, include: nil, exclude: nil, binding: nil)
     raise ArgumetError if include.nil? && exclude.nil?
-    analyze(code) => [:call, type,]
+    analyze(code, binding:) => [:call, type,]
     klasses = type.types.map { _1.klass }
     assert_empty include - klasses if include
     assert_empty klasses & exclude if exclude
@@ -29,6 +29,20 @@ class TestTypeAnalyzeIrb < Minitest::Test
     assert_analyze_type('puts(@x', :ivar, '@x')
     assert_analyze_type('puts(@@', :cvar, '@@')
     assert_analyze_type('puts(@@x', :cvar, '@@x')
+  end
+
+  def test_lvar_singleton_method
+    a = 1
+    b = ''
+    c = Object.new
+    d = [b, c]
+    def b.foo() = 1
+    def c.bar() = 1
+    binding = Kernel.binding
+    assert_call('a.', include: [Integer], exclude: [String], binding:)
+    assert_call('b.', include: [b.singleton_class], exclude: [Integer], binding:)
+    assert_call('c.', include: [c.singleton_class], exclude: [Integer], binding:)
+    assert_call('d.sample.', include: [String, Object], exclude: [b.singleton_class, c.singleton_class], binding:)
   end
 
   def test_local_variable_assign
