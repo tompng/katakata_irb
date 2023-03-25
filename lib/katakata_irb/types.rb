@@ -83,14 +83,23 @@ module KatakataIrb::Types
     intersect.call(InstanceType, &:klass)
   end
 
-  def self.type_from_object(object, max_level: 4)
+  def self.type_from_object(object)
+    case object
+    when Array, Hash, Module
+      type_from_object_recursive(object, max_level: 4)
+    else
+      InstanceType.new object.singleton_class
+    end
+  end
+
+  def self.type_from_object_recursive(object, max_level:)
     max_level -= 1
     sample_size = 1000
     case object
     when Array
       values = object.size > sample_size ? object.sample(sample_size) : object
       if max_level > 0
-        InstanceType.new Array, { Elem: UnionType[*values.map { type_from_object(_1, max_level: max_level) }] }
+        InstanceType.new Array, { Elem: UnionType[*values.map { type_from_object_recursive(_1, max_level: max_level) }] }
       else
         InstanceType.new Array, { Elem: UnionType[*values.map(&:class).uniq.map { InstanceType.new _1 }] }
       end
@@ -98,8 +107,8 @@ module KatakataIrb::Types
       keys = object.size > sample_size ? object.keys.sample(sample_size) : object.keys
       values = object.size > sample_size ? object.values.sample(sample_size) : object.values
       if max_level > 0
-        key_types = keys.map { type_from_object(_1, max_level: max_level) }
-        value_types = values.map { type_from_object(_1, max_level: max_level) }
+        key_types = keys.map { type_from_object_recursive(_1, max_level: max_level) }
+        value_types = values.map { type_from_object_recursive(_1, max_level: max_level) }
         InstanceType.new Hash, { K: UnionType[*key_types], V: UnionType[*value_types] }
       else
         key_types = keys.map(&:class).uniq.map { InstanceType.new _1 }
