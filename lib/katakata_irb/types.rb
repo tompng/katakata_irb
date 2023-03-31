@@ -11,10 +11,13 @@ module KatakataIrb::Types
 
   Splat = Struct.new :item
 
+  MODULE_NAME_METHOD = Module.instance_method(:name)
+
   def self.rbs_search_method(klass, method_name, singleton)
     klass.ancestors.each do |ancestor|
-      next unless ancestor.name
-      type_name = RBS::TypeName(ancestor.name).absolute!
+      name = MODULE_NAME_METHOD.bind_call(ancestor)
+      next unless name
+      type_name = RBS::TypeName(name).absolute!
       definition = (singleton ? rbs_builder.build_singleton(type_name) : rbs_builder.build_instance(type_name)) rescue nil
       method = definition&.methods&.[](method_name)
       return method if method
