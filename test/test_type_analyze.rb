@@ -17,8 +17,8 @@ class TestTypeAnalyzeIrb < Minitest::Test
     raise ArgumetError if include.nil? && exclude.nil?
     analyze(code, binding:) => [:call, type,]
     klasses = type.types.map { _1.klass }
-    assert_empty include - klasses if include
-    assert_empty klasses & exclude if exclude
+    assert_empty [*include] - klasses if include
+    assert_empty klasses & [*exclude] if exclude
   end
 
   def test_lvar_ivar_gvar_cvar
@@ -39,25 +39,25 @@ class TestTypeAnalyzeIrb < Minitest::Test
     def b.foo() = 1
     def c.bar() = 1
     binding = Kernel.binding
-    assert_call('a.', include: [Integer], exclude: [String], binding:)
-    assert_call('b.', include: [b.singleton_class], exclude: [Integer], binding:)
-    assert_call('c.', include: [c.singleton_class], exclude: [Integer], binding:)
+    assert_call('a.', include: Integer, exclude: String, binding:)
+    assert_call('b.', include: b.singleton_class, exclude: Integer, binding:)
+    assert_call('c.', include: c.singleton_class, exclude: Integer, binding:)
     assert_call('d.sample.', include: [String, Object], exclude: [b.singleton_class, c.singleton_class], binding:)
   end
 
   def test_local_variable_assign
-    assert_call('a = 1; a = ""; a.', include: [String], exclude: [Integer])
-    assert_call('1 => a; a.', include: [Integer])
+    assert_call('a = 1; a = ""; a.', include: String, exclude: Integer)
+    assert_call('1 => a; a.', include: Integer)
   end
 
   def test_block_symbol
-    assert_call('1.times.map(&:', include: [Integer])
-    assert_call('1.to_s.tap(&:', include: [String])
+    assert_call('1.times.map(&:', include: Integer)
+    assert_call('1.to_s.tap(&:', include: String)
   end
 
   def test_conditional_assign
     assert_call('a = 1; a = "" if cond; a.', include: [String, Integer])
-    assert_call(<<~RUBY, include: [String, Symbol], exclude: [Integer])
+    assert_call(<<~RUBY, include: [String, Symbol], exclude: Integer)
       a = 1
       cond ? a = '' : a = :a
       a.
@@ -68,7 +68,7 @@ class TestTypeAnalyzeIrb < Minitest::Test
     sobj = Data.define(:to_str).new('a')
     iobj = Data.define(:to_int).new(1)
     binding = Kernel.binding
-    assert_call('([]*sobj).', include: [String], exclude: [Array], binding:)
-    assert_call('([]*iobj).', include: [Array], exclude: [String], binding:)
+    assert_call('([]*sobj).', include: String, exclude: Array, binding:)
+    assert_call('([]*iobj).', include: Array, exclude: String, binding:)
   end
 end
