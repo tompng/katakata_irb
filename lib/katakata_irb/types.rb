@@ -63,8 +63,15 @@ module KatakataIrb::Types
             given << UnionType[*centers.drop(opts.size)]
             expected << rest.type
           end
-          score += given.zip(expected).count do |t, e|
-            intersect? t, from_rbs_type(e, receiver_type)
+          score += given.zip(expected).sum do |t, e|
+            e = from_rbs_type e, receiver_type
+            if intersect? t, e
+              1
+            elsif (intersect?(STRING, e) && t.methods.include?(:to_str)) || (intersect?(INTEGER, e) && t.methods.include?(:to_int)) || (intersect?(ARRAY, e) && t.methods.include?(:to_ary))
+              0.5
+            else
+              0
+            end
           end
         end
         [[method_type, given || [], expected || []], score]

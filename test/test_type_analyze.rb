@@ -63,4 +63,12 @@ class TestTypeAnalyzeIrb < Minitest::Test
       a.
     RUBY
   end
+
+  def test_to_str_to_int
+    sobj = Data.define(:to_str).new('a')
+    iobj = Data.define(:to_int).new(1)
+    binding = Kernel.binding
+    assert_call('([]*sobj).', include: [String], exclude: [Array], binding:)
+    assert_call('([]*iobj).', include: [Array], exclude: [String], binding:)
+  end
 end
