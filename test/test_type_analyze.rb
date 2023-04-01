@@ -71,4 +71,8 @@ class TestTypeAnalyzeIrb < Minitest::Test
     assert_call('([]*sobj).', include: String, exclude: Array, binding:)
     assert_call('([]*iobj).', include: Array, exclude: String, binding:)
   end
+
+  def test_interface_match_var
+    assert_call('([1]+[:a]+["a"]).sample.', include: [Integer, String, Symbol])
+  end
 end

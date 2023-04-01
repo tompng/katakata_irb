@@ -25,9 +25,29 @@ module KatakataIrb::Types
     nil
   end
 
+  def self.method_return_type(type, method_name)
+    receivers = type.types.map do |t|
+      case t
+      in ProcType
+        [t, Proc, false]
+      in SingletonType
+        [t, t.module_or_class, true]
+      in InstanceType
+        [t, t.klass, false]
+      end
+    end
+    types = receivers.flat_map do |receiver_type, klass, singleton|
+      method = rbs_search_method klass, method_name, singleton
+      next [] unless method
+      method.method_types.map do |method|
+        from_rbs_type(method.type.return_type, receiver_type, {})
+      end
+    end
+    UnionType[*types]
+  end
+
   def self.rbs_methods(type, method_name, args_types, kwargs_type, has_block)
-    types = (type in UnionType) ? type.types : [type]
-    receivers = types.map do |t|
+    receivers = type.types.map do |t|
       case t
       in ProcType
         [t, Proc, false]
@@ -352,6 +372,25 @@ module KatakataIrb::Types
       end
     in [RBS::Types::Record, InstanceType] if value.klass == Hash
       # TODO
+    in [RBS::Types::Interface,]
+      definition = rbs_builder.build_interface rbs_type.name
+      convert = {}
+      definition.type_params.zip(rbs_type.args).each do |from, arg|
+        convert[from] = arg.name if arg.is_a? RBS::Types::Variable
+      end
+      return if convert.empty?
+      ac = {}
+      definition.methods.each do |method_name, method|
+        return_type = method_return_type value, method_name
+        method.defs.each do |method_def|
+          interface_return_type = method_def.type.type.return_type
+          _match_free_variable convert, interface_return_type, return_type, ac
+        end
+      end
+      convert.each do |from, to|
+        values = ac[from]
+        (accumulator[to] ||= []).concat values if values
+      end
     else
     end
   end
