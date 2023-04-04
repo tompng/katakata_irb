@@ -97,6 +97,43 @@ module KatakataIrb::Completor
         end
       end
     }
+    setup_type_dialog
+  end
+
+  def self.setup_type_dialog
+    type_dialog_proc = -> {
+      return if just_cursor_moving && completion_journey_data
+      cursor_pos_to_render, _result, pointer, autocomplete_dialog = context.last(4)
+      return unless cursor_pos_to_render && autocomplete_dialog&.width && pointer.nil?
+      receiver_type = (
+        case KatakataIrb::Completor.prev_analyze_result
+        in [:call_or_const, type, name, _self_call] if name.empty?
+          type
+        in [:call, type, name, _self_call] if name.empty?
+          type
+        else
+          return
+        end
+      )
+      return unless receiver_type
+      types = type.types
+      contents = types.filter_map do |type|
+        case type
+        when KatakataIrb::Types::InstanceType
+          type.klass.name
+        when KatakataIrb::Types::SingletonType
+          module_name = type.module_or_class.name
+          "#{module_name}.itself" if module_name
+        end
+      end
+      return if contents.empty?
+      width = contents.map { Reline::Unicode.calculate_width _1 }.max
+
+      x = cursor_pos_to_render.x + autocomplete_dialog.width
+      y = cursor_pos_to_render.y
+      Reline::DialogRenderInfo.new(pos: Reline::CursorPos.new(x, y), contents: contents, width: width, bg_color: 44, fg_color: 37)
+    }
+    Reline.add_dialog_proc(:show_type, type_dialog_proc, Reline::DEFAULT_DIALOG_CONTEXT)
   end
 
   def self.empty_binding()
