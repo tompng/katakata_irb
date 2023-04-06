@@ -17,8 +17,8 @@ class TestTypeAnalyzeIrb < Minitest::Test
     raise ArgumetError if include.nil? && exclude.nil?
     analyze(code, binding:) => [:call, type,]
     klasses = type.types.map { _1.klass }
-    assert_empty [*include] - klasses if include
-    assert_empty klasses & [*exclude] if exclude
+    assert ([*include] - klasses).empty?, "Expected #{klasses} to include #{include}" if include
+    assert (klasses & [*exclude]).empty?, "Expected #{klasses} not to include #{exclude}" if exclude
   end
 
   def test_lvar_ivar_gvar_cvar
@@ -74,5 +74,17 @@ class TestTypeAnalyzeIrb < Minitest::Test
 
   def test_interface_match_var
     assert_call('([1]+[:a]+["a"]).sample.', include: [Integer, String, Symbol])
+  end
+
+  def test_lvar_scope
+    code = <<~RUBY
+      tap { a = :never }
+      a = 1 if x?
+      tap {|a| a = :never }
+      tap { a = 'maybe' }
+      a = {} if x?
+      a.
+    RUBY
+    assert_call(code, include: [Hash, Integer, String], exclude: [Symbol])
   end
 end
