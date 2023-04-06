@@ -68,14 +68,12 @@ class KatakataIrb::TypeSimulator
 
     def has?(name)
       case BaseScope.type_by_name name
-      when :cvar
-        @self_object.class_variable_defined? name
-      when :ivar
-        @self_object.instance_variable_defined? name
       when :lvar
         @local_variables.include? name
       when :const
         @binding.eval("#{name};true") rescue false
+      when :gvar, :cvar, :ivar
+        true
       when :internal
         true
       end

@@ -87,4 +87,22 @@ class TestTypeAnalyzeIrb < Minitest::Test
     RUBY
     assert_call(code, include: [Hash, Integer, String], exclude: [Symbol])
   end
+
+  def test_gvar_no_scope
+    code = <<~RUBY
+      tap { $a = :maybe }
+      $a = 'maybe' if x?
+      $a.
+    RUBY
+    assert_call(code, include: [Symbol, String])
+  end
+
+  def test_ivar_no_scope
+    code = <<~RUBY
+      tap { @a = :maybe }
+      @a = 'maybe' if x?
+      @a.
+    RUBY
+    assert_call(code, include: [Symbol, String])
+  end
 end
