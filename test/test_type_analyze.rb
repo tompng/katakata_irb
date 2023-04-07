@@ -105,4 +105,10 @@ class TestTypeAnalyzeIrb < Minitest::Test
     RUBY
     assert_call(code, include: [Symbol, String])
   end
+
+  def test_ternary_operator
+    assert_call('condition ? 1.chr.', include: [String])
+    assert_call('condition ? value : 1.chr.', include: [String])
+  end
+
 end

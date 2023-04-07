@@ -167,11 +167,12 @@ module KatakataIrb::Completor
         $/ + ($1 || $2 || $3) + $/
       when ':"', ":'", ':'
         t.tok[1]
+      when '?'
+        ' : value'
       else
         $/ + 'end'
       end
     end
-
     # remove error tokens
     tokens.pop while tokens&.last&.tok&.empty?
 

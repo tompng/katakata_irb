@@ -179,6 +179,13 @@ module KatakataIrb::NestingParser
           opens << [t, nil]
         when :on_tstring_end, :on_regexp_end, :on_label_end
           opens.pop
+        when :on_op
+          case t.tok
+          when '?'
+            opens << [t, nil]
+          when ':'
+            opens.pop
+          end
         when :on_symbeg
           if t.tok == ':'
             opens << [t, :in_unquoted_symbol]
