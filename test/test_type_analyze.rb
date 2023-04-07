@@ -109,11 +109,14 @@ class TestTypeAnalyzeIrb < Minitest::Test
   def test_ternary_operator
     assert_call('condition ? 1.chr.', include: [String])
     assert_call('condition ? value : 1.chr.', include: [String])
+    assert_call('condition ? cond ? cond ? value : cond ? value : 1.chr.', include: [String])
   end
 
   def test_block_parameter
-    assert_call('method do |arg = 1.chr.', include: [String])
     assert_call('method { |arg = 1.chr.', include: [String])
+    assert_call('method do |arg = 1.chr.', include: [String])
+    assert_call('method { |arg1 = 1.|(2|3), arg2 = 1.chr.', include: [String])
+    assert_call('method do |arg1 = 1.|(2|3), arg2 = 1.chr.', include: [String])
   end
 
 end
