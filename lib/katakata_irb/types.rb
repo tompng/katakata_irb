@@ -194,7 +194,7 @@ module KatakataIrb::Types
 
   NIL = InstanceType.new NilClass
   OBJECT = InstanceType.new Object
-  TRUE = InstanceType.new FalseClass
+  TRUE = InstanceType.new TrueClass
   FALSE = InstanceType.new FalseClass
   SYMBOL = InstanceType.new Symbol
   STRING = InstanceType.new String
