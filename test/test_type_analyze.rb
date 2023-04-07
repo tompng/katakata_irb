@@ -111,4 +111,9 @@ class TestTypeAnalyzeIrb < Minitest::Test
     assert_call('condition ? value : 1.chr.', include: [String])
   end
 
+  def test_block_parameter
+    assert_call('method do |arg = 1.chr.', include: [String])
+    assert_call('method { |arg = 1.chr.', include: [String])
+  end
+
 end

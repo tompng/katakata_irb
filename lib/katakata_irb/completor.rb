@@ -168,7 +168,11 @@ module KatakataIrb::Completor
       when ':"', ":'", ':'
         t.tok[1]
       when '?'
+        # ternary operator
         ' : value'
+      when '|'
+        # block args
+        '|'
       else
         $/ + 'end'
       end

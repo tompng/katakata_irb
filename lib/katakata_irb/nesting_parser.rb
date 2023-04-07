@@ -26,6 +26,8 @@ module KatakataIrb::NestingParser
     interpolated
   end
 
+  IGNOREABLE_TOKENS = %i[on_sp on_ignored_nl on_comment on_embdoc_beg on_embdoc on_embdoc_end]
+
   def self.parse(tokens)
     opens = []
     pending_heredocs = []
@@ -42,7 +44,7 @@ module KatakataIrb::NestingParser
       when :in_lambda_head
         opens.pop if t.event == :on_tlambeg || (t.event == :on_kw && t.tok == 'do')
       when :in_method_head
-        unless %i[on_sp on_ignored_nl on_comment on_embdoc_beg on_embdoc on_embdoc_end].include?(t.event)
+        unless IGNOREABLE_TOKENS.include?(t.event)
           next_args = []
           body = nil
           if args.include?(:receiver)
@@ -127,13 +129,27 @@ module KatakataIrb::NestingParser
           skip = true if t.event == :on_kw && t.tok == 'do'
           opens[-1] = [last_tok, nil]
         end
+      when :in_block_head
+        if t.event == :on_op && t.tok == '|'
+          opens[-1] = [last_tok, nil]
+          opens << [t, :in_block_args]
+        elsif !IGNOREABLE_TOKENS.include?(t.event)
+          opens[-1] = [last_tok, nil]
+        end
+      when :in_block_args
+        if t.event == :on_op && t.tok == '|' && t.state.allbits?(Ripper::EXPR_BEG)
+          opens.pop
+          skip = true
+        end
       end
 
       unless skip
         case t.event
         when :on_kw
           case t.tok
-          when 'begin', 'class', 'module', 'do', 'case'
+          when 'do'
+            opens << [t, :in_block_head]
+          when 'begin', 'class', 'module', 'case'
             opens << [t, nil]
           when 'end'
             opens.pop
@@ -163,9 +179,15 @@ module KatakataIrb::NestingParser
               opens << [t, nil]
             end
           end
+        when :on_lbrace
+          if t.state.allbits?(Ripper::EXPR_LABEL)
+            opens << [t, nil]
+          else
+            opens << [t, :in_block_head]
+          end
         when :on_tlambda
           opens << [t, :in_lambda_head]
-        when :on_lparen, :on_lbracket, :on_lbrace, :on_tlambeg, :on_embexpr_beg, :on_embdoc_beg
+        when :on_lparen, :on_lbracket, :on_tlambeg, :on_embexpr_beg, :on_embdoc_beg
           opens << [t, nil]
         when :on_rparen, :on_rbracket, :on_rbrace, :on_embexpr_end, :on_embdoc_end
           opens.pop
@@ -182,8 +204,10 @@ module KatakataIrb::NestingParser
         when :on_op
           case t.tok
           when '?'
+            # opening of `cond ? value : value``
             opens << [t, nil]
           when ':'
+            # closing of `cond ? value : value``
             opens.pop
           end
         when :on_symbeg
