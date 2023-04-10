@@ -134,4 +134,13 @@ class TestTypeAnalyzeIrb < Minitest::Test
     assert_call('@int.', include: [Integer], binding: object_binding)
     assert_call('@string.', include: [String], binding: object_binding)
   end
+
+  def test_optional_chain
+    assert_call('[1,nil].sample.', include: [Integer, NilClass])
+    assert_call('[1,nil].sample.chr.', include: [String], exclude: [NilClass])
+    assert_call('[1,nil].sample&.chr.', include: [String, NilClass])
+    assert_call('[1,nil].sample.chr&.ord.', include: [Integer], exclude: [NilClass])
+    assert_call('a = 1; b.c(a = :a); a.', include: [Symbol], exclude: [Integer])
+    assert_call('a = 1; b&.c(a = :a); a.', include: [Integer, Symbol])
+  end
 end

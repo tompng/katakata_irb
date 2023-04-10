@@ -454,7 +454,7 @@ class KatakataIrb::TypeSimulator
         # workaround for https://bugs.ruby-lang.org/issues/19175
         return scope[name]
       end
-      receiver, method, args, kwargs, block, conditional = retrieve_method_call sexp
+      receiver, method, args, kwargs, block, optional_chain = retrieve_method_call sexp
       if receiver.nil? && method == 'raise'
         scope.terminate_with RAISE_BREAK, KatakataIrb::Types::TRUE
         return KatakataIrb::Types::NIL
@@ -508,8 +508,13 @@ class KatakataIrb::TypeSimulator
         end
         simulate_call receiver_type, method, args_type, kwargs_type(kwargs, scope), call_block_proc
       end
-      if conditional
-        scope.conditional { evaluate_method.call }
+      if optional_chain
+        result = scope.conditional { evaluate_method.call }
+        if receiver_type.nillable?
+          KatakataIrb::Types::UnionType[result, KatakataIrb::Types::NIL]
+        else
+          result
+        end
       else
         evaluate_method.call
       end
@@ -941,28 +946,28 @@ class KatakataIrb::TypeSimulator
   end
 
   def retrieve_method_call(sexp)
-    conditional = -> { _1 in [:@op, '&.',] }
+    optional = -> { _1 in [:@op, '&.',] }
     case sexp
     in [:fcall | :vcall, [:@ident | :@const | :@kw | :@op, method,]] # hoge
       [nil, method, [], [], nil, false]
     in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::' => dot, :call]
-      [receiver, :call, [], [], nil, conditional[dot]]
+      [receiver, :call, [], [], nil, optional[dot]]
     in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::' => dot, method]
       method => [:@ident | :@const | :@kw | :@op, method,] unless method == :call
-      [receiver, method, [], [], nil, conditional[dot]]
+      [receiver, method, [], [], nil, optional[dot]]
     in [:command, [:@ident | :@const | :@kw | :@op, method,], args] # hoge 1, 2
       args, kwargs, block = retrieve_method_args args
       [nil, method, args, kwargs, block, false]
     in [:command_call, receiver, [:@period,] | [:@op, '&.',] | :'::' => dot, [:@ident | :@const | :@kw | :@op, method,], args] # a.hoge 1; a.hoge 1, 2;
       args, kwargs, block = retrieve_method_args args
-      [receiver, method, args, kwargs, block, conditional[dot]]
+      [receiver, method, args, kwargs, block, optional[dot]]
     in [:method_add_arg, call, args]
-      receiver, method, _arg, _kwarg, _block, cond = retrieve_method_call call
+      receiver, method, _arg, _kwarg, _block, opt = retrieve_method_call call
       args, kwargs, block = retrieve_method_args args
-      [receiver, method, args, kwargs, block, cond]
+      [receiver, method, args, kwargs, block, opt]
     in [:method_add_block, call, block]
-      receiver, method, args, kwargs, cond = retrieve_method_call call
-      [receiver, method, args, kwargs, block, cond]
+      receiver, method, args, kwargs, opt = retrieve_method_call call
+      [receiver, method, args, kwargs, block, opt]
     end
   end
 

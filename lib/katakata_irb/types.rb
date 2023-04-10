@@ -168,6 +168,7 @@ module KatakataIrb::Types
     def all_methods() = methods | Kernel.methods
     def constants() = @module_or_class.constants
     def types() = [self]
+    def nillable?() = false
   end
 
   class InstanceType
@@ -181,6 +182,7 @@ module KatakataIrb::Types
     def all_methods() = @klass.instance_methods | @klass.private_instance_methods
     def constants() = []
     def types() = [self]
+    def nillable?() = (@klass == NilClass)
   end
 
   class ProcType
@@ -195,6 +197,7 @@ module KatakataIrb::Types
     def all_methods() = Proc.instance_methods | Proc.private_instance_methods
     def constants() = []
     def types() = [self]
+    def nillable?() = (@klass == NilClass)
   end
 
   NIL = InstanceType.new NilClass
@@ -246,6 +249,10 @@ module KatakataIrb::Types
 
     def transform(&block)
       UnionType[*types.map(&block)]
+    end
+
+    def nillable?
+      types.any?(&:nillable?)
     end
 
     def self.[](*types)
