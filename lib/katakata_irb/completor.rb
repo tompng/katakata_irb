@@ -67,15 +67,15 @@ module KatakataIrb::Completor
         method_doc = -> type do
           type = type.types.find { _1.all_methods.include? name.to_sym }
           if type in KatakataIrb::Types::SingletonType
-            "#{type.module_or_class.name}.#{name}"
+            "#{KatakataIrb::Types.class_name_of(type.module_or_class)}.#{name}"
           elsif type in KatakataIrb::Types::InstanceType
-            "#{type.klass.name}##{name}"
+            "#{KatakataIrb::Types.class_name_of(type.klass)}##{name}"
           end
         end
         call_or_const_doc = -> type do
           if name =~ /\A[A-Z]/
             type = type.types.grep(KatakataIrb::Types::SingletonType).find { _1.module_or_class.const_defined?(name) }
-            type.module_or_class == Object ? name : "#{type.module_or_class.name}::#{name}" if type
+            type.module_or_class == Object ? name : "#{KatakataIrb::Types.class_name_of(type.module_or_class)}::#{name}" if type
           else
             method_doc.call(type)
           end
@@ -120,15 +120,15 @@ module KatakataIrb::Completor
       contents = types.filter_map do |type|
         case type
         when KatakataIrb::Types::InstanceType
-          type.klass.name
+          KatakataIrb::Types.class_name_of type.klass
         when KatakataIrb::Types::SingletonType
-          module_name = type.module_or_class.name
+          module_name = KatakataIrb::Types.class_name_of type.module_or_class
           "#{module_name}.itself" if module_name
         end
-      end
+      end.uniq
       return if contents.empty?
-      width = contents.map { Reline::Unicode.calculate_width _1 }.max
 
+      width = contents.map { Reline::Unicode.calculate_width _1 }.max
       x = cursor_pos_to_render.x + autocomplete_dialog.width
       y = cursor_pos_to_render.y
       Reline::DialogRenderInfo.new(pos: Reline::CursorPos.new(x, y), contents: contents, width: width, bg_color: 44, fg_color: 37)

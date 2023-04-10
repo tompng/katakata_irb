@@ -16,7 +16,9 @@ class TestTypeAnalyzeIrb < Minitest::Test
   def assert_call(code, include: nil, exclude: nil, binding: nil)
     raise ArgumetError if include.nil? && exclude.nil?
     analyze(code, binding:) => [:call, type,]
-    klasses = type.types.map { _1.klass }
+    klasses = type.types.flat_map do
+      _1.klass.singleton_class? ? [_1.klass.superclass, _1.klass] : _1.klass
+    end
     assert ([*include] - klasses).empty?, "Expected #{klasses} to include #{include}" if include
     assert (klasses & [*exclude]).empty?, "Expected #{klasses} not to include #{exclude}" if exclude
   end
@@ -119,4 +121,17 @@ class TestTypeAnalyzeIrb < Minitest::Test
     assert_call('method do |arg1 = 1.|(2|3), arg2 = 1.chr.', include: [String])
   end
 
+  def test_self
+    integer_binding = 1.instance_eval { Kernel.binding }
+    assert_call('self.', include: [Integer], binding: integer_binding)
+    string = ''
+    string_binding = string.instance_eval { Kernel.binding }
+    assert_call('self.', include: [string.singleton_class], binding: string_binding)
+    object = Object.new
+    object.instance_eval { @int = 1; @string = string }
+    object_binding = object.instance_eval { Kernel.binding }
+    assert_call('self.', include: [object.singleton_class], binding: object_binding)
+    assert_call('@int.', include: [Integer], binding: object_binding)
+    assert_call('@string.', include: [String], binding: object_binding)
+  end
 end

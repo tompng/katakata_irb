@@ -13,9 +13,14 @@ module KatakataIrb::Types
 
   MODULE_NAME_METHOD = Module.instance_method(:name)
 
+  def self.class_name_of(klass)
+    klass = klass.superclass if klass.singleton_class?
+    MODULE_NAME_METHOD.bind_call klass
+  end
+
   def self.rbs_search_method(klass, method_name, singleton)
     klass.ancestors.each do |ancestor|
-      name = MODULE_NAME_METHOD.bind_call(ancestor)
+      name = class_name_of ancestor
       next unless name
       type_name = RBS::TypeName(name).absolute!
       definition = (singleton ? rbs_builder.build_singleton(type_name) : rbs_builder.build_instance(type_name)) rescue nil
