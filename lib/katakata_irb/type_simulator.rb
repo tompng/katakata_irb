@@ -136,6 +136,7 @@ class KatakataIrb::TypeSimulator
     end
 
     def []=(name, type)
+      return if terminated?
       if @passthrough && BaseScope.type_by_name(name) != :internal
         @parent[name] = type
       elsif trace?(name) && @parent.mutable? && !@tables.any? { _1.key? name } && @parent.has?(name)
@@ -539,9 +540,11 @@ class KatakataIrb::TypeSimulator
       params in [:paren, params]
       params_table = extract_param_names(params).to_h { [_1, KatakataIrb::Types::NIL] }
       block_scope = Scope.new scope, { **params_table, BREAK_RESULT => nil, NEXT_RESULT => nil, RETURN_RESULT => nil }
-      evaluate_assign_params params, [], block_scope
-      block_scope.conditional { evaluate_param_defaults params, block_scope }
-      statements.each { simulate_evaluate _1, block_scope }
+      block_scope.conditional do
+        evaluate_assign_params params, [], block_scope
+        block_scope.conditional { evaluate_param_defaults params, block_scope }
+        statements.each { simulate_evaluate _1, block_scope }
+      end
       block_scope.merge_jumps
       KatakataIrb::Types::ProcType.new
     in [:assign, [:var_field, [:@gvar | :@ivar | :@cvar | :@ident | :@const, name,]], value]
@@ -606,7 +609,7 @@ class KatakataIrb::TypeSimulator
     in [:while | :until, cond, statements]
       inner_scope = Scope.new scope, { BREAK_RESULT => nil }, passthrough: true
       simulate_evaluate cond, inner_scope
-      scope.conditional { statements.each { simulate_evaluate _1, inner_scope } }
+      inner_scope.conditional { statements.each { simulate_evaluate _1, inner_scope } }
       inner_scope.merge_jumps
       breaks = inner_scope[BREAK_RESULT]
       breaks ? KatakataIrb::Types::UnionType[breaks, KatakataIrb::Types::NIL] : KatakataIrb::Types::NIL

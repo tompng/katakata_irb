@@ -72,24 +72,28 @@ class TestTypeAnalyzeIrb < Minitest::Test
   end
 
   def test_branch_termination
+    assert_call('a=1; tap{break; a=//}; a.', include: Integer, exclude: Regexp)
+    assert_call('a=1; tap{a=1.0; break; a=//}; a.', include: [Integer, Float], exclude: Regexp)
+    assert_call('a=1; tap{next; a=//}; a.', include: Integer, exclude: Regexp)
+    assert_call('a=1; tap{a=1.0; next; a=//}; a.', include: [Integer, Float], exclude: Regexp)
+    assert_call('a=1; while cond; break; a=//; end; a.', include: Integer, exclude: Regexp)
+    assert_call('a=1; while cond; a=1.0; break; a=//; end; a.', include: [Integer, Float], exclude: Regexp)
+    assert_call('a=1; ->{ break; a=// }; a.', include: Integer, exclude: Regexp)
+    assert_call('a=1; ->{ a=1.0; break; a=// }; a.', include: [Integer, Float], exclude: Regexp)
+
     assert_call('a=1; tap{if cond; a=:a; break; a=""; end; a.', include: Integer, exclude: [Symbol, String])
     assert_call('a=1; tap{if cond; a=:a; break; a=""; end; a=//}; a.', include: [Integer, Symbol, Regexp], exclude: String)
-    # assert_call('a=1; tap{if cond; a=:a; break; a=""; else; break; end; a=//}; a.', include: [Integer, Symbol], exclude: [String, Regexp])
+    assert_call('a=1; tap{if cond; a=:a; break; a=""; else; break; end; a=//}; a.', include: [Integer, Symbol], exclude: [String, Regexp])
     assert_call('a=1; tap{if cond; a=:a; next; a=""; end; a.', include: Integer, exclude: [Symbol, String])
     assert_call('a=1; tap{if cond; a=:a; next; a=""; end; a=//}; a.', include: [Integer, Symbol, Regexp], exclude: String)
-    # assert_call('a=1; tap{if cond; a=:a; next; a=""; else; next; end; a=//}; a.', include: [Integer, Symbol], exclude: [String, Regexp])
+    assert_call('a=1; tap{if cond; a=:a; next; a=""; else; next; end; a=//}; a.', include: [Integer, Symbol], exclude: [String, Regexp])
     assert_call('def f(a=1); if cond; a=:a; return; a=""; end; a.', include: Integer, exclude: [Symbol, String])
-    assert_call('a=1; while true; if cond; a=:a; break; a=""; end; a.', include: Integer, exclude: [Symbol, String])
-    assert_call('a=1; while true; if cond; a=:a; break; a=""; end; a=//; end; a.', include: [Integer, Symbol, Regexp], exclude: String)
-    # assert_call('a=1; while true; if cond; a=:a; break; a=""; else; break; end; a=//; end; a.', include: [Integer, Symbol], exclude: [String, Regexp])
-    # completion in terminated branch
-    assert_call('a=1; tap{break; a=//; a.', include: Regexp, exclude: Integer)
-    # assert_call('a=1; tap{break; a=//}; a.', include: Integer, exclude: Regexp)
-    assert_call('a=1; tap{next; a=//; a.', include: Regexp, exclude: Integer)
-    # assert_call('a=1; tap{next; a=//}; a.', include: Integer, exclude: Regexp)
-    assert_call('def f(a=1); return; a=:a; a.', include: Symbol, exclude: [Integer])
-    assert_call('a=1; while true; break; a=//; a.', include: Regexp, exclude: Integer)
-    # assert_call('a=1; while true; break; a=//; end; a.', include: Integer, exclude: Regexp)
+    assert_call('a=1; while cond; if cond; a=:a; break; a=""; end; a.', include: Integer, exclude: [Symbol, String])
+    assert_call('a=1; while cond; if cond; a=:a; break; a=""; end; a=//; end; a.', include: [Integer, Symbol, Regexp], exclude: String)
+    assert_call('a=1; while cond; if cond; a=:a; break; a=""; else; break; end; a=//; end; a.', include: [Integer, Symbol], exclude: [String, Regexp])
+    assert_call('a=1; ->{ if cond; a=:a; break; a=""; end; a.', include: Integer, exclude: [Symbol, String])
+    assert_call('a=1; ->{ if cond; a=:a; break; a=""; end; a=// }; a.', include: [Integer, Symbol, Regexp], exclude: String)
+    assert_call('a=1; ->{ if cond; a=:a; break; a=""; else; break; end; a=// }; a.', include: [Integer, Symbol], exclude: [String, Regexp])
   end
 
   def test_to_str_to_int
