@@ -183,12 +183,6 @@ class KatakataIrb::TypeSimulator
       end
     end
 
-    def ancestors
-      scopes = [self]
-      scopes << scopes.last.parent while scopes.last.parent&.mutable?
-      scopes
-    end
-
     def conditional(&block)
       run_branches(block, -> {}).first || KatakataIrb::Types::NIL
     end
@@ -208,14 +202,37 @@ class KatakataIrb::TypeSimulator
       end
     end
 
-    def branch
+    def has?(name)
+      has_own?(name) || (trace?(name) && @parent.has?(name))
+    end
+
+    def has_own?(name)
+      @tables.any? { _1.key? name }
+    end
+
+    private
+
+    def ancestors
+      scopes = [self]
+      scopes << scopes.last.parent while scopes.last.parent&.mutable?
+      scopes
+    end
+
+    def before_branch
+      @terminated = false
       scopes = ancestors
       scopes.each(&:start_branch)
-      @terminated = false
+      scopes
+    end
+
+    def after_branch(scopes)
+      scopes.map(&:end_branch)
+    end
+
+    def branch
+      scopes = before_branch
       result = yield
-      terminated = @terminated
-      @terminated = false
-      [result, scopes.map(&:end_branch), terminated]
+      [result, after_branch(scopes), @terminated]
     end
 
     def merge(branches)
@@ -223,18 +240,6 @@ class KatakataIrb::TypeSimulator
       scopes.zip(*branches).each do |scope, *tables|
         scope.merge_branch(tables)
       end
-    end
-
-    def base_scope
-      @parent&.mutable? ? @parent.base_scope : @parent
-    end
-
-    def has_own?(name)
-      @tables.any? { _1.key? name }
-    end
-
-    def has?(name)
-      has_own?(name) || (trace?(name) && @parent.has?(name))
     end
   end
 
