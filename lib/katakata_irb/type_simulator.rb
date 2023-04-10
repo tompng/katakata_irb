@@ -177,8 +177,8 @@ class KatakataIrb::TypeSimulator
       target_table = @tables.last
       keys = tables.flat_map(&:keys).uniq
       keys.each do |key|
-        original_value = self[key] || KatakataIrb::Types::NIL
-        target_table[key] = KatakataIrb::Types::UnionType[*tables.map { _1[key] || original_value }.uniq]
+        original_value = self[key]
+        target_table[key] = KatakataIrb::Types::UnionType[*tables.map { _1[key] || original_value }.compact.uniq]
       end
     end
 

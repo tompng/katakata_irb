@@ -58,12 +58,17 @@ class TestTypeAnalyzeIrb < Minitest::Test
   end
 
   def test_conditional_assign
-    assert_call('a = 1; a = "" if cond; a.', include: [String, Integer])
-    assert_call(<<~RUBY, include: [String, Symbol], exclude: Integer)
+    assert_call('a = 1; a = "" if cond; a.', include: [String, Integer], exclude: NilClass)
+    assert_call('a = 1 if cond; a.', include: [Integer, NilClass])
+    assert_call(<<~RUBY, include: [String, Symbol], exclude: [Integer, NilClass])
       a = 1
       cond ? a = '' : a = :a
       a.
     RUBY
+  end
+
+  def test_conditional_break
+    assert_call('1.tap{break :a if b}.', include: [Symbol, Integer], exclude: NilClass)
   end
 
   def test_to_str_to_int
