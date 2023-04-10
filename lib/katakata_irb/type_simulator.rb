@@ -761,6 +761,10 @@ class KatakataIrb::TypeSimulator
       KatakataIrb::Types::RANGE
     in [:top_const_ref, [:@const, name,]]
       self.class.type_of { Object.const_get name }
+    in [:string_concat, a, b]
+      simulate_evaluate a, scope
+      simulate_evaluate b, scope
+      KatakataIrb::Types::STRING
     else
       KatakataIrb.log_puts
       KatakataIrb.log_puts :NOMATCH

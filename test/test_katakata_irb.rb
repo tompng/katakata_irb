@@ -22,6 +22,7 @@ class TestKatakataIrb < Minitest::Test
     def f(...)
       f(...)
     end
+    p(?a'b'"c", %(a)"b#{c}d"'e'"f#{g}h")
     p ()
     p (1.method)
     (a,b)=1
