@@ -81,6 +81,11 @@ class TestTypeAnalyzeIrb < Minitest::Test
     assert_call('a=1; ->{ break; a=// }; a.', include: Integer, exclude: Regexp)
     assert_call('a=1; ->{ a=1.0; break; a=// }; a.', include: [Integer, Float], exclude: Regexp)
 
+    assert_call('a=1; tap{ break; a=// if cond }; a.', include: Integer, exclude: Regexp)
+    assert_call('a=1; tap{ next; a=// if cond }; a.', include: Integer, exclude: Regexp)
+    assert_call('a=1; while cond; break; a=// if cond; end; a.', include: Integer, exclude: Regexp)
+    assert_call('a=1; ->{ break; a=// if cond }; a.', include: Integer, exclude: Regexp)
+
     assert_call('a=1; tap{if cond; a=:a; break; a=""; end; a.', include: Integer, exclude: [Symbol, String])
     assert_call('a=1; tap{if cond; a=:a; break; a=""; end; a=//}; a.', include: [Integer, Symbol, Regexp], exclude: String)
     assert_call('a=1; tap{if cond; a=:a; break; a=""; else; break; end; a=//}; a.', include: [Integer, Symbol], exclude: [String, Regexp])

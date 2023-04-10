@@ -210,21 +210,13 @@ module KatakataIrb
       scopes
     end
 
-    def before_branch
-      @terminated = false
+    def branch
       scopes = ancestors
       scopes.each(&:start_branch)
-      scopes
-    end
-
-    def after_branch(scopes)
-      scopes.map(&:end_branch)
-    end
-
-    def branch
-      scopes = before_branch
+      terminated_was = @terminated
       result = yield
-      [result, after_branch(scopes), @terminated]
+      terminated, @terminated = @terminated, terminated_was
+      [result, scopes.map(&:end_branch), terminated]
     end
 
     def merge(branches)
