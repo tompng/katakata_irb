@@ -1,6 +1,7 @@
-require_relative 'types'
 require 'ripper'
 require 'set'
+require_relative 'types'
+require_relative 'scope'
 
 class KatakataIrb::TypeSimulator
   class DigTarget
@@ -14,232 +15,6 @@ class KatakataIrb::TypeSimulator
     def target?(node) = @target_id == node.__id__
     def resolve(type, scope)
       @block.call type, scope
-    end
-  end
-
-  class BaseScope
-    def initialize(binding, self_object)
-      @binding, @self_object = binding, self_object
-      @cache = { SELF => KatakataIrb::Types.type_from_object(self_object) }
-      @local_variables = binding.local_variables.map(&:to_s).to_set
-    end
-
-    def mutable?() = false
-
-    def [](name)
-      @cache[name] ||= (
-        fallback = KatakataIrb::Types::NIL
-        case BaseScope.type_by_name name
-        when :cvar
-          KatakataIrb::TypeSimulator.type_of(fallback: fallback) { @self_object.class_variable_get name }
-        when :ivar
-          KatakataIrb::TypeSimulator.type_of(fallback: fallback) { @self_object.instance_variable_get name }
-        when :lvar
-          KatakataIrb::TypeSimulator.type_of(fallback: fallback) { @binding.local_variable_get(name) }
-        when :const
-          KatakataIrb::TypeSimulator.type_of(fallback: fallback) { @binding.eval name }
-        end
-      )
-    end
-
-    def self_type
-      self[SELF]
-    end
-
-    def local_variables
-      @local_variables.to_a
-    end
-
-    def self.type_by_name(name)
-      if name.start_with? '@@'
-        :cvar
-      elsif name.start_with? '@'
-        :ivar
-      elsif name.start_with? '$'
-        :gvar
-      elsif name.start_with? '%'
-        :internal
-      elsif name[0].downcase != name[0]
-        :const
-      else
-        :lvar
-      end
-    end
-
-    def has?(name)
-      case BaseScope.type_by_name name
-      when :lvar
-        @local_variables.include? name
-      when :const
-        @binding.eval("#{name};true") rescue false
-      when :gvar, :cvar, :ivar
-        true
-      when :internal
-        true
-      end
-    end
-  end
-
-  class Scope
-    attr_reader :parent, :jump_branches
-
-    def self.from_binding(binding) = new(BaseScope.new(binding, binding.eval('self')))
-
-    def initialize(parent, table = {}, trace_cvar: true, trace_ivar: true, trace_lvar: true, passthrough: false)
-      @tables = [table]
-      @parent = parent
-      @trace_cvar = trace_cvar
-      @trace_ivar = trace_ivar
-      @trace_lvar = trace_lvar
-      @passthrough = passthrough
-      @terminated = false
-      @jump_branches = []
-    end
-
-    def mutable? = true
-
-    def terminated?
-      @terminated
-    end
-
-    def terminate_with(type, value)
-      return if terminated?
-      self[type] = value
-      store_jump type
-      terminate
-    end
-
-    def store_jump(type)
-      scopes = ancestors.select(&:mutable?)
-      scope = scopes.find { _1.has_own? type } || scopes.last
-      index = scopes.index scope
-      scope.jump_branches << scopes.drop(index).map(&:branch_table_clone)
-    end
-
-    def terminate
-      @terminated = true
-    end
-
-    def branch_table_clone() = @tables.last.dup
-
-    def trace?(name)
-      return false unless @parent
-      type = BaseScope.type_by_name(name)
-      type == :cvar ? @trace_cvar : type == :ivar ? @trace_ivar : type == :lvar ? @trace_lvar : true
-    end
-
-    def [](name)
-      @tables.reverse_each do |table|
-        return table[name] if table.key? name
-      end
-      @parent[name] if trace? name
-    end
-
-    def []=(name, type)
-      return if terminated?
-      if @passthrough && BaseScope.type_by_name(name) != :internal
-        @parent[name] = type
-      elsif trace?(name) && @parent.mutable? && !@tables.any? { _1.key? name } && @parent.has?(name)
-        @parent[name] = type
-      else
-        @tables.last[name] = type
-      end
-    end
-
-    def self_type
-      self[SELF]
-    end
-
-    def local_variables
-      lvar_keys = @tables.flat_map(&:keys).select do |name|
-        BaseScope.type_by_name(name) == :lvar
-      end
-      lvar_keys |= @parent.local_variables if @trace_lvar
-      lvar_keys
-    end
-
-    def start_branch
-      @tables << {}
-    end
-
-    def end_branch
-      @tables.pop
-    end
-
-    def merge_jumps
-      if terminated?
-        merge @jump_branches
-      else
-        merge [*@jump_branches, [{}] * ancestors.size]
-      end
-    end
-
-    def merge_branch(tables)
-      target_table = @tables.last
-      keys = tables.flat_map(&:keys).uniq
-      keys.each do |key|
-        original_value = self[key]
-        target_table[key] = KatakataIrb::Types::UnionType[*tables.map { _1[key] || original_value }.compact.uniq]
-      end
-    end
-
-    def conditional(&block)
-      run_branches(block, -> {}).first || KatakataIrb::Types::NIL
-    end
-
-    def never(&block)
-      branch(&block)
-    end
-
-    def run_branches(*blocks)
-      results = blocks.map { branch(&_1) }.reject(&:last)
-      merge results.map { _2 }
-      if results.empty?
-        terminate
-        []
-      else
-        results.map(&:first)
-      end
-    end
-
-    def has?(name)
-      has_own?(name) || (trace?(name) && @parent.has?(name))
-    end
-
-    def has_own?(name)
-      @tables.any? { _1.key? name }
-    end
-
-    private
-
-    def ancestors
-      scopes = [self]
-      scopes << scopes.last.parent while scopes.last.parent&.mutable?
-      scopes
-    end
-
-    def before_branch
-      @terminated = false
-      scopes = ancestors
-      scopes.each(&:start_branch)
-      scopes
-    end
-
-    def after_branch(scopes)
-      scopes.map(&:end_branch)
-    end
-
-    def branch
-      scopes = before_branch
-      result = yield
-      [result, after_branch(scopes), @terminated]
-    end
-
-    def merge(branches)
-      scopes = ancestors
-      scopes.zip(*branches).each do |scope, *tables|
-        scope.merge_branch(tables)
-      end
     end
   end
 
@@ -271,13 +46,6 @@ class KatakataIrb::TypeSimulator
     to_c: KatakataIrb::Types::COMPLEX,
     to_r: KatakataIrb::Types::RATIONAL
   }
-
-  SELF = '%self'
-  BREAK_RESULT = '%break'
-  NEXT_RESULT = '%next'
-  RETURN_RESULT = '%return'
-  PATTERNMATCH_BREAK = '%match'
-  RAISE_BREAK = '%raise'
 
   def initialize(dig_targets)
     @dig_targets = dig_targets
@@ -313,7 +81,11 @@ class KatakataIrb::TypeSimulator
       if @dig_targets.dig? sexp
         params in [:paren, params]
         params_table = extract_param_names(params).to_h { [_1, KatakataIrb::Types::NIL] }
-        method_scope = Scope.new scope, { **params_table, SELF => self_type, BREAK_RESULT => nil, NEXT_RESULT => nil, RETURN_RESULT => nil }, trace_lvar: false
+        method_scope = KatakataIrb::Scope.new(
+          scope,
+          { **params_table, KatakataIrb::Scope::SELF => self_type, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil },
+          trace_lvar: false
+        )
         evaluate_assign_params params, [], method_scope
         method_scope.conditional { evaluate_param_defaults params, method_scope }
         simulate_evaluate body_stmt, method_scope
@@ -462,7 +234,7 @@ class KatakataIrb::TypeSimulator
       end
       receiver, method, args, kwargs, block, optional_chain = retrieve_method_call sexp
       if receiver.nil? && method == 'raise'
-        scope.terminate_with RAISE_BREAK, KatakataIrb::Types::TRUE
+        scope.terminate_with KatakataIrb::Scope::RAISE_BREAK, KatakataIrb::Types::TRUE
         return KatakataIrb::Types::NIL
       end
       receiver_type = receiver ? simulate_evaluate(receiver, scope) : scope.self_type
@@ -493,7 +265,7 @@ class KatakataIrb::TypeSimulator
                   params = [:params, names.map { [:@ident, _1, [0, 0]] }, nil, nil, nil, nil, nil, nil]
                 end
                 params_table = names.zip(block_args).to_h { [_1, _2 || KatakataIrb::Types::NIL] }
-                block_scope = Scope.new scope, { **params_table, BREAK_RESULT => nil, NEXT_RESULT => nil }
+                block_scope = KatakataIrb::Scope.new scope, { **params_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil }
                 evaluate_assign_params params, block_args, block_scope
                 block_scope.conditional { evaluate_param_defaults params, block_scope } if params
                 if type == :do_block
@@ -503,7 +275,7 @@ class KatakataIrb::TypeSimulator
                 end
                 block_scope.merge_jumps
                 result = KatakataIrb::Types::NIL if block_scope.terminated?
-                [result, block_scope[BREAK_RESULT], block_scope[NEXT_RESULT]]
+                [result, block_scope[KatakataIrb::Scope::BREAK_RESULT], block_scope[KatakataIrb::Scope::NEXT_RESULT]]
               end
               [KatakataIrb::Types::UnionType[result, *nexts], breaks]
             end
@@ -544,7 +316,7 @@ class KatakataIrb::TypeSimulator
       statements in [:bodystmt, statements, _unknown, _unknown, _unknown] # -> do end
       params in [:paren, params]
       params_table = extract_param_names(params).to_h { [_1, KatakataIrb::Types::NIL] }
-      block_scope = Scope.new scope, { **params_table, BREAK_RESULT => nil, NEXT_RESULT => nil, RETURN_RESULT => nil }
+      block_scope = KatakataIrb::Scope.new scope, { **params_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }
       block_scope.conditional do
         evaluate_assign_params params, [], block_scope
         block_scope.conditional { evaluate_param_defaults params, block_scope }
@@ -612,21 +384,21 @@ class KatakataIrb::TypeSimulator
       )
       results.empty? ? KatakataIrb::Types::NIL : KatakataIrb::Types::UnionType[*results]
     in [:while | :until, cond, statements]
-      inner_scope = Scope.new scope, { BREAK_RESULT => nil }, passthrough: true
+      inner_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::BREAK_RESULT => nil }, passthrough: true
       simulate_evaluate cond, inner_scope
       inner_scope.conditional { statements.each { simulate_evaluate _1, inner_scope } }
       inner_scope.merge_jumps
-      breaks = inner_scope[BREAK_RESULT]
+      breaks = inner_scope[KatakataIrb::Scope::BREAK_RESULT]
       breaks ? KatakataIrb::Types::UnionType[breaks, KatakataIrb::Types::NIL] : KatakataIrb::Types::NIL
     in [:while_mod | :until_mod, cond, statement]
-      inner_scope = Scope.new scope, { BREAK_RESULT => nil }, passthrough: true
+      inner_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::BREAK_RESULT => nil }, passthrough: true
       simulate_evaluate cond, inner_scope
       scope.conditional { simulate_evaluate statement, inner_scope }
       inner_scope.merge_jumps
-      breaks = inner_scope[BREAK_RESULT]
+      breaks = inner_scope[KatakataIrb::Scope::BREAK_RESULT]
       breaks ? KatakataIrb::Types::UnionType[breaks, KatakataIrb::Types::NIL] : KatakataIrb::Types::NIL
     in [:break | :next | :return => jump_type, value]
-      internal_key = jump_type == :break ? BREAK_RESULT : jump_type == :next ? NEXT_RESULT : RETURN_RESULT
+      internal_key = jump_type == :break ? KatakataIrb::Scope::BREAK_RESULT : jump_type == :next ? KatakataIrb::Scope::NEXT_RESULT : KatakataIrb::Scope::RETURN_RESULT
       if value.empty?
         jump_value = KatakataIrb::Types::NIL
       else
@@ -637,7 +409,7 @@ class KatakataIrb::TypeSimulator
       scope.terminate_with internal_key, jump_value
       KatakataIrb::Types::NIL
     in [:return0]
-      scope.terminate_with RETURN_RESULT, KatakataIrb::Types::NIL
+      scope.terminate_with KatakataIrb::Scope::RETURN_RESULT, KatakataIrb::Types::NIL
       KatakataIrb::Types::NIL
     in [:yield, args]
       evaluate_mrhs args, scope
@@ -660,7 +432,7 @@ class KatakataIrb::TypeSimulator
       simulate_evaluate body_stmt, scope
     in [:bodystmt, statements, rescue_stmt, _unknown, ensure_stmt]
       statements = [statements] if statements in [Symbol,] # oneliner-def body
-      rescue_scope = Scope.new scope, { RAISE_BREAK => nil }, passthrough: true if rescue_stmt
+      rescue_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::RAISE_BREAK => nil }, passthrough: true if rescue_stmt
       return_type = statements.map { simulate_evaluate _1, rescue_scope || scope }.last
       rescue_scope&.merge_jumps
       if rescue_stmt
@@ -686,7 +458,7 @@ class KatakataIrb::TypeSimulator
       end
       return_type
     in [:rescue_mod, statement1, statement2]
-      rescue_scope = Scope.new scope, { RAISE_BREAK => nil }, passthrough: true
+      rescue_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::RAISE_BREAK => nil }, passthrough: true
       a = simulate_evaluate statement1, rescue_scope
       rescue_scope.merge_jumps
       b = scope.conditional { simulate_evaluate statement2, scope }
@@ -694,13 +466,13 @@ class KatakataIrb::TypeSimulator
     in [:module, module_stmt, body_stmt]
       module_types = simulate_evaluate(module_stmt, scope).types.grep(KatakataIrb::Types::SingletonType)
       module_types << KatakataIrb::Types::MODULE if module_types.empty?
-      simulate_evaluate body_stmt, Scope.new(scope, { SELF => KatakataIrb::Types::UnionType[*module_types], BREAK_RESULT => nil, NEXT_RESULT => nil, RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
+      simulate_evaluate body_stmt, KatakataIrb::Scope.new(scope, { KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*module_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
     in [:sclass, klass_stmt, body_stmt]
       klass_types = simulate_evaluate(klass_stmt, scope).types.filter_map do |type|
         KatakataIrb::Types::SingletonType.new type.klass if type in KatakataIrb::Types::InstanceType
       end
       klass_types = [KatakataIrb::Types::CLASS] if klass_types.empty?
-      simulate_evaluate body_stmt, Scope.new(scope, { SELF => KatakataIrb::Types::UnionType[*klass_types], BREAK_RESULT => nil, NEXT_RESULT => nil, RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
+      simulate_evaluate body_stmt, KatakataIrb::Scope.new(scope, { KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*klass_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
     in [:class, klass_stmt, superclass_stmt, body_stmt]
       klass_types = simulate_evaluate(klass_stmt, scope).types
       klass_types += simulate_evaluate(superclass_stmt, scope).types if superclass_stmt
@@ -708,7 +480,7 @@ class KatakataIrb::TypeSimulator
         (type in KatakataIrb::Types::SingletonType) && type.module_or_class.is_a?(Class)
       end
       klass_types << KatakataIrb::Types::CLASS if klass_types.empty?
-      simulate_evaluate body_stmt, Scope.new(scope, { SELF => KatakataIrb::Types::UnionType[*klass_types], BREAK_RESULT => nil, NEXT_RESULT => nil, RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
+      simulate_evaluate body_stmt, KatakataIrb::Scope.new(scope, { KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*klass_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
     in [:for, fields, enum, statements]
       fields = [fields] if fields in [:var_field | :field | :aref_field,]
       params = [:params, fields, nil, nil, nil, nil, nil, nil]
@@ -716,12 +488,12 @@ class KatakataIrb::TypeSimulator
       extract_param_names(params).each { scope[_1] = KatakataIrb::Types::NIL }
       response = simulate_call enum, :first, [], nil, nil
       evaluate_assign_params params, [response], scope
-      inner_scope = Scope.new scope, { BREAK_RESULT => nil }, passthrough: true
+      inner_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::BREAK_RESULT => nil }, passthrough: true
       scope.conditional do
         statements.each { simulate_evaluate _1, inner_scope }
       end
       inner_scope.merge_jumps
-      breaks = inner_scope[BREAK_RESULT]
+      breaks = inner_scope[KatakataIrb::Scope::BREAK_RESULT]
       breaks ? KatakataIrb::Types::UnionType[breaks, enum] : enum
     in [:when, pattern, if_statements, else_statement]
       eval_pattern = lambda do |pattern, *rest|
@@ -746,7 +518,7 @@ class KatakataIrb::TypeSimulator
       scope[name] = case_target || KatakataIrb::Types::OBJECT
       if_statements ? if_statements.map { simulate_evaluate _1, scope }.last : KatakataIrb::Types::NIL
     in [:in, pattern, if_statements, else_statement]
-      pattern_scope = Scope.new(scope, { PATTERNMATCH_BREAK => nil }, passthrough: true)
+      pattern_scope = KatakataIrb::Scope.new(scope, { KatakataIrb::Scope::PATTERNMATCH_BREAK => nil }, passthrough: true)
       results = scope.run_branches(
         -> {
           match_pattern case_target, pattern, pattern_scope
@@ -782,7 +554,7 @@ class KatakataIrb::TypeSimulator
   end
 
   def match_pattern(target, pattern, scope)
-    breakable = -> { scope.store_jump PATTERNMATCH_BREAK }
+    breakable = -> { scope.store_jump KatakataIrb::Scope::PATTERNMATCH_BREAK }
     types = target.types
     case pattern
     in [:var_field, [:@ident, name,]]
@@ -1173,7 +945,7 @@ class KatakataIrb::TypeSimulator
     dig_targets = DigTarget.new(parents, target) do |_types, scope|
       return scope
     end
-    scope = Scope.from_binding(binding)
+    scope = KatakataIrb::Scope.from_binding(binding)
     new(dig_targets).simulate_evaluate parents[0], scope
     scope
   end
@@ -1182,7 +954,7 @@ class KatakataIrb::TypeSimulator
     dig_targets = DigTarget.new(parents, receiver) do |type, _scope|
       return type
     end
-    new(dig_targets).simulate_evaluate parents[0], Scope.from_binding(binding)
+    new(dig_targets).simulate_evaluate parents[0], KatakataIrb::Scope.from_binding(binding)
     KatakataIrb::Types::NIL
   end
 end
