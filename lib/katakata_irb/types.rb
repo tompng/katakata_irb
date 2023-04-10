@@ -271,6 +271,8 @@ module KatakataIrb::Types
     def constants() = @types.flat_map(&:constants).uniq
   end
 
+  BOOLEAN = UnionType[TRUE, FALSE]
+
   def self.from_rbs_type(return_type, self_type, extra_vars = {})
     case return_type
     when RBS::Types::Bases::Self
@@ -290,7 +292,7 @@ module KatakataIrb::Types
       end
       UnionType[*types]
     when RBS::Types::Bases::Bool
-      UnionType[TRUE, FALSE]
+      BOOLEAN
     when RBS::Types::Bases::Instance
       self_type.transform do |type|
         case type
@@ -338,7 +340,7 @@ module KatakataIrb::Types
       when :int
         INTEGER
       when :boolish
-        UnionType[TRUE, FALSE]
+        BOOLEAN
       when :string
         STRING
       else
