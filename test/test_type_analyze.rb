@@ -71,6 +71,27 @@ class TestTypeAnalyzeIrb < Minitest::Test
     assert_call('1.tap{break :a if b}.', include: [Symbol, Integer], exclude: NilClass)
   end
 
+  def test_branch_termination
+    assert_call('a=1; tap{if cond; a=:a; break; a=""; end; a.', include: Integer, exclude: [Symbol, String])
+    assert_call('a=1; tap{if cond; a=:a; break; a=""; end; a=//}; a.', include: [Integer, Symbol, Regexp], exclude: String)
+    # assert_call('a=1; tap{if cond; a=:a; break; a=""; else; break; end; a=//}; a.', include: [Integer, Symbol], exclude: [String, Regexp])
+    assert_call('a=1; tap{if cond; a=:a; next; a=""; end; a.', include: Integer, exclude: [Symbol, String])
+    assert_call('a=1; tap{if cond; a=:a; next; a=""; end; a=//}; a.', include: [Integer, Symbol, Regexp], exclude: String)
+    # assert_call('a=1; tap{if cond; a=:a; next; a=""; else; next; end; a=//}; a.', include: [Integer, Symbol], exclude: [String, Regexp])
+    assert_call('def f(a=1); if cond; a=:a; return; a=""; end; a.', include: Integer, exclude: [Symbol, String])
+    assert_call('a=1; while true; if cond; a=:a; break; a=""; end; a.', include: Integer, exclude: [Symbol, String])
+    assert_call('a=1; while true; if cond; a=:a; break; a=""; end; a=//; end; a.', include: [Integer, Symbol, Regexp], exclude: String)
+    # assert_call('a=1; while true; if cond; a=:a; break; a=""; else; break; end; a=//; end; a.', include: [Integer, Symbol], exclude: [String, Regexp])
+    # completion in terminated branch
+    assert_call('a=1; tap{break; a=//; a.', include: Regexp, exclude: Integer)
+    # assert_call('a=1; tap{break; a=//}; a.', include: Integer, exclude: Regexp)
+    assert_call('a=1; tap{next; a=//; a.', include: Regexp, exclude: Integer)
+    # assert_call('a=1; tap{next; a=//}; a.', include: Integer, exclude: Regexp)
+    assert_call('def f(a=1); return; a=:a; a.', include: Symbol, exclude: [Integer])
+    assert_call('a=1; while true; break; a=//; a.', include: Regexp, exclude: Integer)
+    # assert_call('a=1; while true; break; a=//; end; a.', include: Integer, exclude: Regexp)
+  end
+
   def test_to_str_to_int
     sobj = Data.define(:to_str).new('a')
     iobj = Data.define(:to_int).new(1)
