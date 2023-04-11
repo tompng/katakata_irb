@@ -681,7 +681,7 @@ class KatakataIrb::TypeSimulator
       in [:@ident, name,]
         # block arg mlhs
         scope[name] = value || KatakataIrb::Types::OBJECT
-      in [:var_field, [:@ident | :@ivar | :@cvar | :@gvar, name,]]
+      in [:var_field, [:@gvar | :@ivar | :@cvar | :@ident | :@const, name,]]
         # massign
         scope[name] = value || KatakataIrb::Types::OBJECT
       in [:mlhs, *mlhs]
