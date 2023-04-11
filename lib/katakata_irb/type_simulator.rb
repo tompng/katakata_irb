@@ -555,7 +555,7 @@ class KatakataIrb::TypeSimulator
   end
 
   def match_pattern(target, pattern, scope)
-    breakable = -> { scope.store_jump KatakataIrb::Scope::PATTERNMATCH_BREAK }
+    breakable = -> { scope.terminate_with KatakataIrb::Scope::PATTERNMATCH_BREAK, KatakataIrb::Types::NIL }
     types = target.types
     case pattern
     in [:var_field, [:@ident, name,]]
