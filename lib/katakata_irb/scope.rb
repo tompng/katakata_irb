@@ -79,7 +79,7 @@ module KatakataIrb
   end
 
   class Scope < BaseScope
-    attr_reader :parent, :jump_branches, :mergeable_changes
+    attr_reader :parent, :jump_branches, :mergeable_changes, :level
 
     def self.from_binding(binding) = new(BaseScope.new(binding, binding.eval('self')))
 
@@ -104,18 +104,17 @@ module KatakataIrb
 
     def terminate_with(type, value)
       return if terminated?
-      self[type] = value
-      store_jump type, @mergeable_changes
+      store_jump type, value, @mergeable_changes
       terminate
     end
 
-    def store_jump(type, changes)
-      raise unless changes
+    def store_jump(type, value, changes)
       return if terminated?
       if has_own?(type)
+        changes[type] = [level, value]
         @jump_branches << changes
       elsif @parent.mutable?
-        @parent.store_jump(type, changes)
+        @parent.store_jump(type, value, changes)
       end
     end
 
@@ -201,6 +200,14 @@ module KatakataIrb
       @changes.key? name
     end
 
+    def update(child_scope)
+      terminate if child_scope.terminated?
+      current_level = level
+      child_scope.mergeable_changes.each do |name, (level, value)|
+        self[name] = value if level <= current_level
+      end
+    end
+
     protected
 
     def merge(branches)
@@ -209,10 +216,10 @@ module KatakataIrb
       branches.each do |changes|
         changes.each do |name, (level, value)|
           next if current_level < level
-          (merge[name] ||= [level, []]).last << value
+          (merge[name] ||= []) << value
         end
       end
-      merge.each do |name, (level, values)|
+      merge.each do |name, values|
         values << self[name] unless values.size == branches.size
         self[name] = KatakataIrb::Types::UnionType[*values.compact]
       end
