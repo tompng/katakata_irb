@@ -176,7 +176,7 @@ module KatakataIrb
     end
 
     def conditional(&block)
-      run_branches(block, -> {}).first || KatakataIrb::Types::NIL
+      run_branches(block, ->(s){}).first || KatakataIrb::Types::NIL
     end
 
     def never(&block)
@@ -214,7 +214,7 @@ module KatakataIrb
       scopes = ancestors
       scopes.each(&:start_branch)
       terminated_was = @terminated
-      result = yield
+      result = yield self
       terminated, @terminated = @terminated, terminated_was
       [result, scopes.map(&:end_branch), terminated]
     end
