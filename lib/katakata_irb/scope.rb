@@ -177,6 +177,13 @@ module KatakataIrb
       block.call Scope.new(self, { BREAK_RESULT => nil, NEXT_RESULT => nil, PATTERNMATCH_BREAK => nil, RETURN_RESULT => nil, RAISE_BREAK => nil }, passthrough: true)
     end
 
+    def run(*args, **option)
+      scope = Scope.new(self, *args, **option)
+      yield scope
+      merge_jumps
+      update scope
+    end
+
     def run_branches(*blocks)
       results = []
       branches = []
