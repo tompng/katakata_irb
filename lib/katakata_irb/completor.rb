@@ -38,7 +38,7 @@ module KatakataIrb::Completor
       in [:gvar, name]
         global_variables
       in [:symbol, name]
-        Symbol.all_symbols
+        Symbol.all_symbols.map { _1.inspect[1..] }
       in [:call, type, name, self_call]
         (self_call ? type.all_methods : type.methods).map(&:to_s) - HIDDEN_METHODS
       in [:lvar_or_method, name, scope]
