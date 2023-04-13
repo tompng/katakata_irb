@@ -169,6 +169,7 @@ module KatakataIrb::Types
     def constants() = @module_or_class.constants
     def types() = [self]
     def nillable?() = false
+    def nonnillable() = self
   end
 
   class InstanceType
@@ -183,6 +184,7 @@ module KatakataIrb::Types
     def constants() = []
     def types() = [self]
     def nillable?() = (@klass == NilClass)
+    def nonnillable() = self
   end
 
   class ProcType
@@ -198,6 +200,7 @@ module KatakataIrb::Types
     def constants() = []
     def types() = [self]
     def nillable?() = (@klass == NilClass)
+    def nonnillable() = self
   end
 
   NIL = InstanceType.new NilClass
@@ -253,6 +256,10 @@ module KatakataIrb::Types
 
     def nillable?
       types.any?(&:nillable?)
+    end
+
+    def nonnillable
+      UnionType[*types.reject { _1.is_a?(InstanceType) && _1.klass == NilClass }]
     end
 
     def self.[](*types)

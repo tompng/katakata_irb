@@ -57,6 +57,14 @@ class TestTypeAnalyzeIrb < Minitest::Test
     assert_call('1.to_s.tap(&:', include: String)
   end
 
+  def test_range
+    assert_call('(1..2).first.', include: Integer)
+    assert_call('("a".."b").first.', include: String)
+    assert_call('(..1.to_f).first.', include: Float)
+    assert_call('(1.to_s..).first.', include: String)
+    assert_call('(1..2.0).first.', include: [Float, Integer])
+  end
+
   def test_conditional_assign
     assert_call('a = 1; a = "" if cond; a.', include: [String, Integer], exclude: NilClass)
     assert_call('a = 1 if cond; a.', include: [Integer, NilClass])

@@ -536,9 +536,10 @@ class KatakataIrb::TypeSimulator
     in [:void_stmt]
       KatakataIrb::Types::NIL
     in [:dot2 | :dot3, range_beg, range_end]
-      simulate_evaluate range_beg, scope if range_beg
-      simulate_evaluate range_end, scope if range_end
-      KatakataIrb::Types::RANGE
+      beg_type = simulate_evaluate range_beg, scope if range_beg
+      end_type = simulate_evaluate range_end, scope if range_end
+      elem = (KatakataIrb::Types::UnionType[*[beg_type, end_type].compact]).nonnillable
+      KatakataIrb::Types::InstanceType.new Range, { Elem: elem }
     in [:top_const_ref, [:@const, name,]]
       self.class.type_of { Object.const_get name }
     in [:string_concat, a, b]
