@@ -119,6 +119,7 @@ module KatakataIrb
     end
 
     def terminate
+      return if terminated?
       @terminated = true
       @changes = {}
     end
@@ -132,7 +133,8 @@ module KatakataIrb
     end
 
     def level_of(name)
-      has_own?(name) ? level : parent.level_of(name)
+      variable_level, = @changes[name]
+      variable_level || parent.level_of(name)
     end
 
     def [](name)
@@ -208,7 +210,6 @@ module KatakataIrb
     end
 
     def update(child_scope)
-      terminate if child_scope.terminated?
       current_level = level
       child_scope.mergeable_changes.each do |name, (level, value)|
         self[name] = value if level <= current_level
