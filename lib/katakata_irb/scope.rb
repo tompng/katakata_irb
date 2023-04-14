@@ -121,7 +121,7 @@ module KatakataIrb
     def terminate
       return if terminated?
       @terminated = true
-      @changes = {}
+      @changes = @mergeable_changes.dup
     end
 
     def branch_table_clone() = @tables.last.dup
@@ -165,7 +165,12 @@ module KatakataIrb
 
     def merge_jumps
       if terminated?
+        @terminated = false
+        prev_changes = @changes
+        @changes = @mergeable_changes
         merge @jump_branches
+        @changes = prev_changes
+        @terminated = true
       else
         merge [*@jump_branches, {}]
       end
