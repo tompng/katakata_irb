@@ -83,6 +83,11 @@ class TestTypeAnalyzeIrb < Minitest::Test
     assert_call('1.tap{if cond; break :a; else; break "a"; end}.', include: [Symbol, Integer, String], exclude: NilClass)
   end
 
+  def test_instance_eval
+    assert_call('1.instance_eval{:a.then{self.', include: Integer, exclude: Symbol)
+    assert_call('1.then{:a.instance_eval{self.', include: Symbol, exclude: Integer)
+  end
+
   def test_block_next
     assert_call('nil.then{1}.', include: Integer, exclude: [NilClass, Object])
     assert_call('nil.then{next 1; 1.0}.', include: Integer, exclude: [Float, NilClass, Object])

@@ -252,13 +252,13 @@ class KatakataIrb::TypeSimulator
 
         if block
           if block in [:symbol_literal, [:symbol, [:@ident, block_name,]]]
-            call_block_proc = ->(block_args) do
+            call_block_proc = ->(block_args, _self_type) do
               block_receiver, *rest = block_args
               block_receiver ? simulate_call(block_receiver || KatakataIrb::Types::OBJECT, block_name, rest, nil, nil) : KatakataIrb::Types::OBJECT
             end
           elsif block in [:do_block | :brace_block => type, block_var, body]
             block_var in [:block_var, params,]
-            call_block_proc = ->(block_args) do
+            call_block_proc = ->(block_args, block_self_type) do
               scope.conditional do |s|
                 if params
                   names = extract_param_names(params)
@@ -267,7 +267,9 @@ class KatakataIrb::TypeSimulator
                   params = [:params, names.map { [:@ident, _1, [0, 0]] }, nil, nil, nil, nil, nil, nil]
                 end
                 params_table = names.zip(block_args).to_h { [_1, _2 || KatakataIrb::Types::NIL] }
-                block_scope = KatakataIrb::Scope.new s, { **params_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil }
+                table = { **params_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil }
+                table[KatakataIrb::Scope::SELF] = block_self_type if block_self_type
+                block_scope = KatakataIrb::Scope.new s, table
                 evaluate_assign_params params, block_args, block_scope
                 block_scope.conditional { evaluate_param_defaults params, _1 } if params
                 if type == :do_block
@@ -287,7 +289,7 @@ class KatakataIrb::TypeSimulator
               end
             end
           else
-            call_block_proc = ->(_block_args) { KatakataIrb::Types::OBJECT }
+            call_block_proc = ->(_block_args, _self_type) { KatakataIrb::Types::OBJECT }
             simulate_evaluate block, scope
           end
         end
@@ -836,13 +838,14 @@ class KatakataIrb::TypeSimulator
         params_type = method.block.type.required_positionals.map do |func_param|
           KatakataIrb::Types.from_rbs_type func_param.type, receiver, vars
         end
-        block_response, breaks = block.call params_type
+        self_type = KatakataIrb::Types.from_rbs_type method.block.self_type, receiver, vars if method.block.self_type
+        block_response, breaks = block.call params_type, self_type
         block_called = true
         vars.merge! KatakataIrb::Types.match_free_variables(free_vars - vars.keys.to_set, [method.block.type.return_type], [block_response])
       end
       [KatakataIrb::Types.from_rbs_type(method.type.return_type, receiver, vars || {}), breaks]
     end
-    block&.call [] unless block_called
+    block&.call [], nil unless block_called
     types = type_breaks.map(&:first)
     breaks = type_breaks.map(&:last).compact
     types << OBJECT_METHODS[method_name.to_sym] if name_match && OBJECT_METHODS.has_key?(method_name.to_sym)
