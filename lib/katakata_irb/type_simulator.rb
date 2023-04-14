@@ -192,7 +192,7 @@ class KatakataIrb::TypeSimulator
       statements.map { simulate_evaluate _1, scope }.last
     in [:const_path_ref, receiver, [:@const, name,]]
       r = simulate_evaluate receiver, scope
-      (r in KatakataIrb::Types::SingletonType) ? self.class.type_of { r.module_or_class.const_get name } : KatakataIrb::Types::NIL
+      (r in KatakataIrb::Types::SingletonType) ? KatakataIrb::BaseScope.type_of { r.module_or_class.const_get name } : KatakataIrb::Types::NIL
     in [:__var_ref_or_call, [type, name, pos]]
       sexp = scope.has?(name) ? [:var_ref, [type, name, pos]] : [:vcall, [:@ident, name, pos]]
       simulate_evaluate sexp, scope
@@ -564,7 +564,7 @@ class KatakataIrb::TypeSimulator
       elem = (KatakataIrb::Types::UnionType[*[beg_type, end_type].compact]).nonnillable
       KatakataIrb::Types::InstanceType.new Range, { Elem: elem }
     in [:top_const_ref, [:@const, name,]]
-      self.class.type_of { Object.const_get name }
+      KatakataIrb::BaseScope.type_of { Object.const_get name }
     in [:string_concat, a, b]
       simulate_evaluate a, scope
       simulate_evaluate b, scope
@@ -743,14 +743,6 @@ class KatakataIrb::TypeSimulator
       end
     end
     KatakataIrb::Types::InstanceType.new(Hash, K: KatakataIrb::Types::UnionType[*keys], V: KatakataIrb::Types::UnionType[*values])
-  end
-
-  def self.type_of(fallback: KatakataIrb::Types::OBJECT)
-    begin
-      KatakataIrb::Types.type_from_object yield
-    rescue
-      fallback
-    end
   end
 
   def retrieve_method_call(sexp)

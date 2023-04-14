@@ -29,13 +29,13 @@ module KatakataIrb
         fallback = KatakataIrb::Types::NIL
         case BaseScope.type_by_name name
         when :cvar
-          KatakataIrb::TypeSimulator.type_of(fallback: fallback) { @self_object.class_variable_get name }
+          BaseScope.type_of(fallback: fallback) { @self_object.class_variable_get name }
         when :ivar
-          KatakataIrb::TypeSimulator.type_of(fallback: fallback) { @self_object.instance_variable_get name }
+          BaseScope.type_of(fallback: fallback) { @self_object.instance_variable_get name }
         when :lvar
-          KatakataIrb::TypeSimulator.type_of(fallback: fallback) { @binding.local_variable_get(name) }
+          BaseScope.type_of(fallback: fallback) { @binding.local_variable_get(name) }
         when :const
-          KatakataIrb::TypeSimulator.type_of(fallback: fallback) { @binding.eval name }
+          BaseScope.type_of(fallback: fallback) { @binding.eval name }
         end
       )
     end
@@ -46,6 +46,14 @@ module KatakataIrb
 
     def local_variables
       @local_variables.to_a
+    end
+
+    def self.type_of(fallback: KatakataIrb::Types::OBJECT)
+      begin
+        KatakataIrb::Types.type_from_object yield
+      rescue
+        fallback
+      end
     end
 
     def self.type_by_name(name)
