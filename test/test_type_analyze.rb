@@ -84,14 +84,14 @@ class TestTypeAnalyzeIrb < Minitest::Test
   end
 
   def test_block_next
-    assert_call('nil.then{1}.', include: Integer, exclude: NilClass)
-    assert_call('nil.then{next 1; 1.0}.', include: Integer, exclude: [Float, NilClass])
-    assert_call('nil.then{next 1; next 1.0}.', include: Integer, exclude: [Float, NilClass])
-    assert_call('nil.then{1 if cond}.', include: [Integer, NilClass])
-    assert_call('nil.then{if cond; 1; else; 1.0; end}.', include: [Integer, Float], exclude: NilClass)
-    assert_call('nil.then{next 1 if cond; 1.0}.', include: [Integer, Float], exclude: NilClass)
-    assert_call('nil.then{if cond; next 1; else; next 1.0; end; "a"}.', include: [Integer, Float], exclude: [String, NilClass])
-    assert_call('nil.then{if cond; next 1; else; next 1.0; end; next "a"}.', include: [Integer, Float], exclude: [String, NilClass])
+    assert_call('nil.then{1}.', include: Integer, exclude: [NilClass, Object])
+    assert_call('nil.then{next 1; 1.0}.', include: Integer, exclude: [Float, NilClass, Object])
+    assert_call('nil.then{next 1; next 1.0}.', include: Integer, exclude: [Float, NilClass, Object])
+    assert_call('nil.then{1 if cond}.', include: [Integer, NilClass], exclude: Object)
+    assert_call('nil.then{if cond; 1; else; 1.0; end}.', include: [Integer, Float], exclude: [NilClass, Object])
+    assert_call('nil.then{next 1 if cond; 1.0}.', include: [Integer, Float], exclude: [NilClass, Object])
+    assert_call('nil.then{if cond; next 1; else; next 1.0; end; "a"}.', include: [Integer, Float], exclude: [String, NilClass, Object])
+    assert_call('nil.then{if cond; next 1; else; next 1.0; end; next "a"}.', include: [Integer, Float], exclude: [String, NilClass, Object])
   end
 
   def test_vars_with_branch_termination

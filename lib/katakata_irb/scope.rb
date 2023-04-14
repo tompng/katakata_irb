@@ -232,7 +232,8 @@ module KatakataIrb
       end
       merge.each do |name, values|
         values << self[name] unless values.size == branches.size
-        self[name] = KatakataIrb::Types::UnionType[*values.compact]
+        values.compact!
+        self[name] = KatakataIrb::Types::UnionType[*values.compact] unless values.empty?
       end
     end
   end
