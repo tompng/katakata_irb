@@ -75,11 +75,26 @@ class TestTypeAnalyzeIrb < Minitest::Test
     RUBY
   end
 
-  def test_conditional_break
+  def test_block_break
+    assert_call('1.tap{}.', include: [Integer], exclude: NilClass)
+    assert_call('1.tap{break :a; break "a"}.', include: [Symbol, Integer], exclude: [NilClass, String])
     assert_call('1.tap{break :a if b}.', include: [Symbol, Integer], exclude: NilClass)
+    assert_call('1.tap{break :a; break "a" if b}.', include: [Symbol, Integer], exclude: [NilClass, String])
+    assert_call('1.tap{if cond; break :a; else; break "a"; end}.', include: [Symbol, Integer, String], exclude: NilClass)
   end
 
-  def test_branch_termination
+  def test_block_next
+    assert_call('nil.then{1}.', include: Integer, exclude: [NilClass, Object])
+    assert_call('nil.then{next 1; 1.0}.', include: Integer, exclude: [Float, NilClass, Object])
+    assert_call('nil.then{next 1; next 1.0}.', include: Integer, exclude: [Float, NilClass, Object])
+    assert_call('nil.then{1 if cond}.', include: [Integer, NilClass], exclude: Object)
+    assert_call('nil.then{if cond; 1; else; 1.0; end}.', include: [Integer, Float], exclude: [NilClass, Object])
+    assert_call('nil.then{next 1 if cond; 1.0}.', include: [Integer, Float], exclude: [NilClass, Object])
+    assert_call('nil.then{if cond; next 1; else; next 1.0; end; "a"}.', include: [Integer, Float], exclude: [String, NilClass, Object])
+    assert_call('nil.then{if cond; next 1; else; next 1.0; end; next "a"}.', include: [Integer, Float], exclude: [String, NilClass, Object])
+  end
+
+  def test_vars_with_branch_termination
     assert_call('a=1; tap{break; a=//}; a.', include: Integer, exclude: Regexp)
     assert_call('a=1; tap{a=1.0; break; a=//}; a.', include: [Integer, Float], exclude: Regexp)
     assert_call('a=1; tap{next; a=//}; a.', include: Integer, exclude: Regexp)
@@ -108,11 +123,11 @@ class TestTypeAnalyzeIrb < Minitest::Test
     assert_call('a=1; ->{ if cond; a=:a; break; a=""; end; a=// }; a.', include: [Integer, Symbol, Regexp], exclude: String)
     assert_call('a=1; ->{ if cond; a=:a; break; a=""; else; break; end; a=// }; a.', include: [Integer, Symbol], exclude: [String, Regexp])
 
-    # not implemented yet
-    # assert_call('a=1; tap{ a=1.0; break; a=// if cond; a.', include: [Regexp, Float], exclude: Integer)
-    # assert_call('a=1; tap{ a=1.0; next; a=// if cond; a.', include: [Regexp, Float], exclude: Integer)
-    # assert_call('a=1; ->{ a=1.0; break; a=// if cond; a.', include: [Regexp, Float], exclude: Integer)
-    # assert_call('a=1; while cond; a=1.0; break; a=// if cond; a.', include: [Regexp, Float], exclude: Integer)
+    # continue simulation on terminated branch
+    assert_call('a=1; tap{ a=1.0; break; a=// if cond; a.', include: [Regexp, Float], exclude: Integer)
+    assert_call('a=1; tap{ a=1.0; next; a=// if cond; a.', include: [Regexp, Float], exclude: Integer)
+    assert_call('a=1; ->{ a=1.0; break; a=// if cond; a.', include: [Regexp, Float], exclude: Integer)
+    assert_call('a=1; while cond; a=1.0; break; a=// if cond; a.', include: [Regexp, Float], exclude: Integer)
   end
 
   def test_to_str_to_int
