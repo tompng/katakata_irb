@@ -259,7 +259,7 @@ class KatakataIrb::TypeSimulator
           elsif block in [:do_block | :brace_block => type, block_var, body]
             block_var in [:block_var, params,]
             call_block_proc = ->(block_args) do
-              result, breaks, nexts = scope.conditional do |s|
+              scope.conditional do |s|
                 if params
                   names = extract_param_names(params)
                 else
@@ -277,10 +277,14 @@ class KatakataIrb::TypeSimulator
                 end
                 block_scope.merge_jumps
                 s.update block_scope
-                result = KatakataIrb::Types::NIL if block_scope.terminated?
-                [result, block_scope[KatakataIrb::Scope::BREAK_RESULT], block_scope[KatakataIrb::Scope::NEXT_RESULT]]
+                nexts = block_scope[KatakataIrb::Scope::NEXT_RESULT]
+                breaks = block_scope[KatakataIrb::Scope::BREAK_RESULT]
+                if block_scope.terminated?
+                  [KatakataIrb::Types::UnionType[*nexts], breaks]
+                else
+                  [KatakataIrb::Types::UnionType[result, *nexts], breaks]
+                end
               end
-              [KatakataIrb::Types::UnionType[result, *nexts], breaks]
             end
           else
             call_block_proc = ->(_block_args) { KatakataIrb::Types::OBJECT }
