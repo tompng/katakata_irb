@@ -75,8 +75,12 @@ class TestTypeAnalyzeIrb < Minitest::Test
     RUBY
   end
 
-  def test_conditional_break
+  def test_block_break
+    assert_call('1.tap{}.', include: [Integer], exclude: NilClass)
+    assert_call('1.tap{break :a; break "a"}.', include: [Symbol, Integer], exclude: [NilClass, String])
     assert_call('1.tap{break :a if b}.', include: [Symbol, Integer], exclude: NilClass)
+    assert_call('1.tap{break :a; break "a" if b}.', include: [Symbol, Integer], exclude: [NilClass, String])
+    assert_call('1.tap{if cond; break :a; else; break "a"; end}.', include: [Symbol, Integer, String], exclude: NilClass)
   end
 
   def test_branch_termination
