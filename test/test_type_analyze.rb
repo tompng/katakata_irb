@@ -165,6 +165,20 @@ class TestTypeAnalyzeIrb < Minitest::Test
     assert_call(code, include: [Hash, Integer, String], exclude: [Symbol])
   end
 
+  def test_lvar_scope_complex
+    code = <<~RUBY
+      def f
+        if cond
+          return
+          if cond; return; a = 1; end
+        else
+          tap { a = :a }
+        end
+        a.
+    RUBY
+    assert_call(code, include: [NilClass, Symbol], exclude: [Integer, Object])
+  end
+
   def test_gvar_no_scope
     code = <<~RUBY
       tap { $a = :maybe }
