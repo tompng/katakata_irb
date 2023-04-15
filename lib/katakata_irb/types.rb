@@ -1,12 +1,15 @@
 require 'rbs'
-require 'rbs/cli'
 
 module KatakataIrb; end
 module KatakataIrb::Types
   def self.rbs_builder
-    @rbs_builder ||= RBS::DefinitionBuilder.new(
-      env: RBS::Environment.from_loader(RBS::CLI::LibraryOptions.new.loader).resolve_type_names
-    )
+    @rbs_builder ||= load_rbs_builder
+  end
+
+  def self.load_rbs_builder
+    loader = RBS::EnvironmentLoader.new
+    loader.add path: Pathname('sig')
+    RBS::DefinitionBuilder.new env: RBS::Environment.from_loader(loader).resolve_type_names
   end
 
   Splat = Struct.new :item

@@ -1,4 +1,7 @@
 module KatakataIrb
   VERSION: String
-  # See the writing guide of rbs: https://github.com/ruby/rbs#guides
+  module Completor
+    def self.analyze: (code: String, binding?: Binding) -> [Symbol, Object, String, true | false]?
+    def self.setup: () -> void
+  end
 end
