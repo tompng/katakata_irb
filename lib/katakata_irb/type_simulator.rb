@@ -822,6 +822,8 @@ class KatakataIrb::TypeSimulator
       [args, [], nil]
     in [:arg_paren, args]
       args ? retrieve_method_args(args) : [[], [], nil]
+    in [[:command | :command_call, ] => command_arg] # method(a b, c), method(a.b c, d)
+      [[command_arg], [], nil]
     else
       [[], [], nil]
     end

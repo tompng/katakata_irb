@@ -218,4 +218,14 @@ class TestTypeAnalyzeIrb < Minitest::Test
     assert_call('a = 1; b.c(a = :a); a.', include: [Symbol], exclude: [Integer])
     assert_call('a = 1; b&.c(a = :a); a.', include: [Integer, Symbol])
   end
+
+  def test_command_call_arg
+    assert_call('[1][0..].', include: [Array, NilClass], exclude: Integer)
+    assert_call('[1][rand 1].', include: Integer, exclude: [Array, NilClass])
+    assert_call('[1].[](rand 1).', include: Integer, exclude: [Array, NilClass])
+    assert_call('[1].[](rand 1){}.', include: Integer, exclude: [Array, NilClass])
+    assert_call('[1][1.+ 2].', include: Integer, exclude: [Array, NilClass])
+    assert_call('[1].[](1.+ 2).', include: Integer, exclude: [Array, NilClass])
+    assert_call('[1].[](1.+ 2){}.', include: Integer, exclude: [Array, NilClass])
+  end
 end
