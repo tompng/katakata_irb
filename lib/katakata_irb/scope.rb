@@ -87,7 +87,7 @@ module KatakataIrb
   end
 
   class Scope < BaseScope
-    attr_reader :parent, :jump_branches, :mergeable_changes, :level
+    attr_reader :parent, :jump_branches, :mergeable_changes, :level, :lvars
 
     def self.from_binding(binding) = new(BaseScope.new(binding, binding.eval('self')))
 
@@ -101,6 +101,7 @@ module KatakataIrb
       @passthrough = passthrough
       @terminated = false
       @jump_branches = []
+      @lvars = Set.new
       @mergeable_changes = @changes = table.transform_values { [level, _1] }
     end
 
@@ -156,6 +157,7 @@ module KatakataIrb
 
     def []=(name, value)
       variable_level = level_of(name) || level
+      @lvars << name if level == variable_level && BaseScope.type_by_name(name) == :lvar
       @changes[name] = [variable_level, value]
     end
 
@@ -197,12 +199,17 @@ module KatakataIrb
       update scope
     end
 
+    def touch_lvars(lvars)
+      lvars.each { self[_1] = self[_1] || KatakataIrb::Types::NIL }
+    end
+
     def run_branches(*blocks)
       results = []
       branches = []
       blocks.each do |block|
         scope = Scope.new self, passthrough: true
         result = block.call scope
+        touch_lvars scope.lvars if scope.level == level
         next if scope.terminated?
         results << result
         branches << scope.mergeable_changes
@@ -222,6 +229,7 @@ module KatakataIrb
 
     def update(child_scope)
       current_level = level
+      touch_lvars child_scope.lvars if child_scope.level == current_level
       child_scope.mergeable_changes.each do |name, (level, value)|
         self[name] = value if level <= current_level
       end
