@@ -571,6 +571,9 @@ class KatakataIrb::TypeSimulator
       simulate_evaluate a, scope
       simulate_evaluate b, scope
       KatakataIrb::Types::STRING
+    in [:defined, expression]
+      scope.conditional { simulate_evaluate expression, _1 }
+      KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
     else
       KatakataIrb.log_puts
       KatakataIrb.log_puts :NOMATCH

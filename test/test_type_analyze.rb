@@ -170,6 +170,7 @@ class TestTypeAnalyzeIrb < Minitest::Test
     assert_call('def f; if cond; a = 1; return; end; tap { a = :a }; a.', include: [NilClass, Symbol], exclude: [Integer, Object])
     assert_call('def f; if cond; return; a = 1; end; tap { a = :a }; a.', include: [NilClass, Symbol], exclude: [Integer, Object])
     assert_call('def f; if cond; return; if cond; return; a = 1; end; end; tap { a = :a }; a.', include: [NilClass, Symbol], exclude: [Integer, Object])
+    assert_call('def f; if cond; return; if cond; return; a = 1; end; end; tap { a = :a }; a.', include: [NilClass, Symbol], exclude: [Integer, Object])
   end
 
   def test_gvar_no_scope
@@ -188,6 +189,11 @@ class TestTypeAnalyzeIrb < Minitest::Test
       @a.
     RUBY
     assert_call(code, include: [Symbol, String])
+  end
+
+  def test_defined
+    assert_call('defined?(a.b+c).', include: [String, NilClass])
+    assert_call('defined?(a = 1); tap { a = 1.0 }; a.', include: [Integer, Float, NilClass])
   end
 
   def test_ternary_operator
