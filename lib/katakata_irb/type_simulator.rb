@@ -70,7 +70,7 @@ class KatakataIrb::TypeSimulator
       else
         current_self_types = scope.self_type.types
         self_types = current_self_types.map do |type|
-          if (type in KatakataIrb::Types::SingletonType) && type.module_or_class.is_a?(Class)
+          if type.is_a?(KatakataIrb::Types::SingletonType) && type.module_or_class.is_a?(Class)
             KatakataIrb::Types::InstanceType.new type.module_or_class
           else
             type
@@ -129,7 +129,7 @@ class KatakataIrb::TypeSimulator
     in [:array, [:args_add_star,] => star]
       args, kwargs = retrieve_method_args star
       types = args.flat_map do |elem|
-        if elem in KatakataIrb::Types::Splat
+        if elem.is_a? KatakataIrb::Types::Splat
           splat = simulate_evaluate elem.item, scope
           array_elem, non_array = partition_to_array splat.nonnillable, :to_a
           KatakataIrb::Types::UnionType[*array_elem, *non_array]
@@ -173,10 +173,10 @@ class KatakataIrb::TypeSimulator
           values << simulate_evaluate(value, scope)
         in [:assoc_splat, value]
           hash = simulate_evaluate value, scope
-          unless (hash in KatakataIrb::Types::InstanceType) && hash.klass == Hash
+          unless hash.is_a?(KatakataIrb::Types::InstanceType) && hash.klass == Hash
             hash = simulate_call hash, :to_hash, [], nil, nil
           end
-          if (hash in KatakataIrb::Types::InstanceType) && hash.klass == Hash
+          if hash.is_a?(KatakataIrb::Types::InstanceType) && hash.klass == Hash
             keys << hash.params[:K] if hash.params[:K]
             values << hash.params[:V] if hash.params[:V]
           end
@@ -192,7 +192,7 @@ class KatakataIrb::TypeSimulator
       statements.map { simulate_evaluate _1, scope }.last
     in [:const_path_ref, receiver, [:@const, name,]]
       r = simulate_evaluate receiver, scope
-      (r in KatakataIrb::Types::SingletonType) ? KatakataIrb::BaseScope.type_of { r.module_or_class.const_get name } : KatakataIrb::Types::NIL
+      r.is_a?(KatakataIrb::Types::SingletonType) ? KatakataIrb::BaseScope.type_of { r.module_or_class.const_get name } : KatakataIrb::Types::NIL
     in [:__var_ref_or_call, [type, name, pos]]
       sexp = scope.has?(name) ? [:var_ref, [type, name, pos]] : [:vcall, [:@ident, name, pos]]
       simulate_evaluate sexp, scope
@@ -221,7 +221,7 @@ class KatakataIrb::TypeSimulator
       receiver_type = simulate_evaluate receiver, scope if receiver
       args, kwargs, _block = retrieve_method_args args
       args_type = args.map do |arg|
-        if arg in KatakataIrb::Types::Splat
+        if arg.is_a? KatakataIrb::Types::Splat
           simulate_evaluate arg.item, scope
           nil # TODO: splat
         else
@@ -242,7 +242,7 @@ class KatakataIrb::TypeSimulator
       receiver_type = receiver ? simulate_evaluate(receiver, scope) : scope.self_type
       evaluate_method = lambda do |scope|
         args_type = args.map do |arg|
-          if arg in KatakataIrb::Types::Splat
+          if arg.is_a? KatakataIrb::Types::Splat
             simulate_evaluate arg.item, scope
             nil # TODO: splat
           else
@@ -342,7 +342,7 @@ class KatakataIrb::TypeSimulator
       simulate_evaluate receiver, scope
       args, kwargs, _block = retrieve_method_args key
       args.each do |arg|
-        item = ((arg in KatakataIrb::Types::Splat) ? arg.item : arg)
+        item = arg.is_a?(KatakataIrb::Types::Splat) ? arg.item : arg
         simulate_evaluate item, scope
       end
       kwargs_type kwargs, scope
@@ -435,7 +435,7 @@ class KatakataIrb::TypeSimulator
     in [:super, args]
       args, kwargs, _block = retrieve_method_args args
       args.each do |arg|
-        item = ((arg in KatakataIrb::Types::Splat) ? arg.item : arg)
+        item = arg.is_a?(KatakataIrb::Types::Splat) ? arg.item : arg
         simulate_evaluate item, scope
       end
       kwargs_type kwargs, scope
@@ -460,7 +460,7 @@ class KatakataIrb::TypeSimulator
             error_class_stmts = [*stmts, stmt]
           end
           error_classes = (error_class_stmts || []).flat_map { simulate_evaluate _1, s }.uniq
-          error_types = error_classes.filter_map { KatakataIrb::Types::InstanceType.new _1.module_or_class if _1 in KatakataIrb::Types::SingletonType }
+          error_types = error_classes.filter_map { KatakataIrb::Types::InstanceType.new _1.module_or_class if _1.is_a?(KatakataIrb::Types::SingletonType) }
           error_types << KatakataIrb::Types::InstanceType.new(StandardError) if error_types.empty?
           s[error_var] = KatakataIrb::Types::UnionType[*error_types]
         end
@@ -486,7 +486,7 @@ class KatakataIrb::TypeSimulator
       result
     in [:sclass, klass_stmt, body_stmt]
       klass_types = simulate_evaluate(klass_stmt, scope).types.filter_map do |type|
-        KatakataIrb::Types::SingletonType.new type.klass if type in KatakataIrb::Types::InstanceType
+        KatakataIrb::Types::SingletonType.new type.klass if type.is_a? KatakataIrb::Types::InstanceType
       end
       klass_types = [KatakataIrb::Types::CLASS] if klass_types.empty?
       sclass_scope = KatakataIrb::Scope.new(scope, { KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*klass_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
@@ -497,7 +497,7 @@ class KatakataIrb::TypeSimulator
       klass_types = simulate_evaluate(klass_stmt, scope).types
       klass_types += simulate_evaluate(superclass_stmt, scope).types if superclass_stmt
       klass_types = klass_types.select do |type|
-        (type in KatakataIrb::Types::SingletonType) && type.module_or_class.is_a?(Class)
+        type.is_a?(KatakataIrb::Types::SingletonType) && type.module_or_class.is_a?(Class)
       end
       klass_types << KatakataIrb::Types::CLASS if klass_types.empty?
       klass_scope = KatakataIrb::Scope.new(scope, { KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*klass_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
@@ -600,7 +600,7 @@ class KatakataIrb::TypeSimulator
     in [:binary, lpattern, :'=>', [:var_field, [:@ident, name,]] => rpattern]
       if lpattern in [:var_ref, [:@const, _const_name,]]
         const_value = simulate_evaluate lpattern, scope
-        if (const_value in KatakataIrb::Types::SingletonType) && const_value.module_or_class.is_a?(Class)
+        if const_value.is_a?(KatakataIrb::Types::SingletonType) && const_value.module_or_class.is_a?(Class)
           scope[name] = KatakataIrb::Types::InstanceType.new const_value.module_or_class
         else
           scope[name] = KatakataIrb::Types::OBJECT
@@ -612,7 +612,7 @@ class KatakataIrb::TypeSimulator
       end
     in [:aryptn, _unknown, items, splat, post_items]
       # TODO: deconstruct keys
-      array_types = types.select { (_1 in KatakataIrb::Types::InstanceType) && _1.klass == Array }
+      array_types = types.select { _1.is_a?(KatakataIrb::Types::InstanceType) && _1.klass == Array }
       elem = KatakataIrb::Types::UnionType[*array_types.filter_map { _1.params[:Elem] }]
       items&.each do |item|
         match_pattern elem, item, scope
@@ -626,7 +626,7 @@ class KatakataIrb::TypeSimulator
       end
     in [:hshptn, _unknown, items, splat]
       # TODO: deconstruct keys
-      hash_types = types.select { (_1 in KatakataIrb::Types::InstanceType) && _1.klass == Hash }
+      hash_types = types.select { _1.is_a?(KatakataIrb::Types::InstanceType) && _1.klass == Hash }
       key_type = KatakataIrb::Types::UnionType[*hash_types.filter_map { _1.params[:K] }]
       value_type = KatakataIrb::Types::UnionType[*hash_types.filter_map { _1.params[:V] }]
       items&.each do |key_pattern, value_pattern|
@@ -655,7 +655,7 @@ class KatakataIrb::TypeSimulator
   def evaluate_mrhs(sexp, scope)
     args, kwargs, = retrieve_method_args sexp
     values = args.filter_map do |t|
-      if t in KatakataIrb::Types::Splat
+      if t.is_a? KatakataIrb::Types::Splat
         simulate_evaluate t.item, scope
         # TODO
         nil
@@ -690,10 +690,10 @@ class KatakataIrb::TypeSimulator
   end
 
   def partition_to_array(value, method)
-    arrays, non_arrays = value.types.partition { KatakataIrb::Types::InstanceType === _1 && _1.klass == Array }
+    arrays, non_arrays = value.types.partition { _1.is_a?(KatakataIrb::Types::InstanceType) && _1.klass == Array }
     non_arrays.select! do |type|
       to_array_result = simulate_call type, method, [], nil, nil, name_match: false
-      if KatakataIrb::Types::InstanceType === to_array_result && to_array_result.klass == Array
+      if to_array_result.is_a?(KatakataIrb::Types::InstanceType) && to_array_result.klass == Array
         arrays << to_array_result
         false
       else
@@ -706,7 +706,7 @@ class KatakataIrb::TypeSimulator
   end
 
   def evaluate_massign(sexp, values, scope)
-    values = sized_splat values, :to_ary, sexp.size unless values in Array
+    values = sized_splat values, :to_ary, sexp.size unless values.is_a? Array
 
     rest_index = sexp.find_index { _1 in [:rest_param, ]}
     if rest_index
@@ -746,12 +746,12 @@ class KatakataIrb::TypeSimulator
     keys = []
     values = []
     kwargs.each do |kv|
-      if kv in KatakataIrb::Types::Splat
+      if kv.is_a? KatakataIrb::Types::Splat
         hash = simulate_evaluate kv.item, scope
-        unless (hash in KatakataIrb::Types::InstanceType) && hash.klass == Hash
+        unless hash.is_a?(KatakataIrb::Types::InstanceType) && hash.klass == Hash
           hash = simulate_call hash, :to_hash, [], nil, nil
         end
-        if (hash in KatakataIrb::Types::InstanceType) && hash.klass == Hash
+        if hash.is_a?(KatakataIrb::Types::InstanceType) && hash.klass == Hash
           keys << hash.params[:K] if hash.params[:K]
           values << hash.params[:V] if hash.params[:V]
         end
@@ -970,7 +970,7 @@ class KatakataIrb::TypeSimulator
       name.match?(/\A_[1-9]\z/) ? name[1..].to_i : 0
     else
       sexp.filter_map do |s|
-        max_numbered_params s if s in Array
+        max_numbered_params s if s.is_a? Array
       end.max || 0
     end
   end
