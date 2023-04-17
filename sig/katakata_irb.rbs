@@ -1,7 +1,7 @@
 module KatakataIrb
   VERSION: String
   module Completor
-    def self.analyze: (code: String, binding?: Binding) -> [Symbol, Object, String, true | false]?
+    def self.analyze: (code: String, binding?: Binding) -> Array[Symbol | Object | String | true | false]?
     def self.setup: () -> void
   end
 end
