@@ -63,6 +63,12 @@ class TestTypeAnalyzeIrb < Minitest::Test
     assert_call('1.to_s.tap(&:', include: String)
   end
 
+  def test_union_splat
+    assert_call('a, = [[:a], 1, nil].sample; a.', include: [Symbol, Integer, NilClass], exclude: Object)
+    assert_call('[[:a], 1, nil].each do _2; _1.', include: [Symbol, Integer, NilClass], exclude: Object)
+    assert_call('a = [[:a], 1, nil, ("a".."b")].sample; [*a].sample.', include: [Symbol, Integer, NilClass, String], exclude: Object)
+  end
+
   def test_range
     assert_call('(1..2).first.', include: Integer)
     assert_call('("a".."b").first.', include: String)
@@ -189,6 +195,10 @@ class TestTypeAnalyzeIrb < Minitest::Test
       @a.
     RUBY
     assert_call(code, include: [Symbol, String])
+  end
+
+  def test_massign_union
+    assert_call('defined?(a.b+c).', include: [String, NilClass])
   end
 
   def test_defined

@@ -131,8 +131,8 @@ class KatakataIrb::TypeSimulator
       types = args.flat_map do |elem|
         if elem in KatakataIrb::Types::Splat
           splat = simulate_evaluate elem.item, scope
-          array_value = to_array splat, :to_a
-          array_value ? (array_value.params[:Elem] || []) : splat
+          array_elem, non_array = partition_to_array splat.nonnillable, :to_a
+          KatakataIrb::Types::UnionType[*array_elem, *non_array]
         else
           simulate_evaluate elem, scope
         end
@@ -682,17 +682,31 @@ class KatakataIrb::TypeSimulator
     [values, kw]
   end
 
-  def to_array(value, method)
-    return value if (value in KatakataIrb::Types::InstanceType) && value.klass == Array
-    to_array_result = simulate_call value, method, [], nil, nil, name_match: false
-    return to_array_result if (to_array_result in KatakataIrb::Types::InstanceType) && to_array_result.klass == Array
+  def sized_splat(value, method, size)
+    array_elem, non_array = partition_to_array value, method
+    values = [KatakataIrb::Types::UnionType[*array_elem, *non_array]]
+    values += [array_elem] * (size - 1) if array_elem && size >= 1
+    values
+  end
+
+  def partition_to_array(value, method)
+    arrays, non_arrays = value.types.partition { KatakataIrb::Types::InstanceType === _1 && _1.klass == Array }
+    non_arrays.select! do |type|
+      to_array_result = simulate_call type, method, [], nil, nil, name_match: false
+      if KatakataIrb::Types::InstanceType === to_array_result && to_array_result.klass == Array
+        arrays << to_array_result
+        false
+      else
+        true
+      end
+    end
+    array_elem = arrays.empty? ? nil : KatakataIrb::Types::UnionType[*arrays.map { _1.params[:Elem] || KatakataIrb::Types::OBJECT }]
+    non_array = non_arrays.empty? ? nil : KatakataIrb::Types::UnionType[*non_arrays]
+    [array_elem, non_array]
   end
 
   def evaluate_massign(sexp, values, scope)
-    unless values in Array
-      array_value = to_array values, :to_ary
-      values = array_value ? [array_value.params[:Elem] || KatakataIrb::Types::OBJECT] * sexp.size : [values]
-    end
+    values = sized_splat values, :to_ary, sexp.size unless values in Array
 
     rest_index = sexp.find_index { _1 in [:rest_param, ]}
     if rest_index
@@ -906,11 +920,7 @@ class KatakataIrb::TypeSimulator
     values = values.dup
     params => [:params, pre_required, optional, rest, post_required, _keywords, keyrest, block]
     size = (pre_required&.size || 0) + (optional&.size || 0) + (post_required&.size || 0) + (rest ? 1 : 0)
-    if values.size == 1 && size >= 2
-      value = values.first
-      array_value = to_array value, :to_ary if value
-      values = [array_value.params[:Elem] || KatakataIrb::Types::OBJECT] * size if array_value
-    end
+    values = sized_splat values.first, :to_ary, size if values.size == 1 && size >= 2
     pre_values = values.shift pre_required.size if pre_required
     post_values = values.pop post_required.size if post_required
     opt_values = values.shift optional.size if optional
