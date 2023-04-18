@@ -291,9 +291,9 @@ module KatakataIrb::Types
     case return_type
     when RBS::Types::Bases::Self
       self_type
-    when RBS::Types::Bases::Void, RBS::Types::Bases::Bottom, RBS::Types::Bases::Nil
+    when RBS::Types::Bases::Bottom, RBS::Types::Bases::Nil
       NIL
-    when RBS::Types::Bases::Any
+    when RBS::Types::Bases::Any, RBS::Types::Bases::Void
       OBJECT
     when RBS::Types::Bases::Class
       self_type.transform do |type|
