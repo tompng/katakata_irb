@@ -36,7 +36,7 @@ class TestTypeAnalyzeIrb < Minitest::Test
   def test_sig_dir
     assert_call('KatakataIrb::Completor.analyze("").', include: [NilClass, Array], exclude: Object)
     assert_call('KatakataIrb::Completor.analyze("")[rand(4)].', include: [Symbol, Object, String, TrueClass, FalseClass], exclude: NilClass)
-    assert_call('KatakataIrb::Completor.setup.', include: NilClass, exclude: Object)
+    assert_call('KatakataIrb::Completor.setup.', include: Object, exclude: NilClass)
   end
 
   def test_lvar_singleton_method
