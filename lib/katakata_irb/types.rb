@@ -31,7 +31,7 @@ module KatakataIrb::Types
       next unless name
       type_name = RBS::TypeName(name).absolute!
       definition = (singleton ? rbs_builder.build_singleton(type_name) : rbs_builder.build_instance(type_name)) rescue nil
-      method = definition&.methods&.[](method_name)
+      method = definition.methods[method_name] if definition
       return method if method
     end
     nil
