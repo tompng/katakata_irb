@@ -177,6 +177,9 @@ module KatakataIrb::Types
     def types() = [self]
     def nillable?() = false
     def nonnillable() = self
+    def inspect
+      "#{module_or_class}.itself"
+    end
   end
 
   class InstanceType
@@ -192,6 +195,19 @@ module KatakataIrb::Types
     def types() = [self]
     def nillable?() = (@klass == NilClass)
     def nonnillable() = self
+    def inspect
+      case klass
+      when NilClass
+        'nil'
+      when TrueClass
+        'true'
+      when FalseClass
+        'false'
+      else
+        params_string = "[#{params.map { "#{_1}: #{_2.inspect}" }.join(', ')}]" unless params.empty?
+        "#{klass.name}#{params_string}"
+      end
+    end
   end
 
   class ProcType
@@ -208,6 +224,7 @@ module KatakataIrb::Types
     def types() = [self]
     def nillable?() = (@klass == NilClass)
     def nonnillable() = self
+    def inspect() = 'Proc'
   end
 
   NIL = InstanceType.new NilClass
@@ -283,6 +300,7 @@ module KatakataIrb::Types
     def methods() = @types.flat_map(&:methods).uniq
     def all_methods() = @types.flat_map(&:all_methods).uniq
     def constants() = @types.flat_map(&:constants).uniq
+    def inspect() = @types.map(&:inspect).join(' | ')
   end
 
   BOOLEAN = UnionType[TRUE, FALSE]
