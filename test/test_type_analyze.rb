@@ -43,14 +43,13 @@ class TestTypeAnalyzeIrb < Minitest::Test
     a = 1
     b = ''
     c = Object.new
-    d = [b, c]
-    def b.foo() = 1
-    def c.bar() = 1
+    d = [a, b, c]
     binding = Kernel.binding
     assert_call('a.', include: Integer, exclude: String, binding:)
-    assert_call('b.', include: b.singleton_class, exclude: Integer, binding:)
-    assert_call('c.', include: c.singleton_class, exclude: Integer, binding:)
-    assert_call('d.sample.', include: [String, Object], exclude: [b.singleton_class, c.singleton_class], binding:)
+    assert_call('b.', include: b.singleton_class, exclude: [Integer, Object], binding:)
+    assert_call('c.', include: c.singleton_class, exclude: [Integer, String], binding:)
+    assert_call('d.', include: d.class, exclude: [Integer, String, Object], binding:)
+    assert_call('d.sample.', include: [Integer, String, Object], exclude: [b.singleton_class, c.singleton_class], binding:)
   end
 
   def test_local_variable_assign
@@ -151,6 +150,8 @@ class TestTypeAnalyzeIrb < Minitest::Test
     sobj = Data.define(:to_str).new('a')
     iobj = Data.define(:to_int).new(1)
     binding = Kernel.binding
+    assert_equal String, ([] * sobj).class
+    assert_equal Array, ([] * iobj).class
     assert_call('([]*sobj).', include: String, exclude: Array, binding:)
     assert_call('([]*iobj).', include: Array, exclude: String, binding:)
   end

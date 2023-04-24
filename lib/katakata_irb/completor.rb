@@ -247,7 +247,7 @@ module KatakataIrb::Completor
       # `require 'target'`
       return [require_method.to_sym, name.rstrip]
     end
-    if (target in [:@ident,]) && (expression in [:symbol,]) && (parents[-2] in [:args_add_block, Array => args, [:symbol_literal, ^expression]])
+    if (target in [:@ident,]) && (expression in [:symbol,]) && (parents[-2] in [:args_add_block, Array => _args, [:symbol_literal, ^expression]])
       # `method(&:target)`
       receiver_ref = [:var_ref, [:@ident, '_1', [0, 0]]]
       block_statements = [receiver_ref]

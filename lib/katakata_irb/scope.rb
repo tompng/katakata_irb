@@ -77,7 +77,12 @@ module KatakataIrb
       when :lvar
         @local_variables.include? name
       when :const
-        @binding.eval("#{name};true") rescue false
+        begin
+          @binding.eval(name)
+          true
+        rescue
+          false
+        end
       when :gvar, :cvar, :ivar
         true
       when :internal
