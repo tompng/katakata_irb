@@ -9,12 +9,12 @@ GEM
   remote: https://rubygems.org/
   specs:
     io-console (0.6.0)
-    irb (1.6.2)
+    irb (1.6.4)
       reline (>= 0.3.0)
-    minitest (5.16.3)
+    minitest (5.18.0)
     rake (13.0.6)
-    rbs (2.7.0)
-    reline (0.3.2)
+    rbs (3.1.0)
+    reline (0.3.3)
       io-console (~> 0.5)
 
 PLATFORMS
