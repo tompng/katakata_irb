@@ -199,7 +199,7 @@ class TestTypeAnalyzeIrb < Minitest::Test
   end
 
   def test_massign_union
-    assert_call('defined?(a.b+c).', include: [String, NilClass])
+    assert_call('a=[1,2]; a=:a if cond; b, = a; b.', include: [Integer, Symbol])
   end
 
   def test_defined
