@@ -707,13 +707,12 @@ class KatakataIrb::TypeSimulator
 
   def evaluate_massign(sexp, values, scope)
     values = sized_splat values, :to_ary, sexp.size unless values.is_a? Array
-
     rest_index = sexp.find_index { _1 in [:rest_param, ]}
     if rest_index
       pre = rest_index ? sexp[0...rest_index] : sexp
       post = rest_index ? sexp[rest_index + 1..] : []
       sexp[rest_index] in [:rest_param, rest_field]
-      rest_values = values[pre.size...-post.size] || []
+      rest_values = values[pre.size...values.size - post.size] || []
       rest_type = KatakataIrb::Types::InstanceType.new Array, Elem: KatakataIrb::Types::UnionType[*rest_values]
       pairs = pre.zip(values.first(pre.size)) + [[rest_field, rest_type]] + post.zip(values.last(post.size))
     else

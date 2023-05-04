@@ -206,15 +206,20 @@ class TestTypeAnalyzeIrb < Minitest::Test
     assert_call('a,*,b=[1,2]; b.', include: Integer, exclude: Array)
     assert_call('a,*b=[1,2]; a.', include: Integer, exclude: Array)
     assert_call('a,*b=[1,2]; b.', include: Array, exclude: Integer)
+    assert_call('a,*b=[1,2]; b.sample.', include: Integer)
     assert_call('*a=[1,2]; a.', include: Array, exclude: Integer)
+    assert_call('*a=[1,2]; a.sample.', include: Integer)
     assert_call('a,*b,c=[1,2,3]; b.', include: Array, exclude: Integer)
+    assert_call('a,*b,c=[1,2,3]; b.sample.', include: Integer)
     assert_call('a,b=(cond)?[1,2]:[:a,:b]; a.', include: [Integer, Symbol])
     assert_call('a,b=(cond)?[1,2]:[:a,:b]; b.', include: [Integer, Symbol])
     assert_call('a,b=(cond)?[1,2]:"s"; a.', include: [Integer, String])
     assert_call('a,b=(cond)?[1,2]:"s"; b.', include: Integer, exclude: String)
     assert_call('a,*b=(cond)?[1,2]:"s"; a.', include: [Integer, String])
     assert_call('a,*b=(cond)?[1,2]:"s"; b.', include: Array, exclude: [Integer, String])
+    assert_call('a,*b=(cond)?[1,2]:"s"; b.sample.', include: Integer, exclude: String)
     assert_call('*a=(cond)?[1,2]:"s"; a.', include: Array, exclude: [Integer, String])
+    assert_call('*a=(cond)?[1,2]:"s"; a.sample.', include: [Integer, String])
   end
 
   def test_defined
