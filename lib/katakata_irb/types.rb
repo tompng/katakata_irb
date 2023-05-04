@@ -196,6 +196,14 @@ module KatakataIrb::Types
     def nillable?() = (@klass == NilClass)
     def nonnillable() = self
     def inspect
+      if params.empty?
+        inspect_without_params
+      else
+        params_string = "[#{params.map { "#{_1}: #{_2.inspect}" }.join(', ')}]"
+        "#{inspect_without_params}#{params_string}"
+      end
+    end
+    def inspect_without_params
       if klass == NilClass
         'nil'
       elsif klass == TrueClass
@@ -203,8 +211,7 @@ module KatakataIrb::Types
       elsif klass == FalseClass
         'false'
       else
-        params_string = "[#{params.map { "#{_1}: #{_2.inspect}" }.join(', ')}]" unless params.empty?
-        "#{klass.name}#{params_string}"
+        klass.to_s
       end
     end
   end

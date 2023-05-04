@@ -1,6 +1,6 @@
 require 'test_helper'
 
-class TestTypeAnalyzeIrb < Minitest::Test
+class TestTypeAnalyze < Minitest::Test
   def empty_binding() = binding
 
   def analyze(code, binding: nil)

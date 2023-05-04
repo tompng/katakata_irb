@@ -120,10 +120,9 @@ module KatakataIrb::Completor
       contents = types.filter_map do |type|
         case type
         when KatakataIrb::Types::InstanceType
-          KatakataIrb::Types.class_name_of type.klass
-        when KatakataIrb::Types::SingletonType
-          module_name = KatakataIrb::Types.class_name_of type.module_or_class
-          "#{module_name}.itself" if module_name
+          type.inspect_without_params
+        else
+          type.inspect
         end
       end.uniq
       return if contents.empty?
