@@ -220,6 +220,7 @@ class TestTypeAnalyzeIrb < Minitest::Test
     assert_call('a,*b=(cond)?[1,2]:"s"; b.sample.', include: Integer, exclude: String)
     assert_call('*a=(cond)?[1,2]:"s"; a.', include: Array, exclude: [Integer, String])
     assert_call('*a=(cond)?[1,2]:"s"; a.sample.', include: [Integer, String])
+    assert_call('a,(b,),c=[1,[:a],4]; b.', include: Symbol)
   end
 
   def test_defined
