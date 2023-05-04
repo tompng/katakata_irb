@@ -333,18 +333,10 @@ module KatakataIrb::Types
       BOOLEAN
     when RBS::Types::Bases::Instance
       self_type.transform do |type|
-        case type
-        in SingletonClass
-          InstanceType.new type.klass
-        in InstanceType
-          case type.klass
-          in Class
-            InstanceType.new Class
-          in Module
-            InstanceType.new Module
-          else
-            OBJECT
-          end
+        if type.is_a?(SingletonType) && type.module_or_class.is_a?(Class)
+          InstanceType.new type.module_or_class
+        else
+          OBJECT
         end
       end
     when RBS::Types::Union
