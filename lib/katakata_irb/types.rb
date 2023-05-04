@@ -12,7 +12,7 @@ module KatakataIrb::Types
     loader.add path: Pathname('sig')
     RBS::DefinitionBuilder.new env: RBS::Environment.from_loader(loader).resolve_type_names
   rescue => e
-    puts "\nKatakataIRB failed to initialize RBS::DefinitionBuild\n#{e}"
+    puts "\r\nKatakataIRB failed to initialize RBS::DefinitionBuilder\r\n#{e}\r\n"
     Object.new
   end
 
