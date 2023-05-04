@@ -196,12 +196,11 @@ module KatakataIrb::Types
     def nillable?() = (@klass == NilClass)
     def nonnillable() = self
     def inspect
-      case klass
-      when NilClass
+      if klass == NilClass
         'nil'
-      when TrueClass
+      elsif klass == TrueClass
         'true'
-      when FalseClass
+      elsif klass == FalseClass
         'false'
       else
         params_string = "[#{params.map { "#{_1}: #{_2.inspect}" }.join(', ')}]" unless params.empty?
