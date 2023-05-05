@@ -211,7 +211,7 @@ module KatakataIrb::Types
       elsif klass == FalseClass
         'false'
       else
-        klass.to_s
+        klass.singleton_class? ? klass.superclass.to_s : klass.to_s
       end
     end
   end
