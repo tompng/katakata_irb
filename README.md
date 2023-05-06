@@ -10,8 +10,10 @@ gem install katakata_irb
 ## Usage
 
 Just require katakata_irb or write it to your `.irbrc` file.
+
 ```ruby
-require 'katakata_irb'
+# .irbrc
+require 'katakata_irb' rescue nil
 ```
 
 ```
