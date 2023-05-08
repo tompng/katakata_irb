@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    katakata_irb (0.1.6)
+    katakata_irb (0.1.7)
       irb (>= 1.4.0)
       rbs
 
