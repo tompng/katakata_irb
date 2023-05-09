@@ -33,6 +33,20 @@ class TestTypeAnalyze < Minitest::Test
     assert_analyze_type('puts(@@x', :cvar, '@@x')
   end
 
+  def test_ref
+    bind = Class.new do
+      lvar = 1
+      instance_variable_set(:@ivar, :a)
+      class_variable_set(:@@cvar, 'a')
+      break binding
+    end
+    assert_call('STDIN.', include: STDIN.singleton_class)
+    assert_call('$stdin.', include: $stdin.singleton_class)
+    assert_call('lvar.', include: Integer, binding: bind)
+    assert_call('@ivar.', include: Symbol, binding: bind)
+    assert_call('@@cvar.', include: String, binding: bind)
+  end
+
   def test_sig_dir
     assert_call('KatakataIrb::Completor.analyze("").', include: [NilClass, Array], exclude: Object)
     assert_call('KatakataIrb::Completor.analyze("")[rand(4)].', include: [Symbol, Object, String, TrueClass, FalseClass], exclude: NilClass)

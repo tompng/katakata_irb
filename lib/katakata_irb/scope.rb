@@ -14,6 +14,7 @@ module KatakataIrb
       @binding, @self_object = binding, self_object
       @cache = { SELF => KatakataIrb::Types.type_from_object(self_object) }
       @local_variables = binding.local_variables.map(&:to_s).to_set
+      @global_variables = global_variables.map(&:to_s).to_set
     end
 
     def level() = 0
@@ -36,6 +37,8 @@ module KatakataIrb
           BaseScope.type_of(fallback: fallback) { @binding.local_variable_get(name) }
         when :const
           BaseScope.type_of(fallback: fallback) { @binding.eval name }
+        when :gvar
+          BaseScope.type_of(fallback: fallback) { @binding.eval name if @global_variables.include? name }
         end
       )
     end
