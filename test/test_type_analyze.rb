@@ -170,6 +170,14 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('([]*iobj).', include: Array, exclude: String, binding:)
   end
 
+  def test_method_select
+    assert_call('([]*4).', include: Array, exclude: String)
+    assert_call('([]*"").', include: String, exclude: Array)
+    assert_call('([]*unknown).', include: [String, Array])
+    assert_call('p(1).', include: Integer)
+    assert_call('p(1, 2).', include: Array, exclude: Integer)
+  end
+
   def test_interface_match_var
     assert_call('([1]+[:a]+["a"]).sample.', include: [Integer, String, Symbol])
   end

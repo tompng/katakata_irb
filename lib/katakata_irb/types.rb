@@ -95,15 +95,11 @@ module KatakataIrb::Types
             given << UnionType[*centers.drop(opts.size)]
             expected << rest.type
           end
-          score += given.zip(expected).sum do |t, e|
-            e = from_rbs_type e, receiver_type
-            if intersect? t, e
-              1
-            elsif (intersect?(STRING, e) && t.methods.include?(:to_str)) || (intersect?(INTEGER, e) && t.methods.include?(:to_int)) || (intersect?(ARRAY, e) && t.methods.include?(:to_ary))
-              0.5
-            else
-              0
-            end
+          if given.any?
+            score += given.zip(expected).count do |t, e|
+              e = from_rbs_type e, receiver_type
+              intersect?(t, e) || (intersect?(STRING, e) && t.methods.include?(:to_str)) || (intersect?(INTEGER, e) && t.methods.include?(:to_int)) || (intersect?(ARRAY, e) && t.methods.include?(:to_ary))
+            end.fdiv(given.size)
           end
         end
         [[method_type, given || [], expected || []], score]
@@ -114,15 +110,16 @@ module KatakataIrb::Types
   end
 
   def self.intersect?(a, b)
-    atypes = ((a in UnionType) ? a.types : [a]).group_by(&:class)
-    btypes = ((b in UnionType) ? b.types : [b]).group_by(&:class)
-    intersect = ->(type, &block) do
-      aa, bb = [atypes, btypes].map {|types| (types[type] || []).map(&block) }
-      (aa & bb).any?
-    end
+    atypes = a.types.group_by(&:class)
+    btypes = b.types.group_by(&:class)
     return true if atypes[ProcType] && btypes[ProcType]
-    return true if intersect.call(SingletonType, &:module_or_class)
-    intersect.call(InstanceType, &:klass)
+    if atypes[SingletonType] && btypes[SingletonType]
+      aa, bb = [atypes, btypes].map {|types| types[SingletonType].map(&:module_or_class) }
+      return true if (aa & bb).any?
+    end
+
+    aa, bb = [atypes, btypes].map {|types| (types[InstanceType] || []).map(&:klass) }
+    (aa.flat_map(&:ancestors) & bb).any?
   end
 
   def self.type_from_object(object)
