@@ -3,7 +3,7 @@ require 'katakata_irb/completor'
 
 module KatakataIrb
   class << self
-    attr_accessor :log_output
+    attr_accessor :log_output, :last_completion_error
     def log_puts(...)
       STDOUT.cooked { log_output&.puts(...) }
     end
