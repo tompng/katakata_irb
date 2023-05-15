@@ -4,11 +4,10 @@ require 'test_helper'
 class TestKatakataIrb < Minitest::Test
   def test_analyze_does_not_raise_error
     original_output = KatakataIrb.log_output
-    KatakataIrb::TypeSimulator::DigTarget.prepend(
-      Module.new do
-        def dig?(*) = true
-      end
-    )
+    KatakataIrb::TypeSimulator::DigTarget.class_eval do
+      alias_method :original_dig?, :dig?
+      def dig?(*) = true
+    end
     KatakataIrb.log_output = Object.new.tap do |output|
       def output.puts(*)
         raise 'Unexpected log output in test'
@@ -22,6 +21,10 @@ class TestKatakataIrb < Minitest::Test
     assert KatakataIrb::Completor.analyze("(#{SYNTAX_TEST_CODE}).hoge"), "analyzing SYNTAX_TEST_CODE"
   ensure
     KatakataIrb.log_output = original_output
+    KatakataIrb::TypeSimulator::DigTarget.class_eval do
+      undef_method :dig?
+      alias_method :dig?, :original_dig?
+    end
   end
 
   SYNTAX_TEST_CODE = <<~'RUBY'
