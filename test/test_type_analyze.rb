@@ -13,6 +13,17 @@ class TestTypeAnalyze < Minitest::Test
     assert_equal token, result_token if token
   end
 
+  def assert_no_log
+    original_output = KatakataIrb.log_output
+    output = StringIO.new
+    KatakataIrb.log_output = output
+    yield
+    output.rewind
+    assert_empty output.read
+  ensure
+    KatakataIrb.log_output = original_output
+  end
+
   def assert_call(code, include: nil, exclude: nil, binding: nil)
     raise ArgumetError if include.nil? && exclude.nil?
     analyze(code, binding:) => [:call, type,]
@@ -33,16 +44,31 @@ class TestTypeAnalyze < Minitest::Test
     assert_analyze_type('puts(@@x', :cvar, '@@x')
   end
 
+  def test_rescue_assign_no_log
+    assert_no_log do
+      assert_nil analyze('begin; rescue => a')
+      assert_equal [:gvar, '$a'], analyze('begin; rescue => $a')
+      assert_equal [:ivar, '@a'], analyze('begin; rescue => @a')
+      assert_equal [:cvar, '@@a'], analyze('begin; rescue => @@a')
+      # Do not complete assigning to non-variable in rescue
+      assert_nil analyze('begin; rescue => A')
+      assert_nil analyze('begin; rescue => (a).b')
+      assert_nil analyze('begin; rescue => (a)::b')
+      assert_nil analyze('begin; rescue => (a)::A')
+      assert_nil analyze('begin; rescue => (a).A')
+    end
+  end
+
   def test_ref
+    lvar = 1
     bind = Class.new do
-      lvar = 1
       instance_variable_set(:@ivar, :a)
       class_variable_set(:@@cvar, 'a')
       break binding
     end
     assert_call('STDIN.', include: STDIN.singleton_class)
     assert_call('$stdin.', include: $stdin.singleton_class)
-    assert_call('lvar.', include: Integer, binding: bind)
+    assert_call('lvar.', include: lvar.class, binding: bind)
     assert_call('@ivar.', include: Symbol, binding: bind)
     assert_call('@@cvar.', include: String, binding: bind)
   end

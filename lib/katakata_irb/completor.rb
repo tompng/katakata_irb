@@ -233,7 +233,9 @@ module KatakataIrb::Completor
     in_class_module = parents&.any? { _1 in [:class | :module,] }
     icvar_available = !in_class_module
     return unless target in [_type, String, [Integer, Integer]]
-    if target in [:@ivar,]
+    if target in [:@gvar,]
+      return [:gvar, name]
+    elsif target in [:@ivar,]
       return [:ivar, name] if icvar_available
     elsif target in [:@cvar,]
       return [:cvar, name] if icvar_available
@@ -275,12 +277,13 @@ module KatakataIrb::Completor
       [:const, calculate_receiver.call(receiver), name]
     in [:top_const_ref, [:@const,]]
       [:const, KatakataIrb::Types::SingletonType.new(Object), name]
-    in [:def,] | [:string_content,] | [:var_field,] | [:defs,] | [:rest_param,] | [:kwrest_param,] | [:blockarg,] | [[:@ident,],]
+    in [:def,] | [:string_content,] | [:field | :var_field | :const_path_field,] | [:defs,] | [:rest_param,] | [:kwrest_param,] | [:blockarg,] | [[:@ident,],]
     in [Array,] # `xstring`, /regexp/
     else
       KatakataIrb.log_puts
-      KatakataIrb.log_puts [:NEW_EXPRESSION, expression].inspect
+      KatakataIrb.log_puts [:UNIMPLEMENTED_EXPRESSION, expression].inspect
       KatakataIrb.log_puts
+      nil
     end
   end
 
