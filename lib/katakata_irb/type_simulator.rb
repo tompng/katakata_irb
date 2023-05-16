@@ -80,6 +80,7 @@ class KatakataIrb::TypeSimulator
       end
       if @dig_targets.dig? sexp
         params in [:paren, params]
+        params ||= [:params, nil, nil, nil, nil, nil, nil, nil] # params might be nil in ruby 3.0
         params_table = extract_param_names(params).to_h { [_1, KatakataIrb::Types::NIL] }
         method_scope = KatakataIrb::Scope.new(
           scope,
@@ -894,6 +895,7 @@ class KatakataIrb::TypeSimulator
       in [:field | :aref_field,]
         # a.b, c[i] = value
       in [:excessed_comma]
+      in [:args_forward]
       end
     end
     [*pre_required, *post_required].each(&extract_mlhs)

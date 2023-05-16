@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 require 'test_helper'
 
+# Needed for ruby 3.0 test
+Refinement = Object unless defined? Refinement
+
 class TestKatakataIrb < Minitest::Test
   def test_analyze_does_not_raise_error
     original_output = KatakataIrb.log_output
@@ -17,8 +20,10 @@ class TestKatakataIrb < Minitest::Test
       assert KatakataIrb::Completor.analyze("(\n#{File.read(file)}\n).hoge"), "analyzing #{file}"
     end
     syntax_ok = !!Ripper.sexp(SYNTAX_TEST_CODE)
-    assert syntax_ok if RUBY_VERSION > '3.1'
-    assert KatakataIrb::Completor.analyze("(#{SYNTAX_TEST_CODE}).hoge"), "analyzing SYNTAX_TEST_CODE"
+    if RUBY_VERSION > '3.1'
+      assert syntax_ok
+      assert KatakataIrb::Completor.analyze("(#{SYNTAX_TEST_CODE}).hoge"), "analyzing SYNTAX_TEST_CODE"
+    end
   ensure
     KatakataIrb.log_output = original_output
     KatakataIrb::TypeSimulator::DigTarget.class_eval do
