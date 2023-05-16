@@ -4,6 +4,7 @@ PATH
     katakata_irb (0.1.8)
       irb (>= 1.4.0)
       rbs
+      reline (>= 0.3.0)
 
 GEM
   remote: https://rubygems.org/
