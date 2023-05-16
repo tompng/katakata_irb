@@ -130,7 +130,8 @@ module KatakataIrb::Completor
       width = contents.map { Reline::Unicode.calculate_width _1 }.max
       x = cursor_pos_to_render.x + autocomplete_dialog.width
       y = cursor_pos_to_render.y
-      Reline::DialogRenderInfo.new(pos: Reline::CursorPos.new(x, y), contents: contents, width: width, bg_color: 44, fg_color: 37)
+      info = { pos: Reline::CursorPos.new(x, y), contents: contents, width: width, bg_color: 44, fg_color: 37 }
+      Reline::DialogRenderInfo.new(**info.slice(*Reline::DialogRenderInfo.members))
     }
     Reline.add_dialog_proc(:show_type, type_dialog_proc, Reline::DEFAULT_DIALOG_CONTEXT)
   end
