@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 require 'test_helper'
 
+# Needed for ruby 3.0 test
+Refinement = Object unless defined? Refinement
+
 class TestKatakataIrb < Minitest::Test
   def test_analyze_does_not_raise_error
     original_output = KatakataIrb.log_output
@@ -13,12 +16,17 @@ class TestKatakataIrb < Minitest::Test
         raise 'Unexpected log output in test'
       end
     end
-    Dir.glob '**/*.rb' do |file|
-      assert KatakataIrb::Completor.analyze("(\n#{File.read(file)}\n).hoge"), "analyzing #{file}"
+    # Should analyze whole code in this repository
+    files = Dir.glob('lib/**/*.rb') + Dir.glob('test/**/*.rb')
+    files.each do |file|
+      result = KatakataIrb::Completor.analyze("(\n#{File.read(file)}\n).hoge") rescue nil
+      assert result, "analyzing #{file}"
     end
     syntax_ok = !!Ripper.sexp(SYNTAX_TEST_CODE)
-    assert syntax_ok if RUBY_VERSION > '3.1'
-    assert KatakataIrb::Completor.analyze("(#{SYNTAX_TEST_CODE}).hoge"), "analyzing SYNTAX_TEST_CODE"
+    if RUBY_VERSION > '3.1'
+      assert syntax_ok
+      assert KatakataIrb::Completor.analyze("(#{SYNTAX_TEST_CODE}).hoge"), "analyzing SYNTAX_TEST_CODE"
+    end
   ensure
     KatakataIrb.log_output = original_output
     KatakataIrb::TypeSimulator::DigTarget.class_eval do

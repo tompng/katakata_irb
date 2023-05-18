@@ -8,7 +8,7 @@ class TestTypeAnalyze < Minitest::Test
   end
 
   def assert_analyze_type(code, type, token = nil, binding: empty_binding)
-    result_type, result_token = analyze(code, binding:)
+    result_type, result_token = analyze(code, binding: binding)
     assert_equal type, result_type
     assert_equal token, result_token if token
   end
@@ -26,7 +26,7 @@ class TestTypeAnalyze < Minitest::Test
 
   def assert_call(code, include: nil, exclude: nil, binding: nil)
     raise ArgumetError if include.nil? && exclude.nil?
-    analyze(code, binding:) => [:call, type,]
+    analyze(code, binding: binding) => [:call, type,]
     klasses = type.types.flat_map do
       _1.klass.singleton_class? ? [_1.klass.superclass, _1.klass] : _1.klass
     end
@@ -85,11 +85,11 @@ class TestTypeAnalyze < Minitest::Test
     c = Object.new
     d = [a, b, c]
     binding = Kernel.binding
-    assert_call('a.', include: Integer, exclude: String, binding:)
-    assert_call('b.', include: b.singleton_class, exclude: [Integer, Object], binding:)
-    assert_call('c.', include: c.singleton_class, exclude: [Integer, String], binding:)
-    assert_call('d.', include: d.class, exclude: [Integer, String, Object], binding:)
-    assert_call('d.sample.', include: [Integer, String, Object], exclude: [b.singleton_class, c.singleton_class], binding:)
+    assert_call('a.', include: Integer, exclude: String, binding: binding)
+    assert_call('b.', include: b.singleton_class, exclude: [Integer, Object], binding: binding)
+    assert_call('c.', include: c.singleton_class, exclude: [Integer, String], binding: binding)
+    assert_call('d.', include: d.class, exclude: [Integer, String, Object], binding: binding)
+    assert_call('d.sample.', include: [Integer, String, Object], exclude: [b.singleton_class, c.singleton_class], binding: binding)
   end
 
   def test_local_variable_assign
@@ -187,13 +187,13 @@ class TestTypeAnalyze < Minitest::Test
   end
 
   def test_to_str_to_int
-    sobj = Data.define(:to_str).new('a')
-    iobj = Data.define(:to_int).new(1)
+    sobj = Struct.new(:to_str).new('a')
+    iobj = Struct.new(:to_int).new(1)
     binding = Kernel.binding
     assert_equal String, ([] * sobj).class
     assert_equal Array, ([] * iobj).class
-    assert_call('([]*sobj).', include: String, exclude: Array, binding:)
-    assert_call('([]*iobj).', include: Array, exclude: String, binding:)
+    assert_call('([]*sobj).', include: String, exclude: Array, binding: binding)
+    assert_call('([]*iobj).', include: Array, exclude: String, binding: binding)
   end
 
   def test_method_select
