@@ -16,7 +16,9 @@ class TestKatakataIrb < Minitest::Test
         raise 'Unexpected log output in test'
       end
     end
-    Dir.glob '**/*.rb' do |file|
+    # Should analyze whole code in this repository
+    files = Dir.glob('lib/**/*.rb') + Dir.glob('test/**/*.rb')
+    files.each do |file|
       result = KatakataIrb::Completor.analyze("(\n#{File.read(file)}\n).hoge") rescue nil
       assert result, "analyzing #{file}"
     end
