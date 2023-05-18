@@ -186,12 +186,16 @@ module KatakataIrb::Types
       @params = params
     end
     def transform() = yield(self)
-    def methods() = @klass.instance_methods
-    def all_methods() = @klass.instance_methods | @klass.private_instance_methods
+    def methods() = rbs_methods.select { _2.public? }.keys | @klass.instance_methods
+    def all_methods() = rbs_methods.keys | @klass.instance_methods | @klass.private_instance_methods
     def constants() = []
     def types() = [self]
     def nillable?() = (@klass == NilClass)
     def nonnillable() = self
+    def rbs_methods
+      type_name = RBS::TypeName(KatakataIrb::Types.class_name_of(@klass)).absolute!
+      KatakataIrb::Types.rbs_builder.build_instance(type_name).methods rescue []
+    end
     def inspect
       if params.empty?
         inspect_without_params
