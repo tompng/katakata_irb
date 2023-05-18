@@ -17,7 +17,8 @@ class TestKatakataIrb < Minitest::Test
       end
     end
     Dir.glob '**/*.rb' do |file|
-      assert KatakataIrb::Completor.analyze("(\n#{File.read(file)}\n).hoge"), "analyzing #{file}"
+      result = KatakataIrb::Completor.analyze("(\n#{File.read(file)}\n).hoge") rescue nil
+      assert result, "analyzing #{file}"
     end
     syntax_ok = !!Ripper.sexp(SYNTAX_TEST_CODE)
     if RUBY_VERSION > '3.1'
