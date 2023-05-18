@@ -61,5 +61,9 @@ class TestKatakataIrb < Minitest::Test
     embdoc
     =end
       = 1
+    case
+    when cond
+    else
+    end
   RUBY
 end

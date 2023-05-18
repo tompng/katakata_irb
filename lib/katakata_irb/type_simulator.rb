@@ -557,7 +557,7 @@ class KatakataIrb::TypeSimulator
       scope.update pattern_scope
       KatakataIrb::Types::UnionType[*results]
     in [:case, target_exp, match_exp]
-      target = simulate_evaluate target_exp, scope
+      target = target_exp ? simulate_evaluate(target_exp, scope) : KatakataIrb::Types::NIL
       simulate_evaluate match_exp, scope, case_target: target
     in [:void_stmt]
       KatakataIrb::Types::NIL
