@@ -16,16 +16,20 @@ class TestKatakataIrb < Minitest::Test
         raise 'Unexpected log output in test'
       end
     end
+
+    assert Ripper.sexp(SYNTAX_TEST_CODE)
+    assert KatakataIrb::Completor.analyze("(#{SYNTAX_TEST_CODE}).hoge"), 'analyzing SYNTAX_TEST_CODE'
+
+    if RUBY_VERSION >= '3.1'
+      assert Ripper.sexp(SYNTAX_TEST_CODE_3_1_PLUS)
+      assert KatakataIrb::Completor.analyze("(#{SYNTAX_TEST_CODE_3_1_PLUS}).hoge"), 'analyzing SYNTAX_TEST_CODE_3_1_PLUS'
+    end
+
     # Should analyze whole code in this repository
     files = Dir.glob('lib/**/*.rb') + Dir.glob('test/**/*.rb')
     files.each do |file|
       result = KatakataIrb::Completor.analyze("(\n#{File.read(file)}\n).hoge") rescue nil
       assert result, "analyzing #{file}"
-    end
-    syntax_ok = !!Ripper.sexp(SYNTAX_TEST_CODE)
-    if RUBY_VERSION > '3.1'
-      assert syntax_ok
-      assert KatakataIrb::Completor.analyze("(#{SYNTAX_TEST_CODE}).hoge"), "analyzing SYNTAX_TEST_CODE"
     end
   ensure
     KatakataIrb.log_output = original_output
@@ -35,12 +39,15 @@ class TestKatakataIrb < Minitest::Test
     end
   end
 
+  SYNTAX_TEST_CODE_3_1_PLUS = <<~'RUBY'
+    def f(*,**,&)
+      f(&)
+    end
+  RUBY
+
   SYNTAX_TEST_CODE = <<~'RUBY'
     a[i], b[j, k], *, c.d = value
     for a[i], b[j, k], *, c.d in array
-    end
-    def f(*,**,&)
-      f(&)
     end
     def f(...)
       f(...)
