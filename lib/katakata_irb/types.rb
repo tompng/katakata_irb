@@ -193,7 +193,10 @@ module KatakataIrb::Types
     def nillable?() = (@klass == NilClass)
     def nonnillable() = self
     def rbs_methods
-      type_name = RBS::TypeName(KatakataIrb::Types.class_name_of(@klass)).absolute!
+      name = KatakataIrb::Types.class_name_of(@klass)
+      return {} unless name
+
+      type_name = RBS::TypeName(name).absolute!
       KatakataIrb::Types.rbs_builder.build_instance(type_name).methods rescue {}
     end
     def inspect
