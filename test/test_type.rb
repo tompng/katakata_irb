@@ -41,4 +41,20 @@ class TestType < Minitest::Test
     assert_equal 'Array.itself', KatakataIrb::Types.type_from_object(Array).inspect
     assert_equal 'KatakataIrb.itself', KatakataIrb::Types.type_from_object(KatakataIrb).inspect
   end
+
+  def test_type_methods
+    s = ''
+    class << s
+      def foobar; end
+      private def foobaz; end
+    end
+    # Some instance methods are delayed defined (example: ActiveRecord's column method)
+    # dedup is defined in rbs but not defined in ruby <= 3.1
+    targets = [:foobar, :foobaz, :dedup]
+    type = KatakataIrb::Types.type_from_object s
+    assert_equal [:foobar, :dedup], targets & type.methods
+    assert_equal [:foobar, :foobaz, :dedup], targets & type.all_methods
+    assert_equal [:dedup], targets & KatakataIrb::Types::STRING.methods
+    assert_equal [:dedup], targets & KatakataIrb::Types::STRING.all_methods
+  end
 end
