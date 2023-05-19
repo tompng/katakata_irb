@@ -194,7 +194,7 @@ module KatakataIrb::Types
     def nonnillable() = self
     def rbs_methods
       type_name = RBS::TypeName(KatakataIrb::Types.class_name_of(@klass)).absolute!
-      KatakataIrb::Types.rbs_builder.build_instance(type_name).methods rescue []
+      KatakataIrb::Types.rbs_builder.build_instance(type_name).methods rescue {}
     end
     def inspect
       if params.empty?
