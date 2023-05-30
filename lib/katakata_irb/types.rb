@@ -4,7 +4,25 @@ require 'rbs/cli'
 module KatakataIrb; end
 module KatakataIrb::Types
   def self.rbs_builder
-    @rbs_builder ||= load_rbs_builder
+    preload if @rbs_builder.nil?
+
+    @rbs_builder
+  end
+
+  def self.loader_type=(loader_type)
+    @loader_type = loader_type
+  end
+
+  def self.preload
+    case @loader_type
+    when :sync, nil
+      @rbs_builder = load_rbs_builder
+    when :async
+      @loader_thread ||= Thread.new do
+        @rbs_builder = load_rbs_builder
+      end
+    end
+    rbs_builder_loader.run if @rbs_builder.nil?
   end
 
   def self.load_rbs_builder
@@ -59,6 +77,8 @@ module KatakataIrb::Types
   end
 
   def self.rbs_methods(type, method_name, args_types, kwargs_type, has_block)
+    return [] unless rbs_builder
+
     receivers = type.types.map do |t|
       case t
       in ProcType
