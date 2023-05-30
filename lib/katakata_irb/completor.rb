@@ -61,7 +61,7 @@ module KatakataIrb::Completor
     end
 
     IRB::InputCompletor.singleton_class.prepend Module.new{
-      def retrieve_completion_data(input, _bind: IRB.conf[:MAIN_CONTEXT].workspace.binding, doc_namespace: false)
+      def retrieve_completion_data(input, doc_namespace: false, **)
         return super unless doc_namespace
         name = input[/[a-zA-Z_0-9]+[!?=]?\z/]
         method_doc = -> type do

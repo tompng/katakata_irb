@@ -39,6 +39,15 @@ class TestKatakataIrb < Minitest::Test
     end
   end
 
+  def test_irb_input_completor_compatibility
+    completion = IRB::InputCompletor.retrieve_completion_data 'at_exi', bind: binding, doc_namespace: false
+    assert_equal ['at_exit'], completion
+
+    KatakataIrb::Completor.prev_analyze_result = KatakataIrb::Completor.analyze 'a = 1.to_c; a.abs', binding
+    document = IRB::InputCompletor.retrieve_completion_data 'a.abs', bind: binding, doc_namespace: true
+    assert_equal 'Complex#abs', document
+  end
+
   SYNTAX_TEST_CODE_3_1_PLUS = <<~'RUBY'
     def f(*,**,&)
       f(&)
