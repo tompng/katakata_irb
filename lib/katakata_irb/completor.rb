@@ -147,7 +147,7 @@ module KatakataIrb::Completor
     code = lvars_code + code
     tokens = RubyLex.ripper_lex_without_warning code
     tokens = KatakataIrb::NestingParser.interpolate_ripper_ignored_tokens code, tokens
-    last_opens = KatakataIrb::NestingParser.parse(tokens)
+    last_opens = KatakataIrb::NestingParser.open_tokens(tokens)
     closings = last_opens.map do |t|
       case t.tok
       when /\A%.[<>]\z/
