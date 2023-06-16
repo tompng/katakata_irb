@@ -26,9 +26,10 @@ module KatakataIrb::NestingParser
     interpolated
   end
 
-  IGNOREABLE_TOKENS = %i[on_sp on_ignored_nl on_comment on_embdoc_beg on_embdoc on_embdoc_end]
+  IGNORE_TOKENS = %i[on_sp on_ignored_nl on_comment on_embdoc_beg on_embdoc on_embdoc_end]
 
-  def self.parse(tokens)
+  # Scan each token and call the given block with array of token and other information for parsing
+  def self.scan_opens(tokens)
     opens = []
     pending_heredocs = []
     first_token_on_line = true
@@ -37,14 +38,14 @@ module KatakataIrb::NestingParser
       last_tok, state, args = opens.last
       case state
       when :in_unquoted_symbol
-        unless t.event == :on_sp
+        unless IGNORE_TOKENS.include?(t.event)
           opens.pop
           skip = true
         end
       when :in_lambda_head
         opens.pop if t.event == :on_tlambeg || (t.event == :on_kw && t.tok == 'do')
       when :in_method_head
-        unless IGNOREABLE_TOKENS.include?(t.event)
+        unless IGNORE_TOKENS.include?(t.event)
           next_args = []
           body = nil
           if args.include?(:receiver)
@@ -133,7 +134,7 @@ module KatakataIrb::NestingParser
         if t.event == :on_op && t.tok == '|'
           opens[-1] = [last_tok, nil]
           opens << [t, :in_block_args]
-        elsif !IGNOREABLE_TOKENS.include?(t.event)
+        elsif !IGNORE_TOKENS.include?(t.event)
           opens[-1] = [last_tok, nil]
         end
       when :in_block_args
@@ -201,6 +202,12 @@ module KatakataIrb::NestingParser
           opens << [t, nil]
         when :on_tstring_end, :on_regexp_end, :on_label_end
           opens.pop
+        when :on_symbeg
+          if t.tok == ':'
+            opens << [t, :in_unquoted_symbol]
+          else
+            opens << [t, nil]
+          end
         when :on_op
           case t.tok
           when '?'
@@ -209,12 +216,6 @@ module KatakataIrb::NestingParser
           when ':'
             # closing of `cond ? value : value``
             opens.pop
-          end
-        when :on_symbeg
-          if t.tok == ':'
-            opens << [t, :in_unquoted_symbol]
-          else
-            opens << [t, nil]
           end
         end
       end
@@ -232,29 +233,8 @@ module KatakataIrb::NestingParser
     opens.map(&:first) + pending_heredocs.reverse
   end
 
-  def self.parse_line(tokens)
-    line_tokens = []
-    prev_opens = []
-    min_depth = 0
-    output = []
-    last_opens = parse(tokens) do |t, opens|
-      depth = t == opens.last&.first ? opens.size - 1 : opens.size
-      min_depth = depth if depth < min_depth
-      if t.tok.include?("\n")
-        t.tok.each_line do |line|
-          line_tokens << [t, line]
-          next if line[-1] != "\n"
-          next_opens = opens.map(&:first)
-          output << [line_tokens, prev_opens, next_opens, min_depth]
-          prev_opens = next_opens
-          min_depth = prev_opens.size
-          line_tokens = []
-        end
-      else
-        line_tokens << [t, t.tok]
-      end
-    end
-    output << [line_tokens, prev_opens, last_opens, min_depth] if line_tokens.any?
-    output
+  def self.open_tokens(tokens)
+    # scan_opens without block will return a list of open tokens at last token position
+    scan_opens(tokens)
   end
 end
