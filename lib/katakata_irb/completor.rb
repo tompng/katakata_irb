@@ -5,9 +5,24 @@ require 'rbs/cli'
 require 'irb'
 
 module KatakataIrb::Completor
-  using KatakataIrb::TypeSimulator::LexerElemMatcher
+  using KatakataIrb::TypeSimulator::ASTNodeMatcher
   HIDDEN_METHODS = %w[Namespace TypeName] # defined by rbs, should be hidden
   singleton_class.attr_accessor :prev_analyze_result
+
+  module LexerElemMatcher
+    refine Ripper::Lexer::Elem do
+      def deconstruct_keys(_keys)
+        {
+          tok: tok,
+          event: event,
+          label: state.allbits?(Ripper::EXPR_LABEL),
+          beg: state.allbits?(Ripper::EXPR_BEG),
+          dot: state.allbits?(Ripper::EXPR_DOT)
+        }
+      end
+    end
+  end
+  using LexerElemMatcher
 
   def self.setup
     completion_proc = ->(target, preposing = nil, postposing = nil) do
@@ -142,8 +157,8 @@ module KatakataIrb::Completor
 
   def self.completion_ast_targets(code, binding = empty_binding)
     lvars_code = binding.local_variables.map do |name|
-      "#{name}="
-    end.join + "nil;\n"
+      "#{name}=#{name}"
+    end.join(';') + "\n"
     code = lvars_code + code
     tokens = RubyLex.ripper_lex_without_warning code
     tokens = KatakataIrb::NestingParser.interpolate_ripper_ignored_tokens code, tokens
@@ -210,9 +225,9 @@ module KatakataIrb::Completor
   def self.analyze(code, binding = empty_binding)
     (*parents, target), tok = completion_ast_targets code, binding
     return unless target
-
-    calculate_scope = -> { return KatakataIrb::Scope.from_binding(binding); KatakataIrb::TypeSimulator.calculate_binding_scope binding, parents, target }
-    calculate_receiver = -> receiver { return KatakataIrb::Types::INTEGER; KatakataIrb::TypeSimulator.calculate_receiver binding, parents, receiver }
+    $parents = parents
+    calculate_scope = -> { KatakataIrb::TypeSimulator.calculate_binding_scope binding, parents, target }
+    calculate_receiver = -> receiver { KatakataIrb::TypeSimulator.calculate_receiver binding, parents, receiver }
 
     case target.type
     when :GVAR
@@ -237,6 +252,7 @@ module KatakataIrb::Completor
     when :COLON3
       [:top_const, tok]
     when :CALL
+      $receiver = target.children.first
       [:call, tok, calculate_receiver.call(target.children.first), false]
     end
     # TODO: method(&:name)

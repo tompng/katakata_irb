@@ -6,37 +6,26 @@ require_relative 'scope'
 class KatakataIrb::TypeSimulator
   class DigTarget
     def initialize(parents, receiver, &block)
-      @dig_ids = parents.to_h { [_1.__id__, true] }
-      @target_id = receiver.__id__
+      @dig_ids = parents.to_h { [_1.node_id, true] }
+      @target_id = receiver.node_id
       @block = block
     end
 
-    def dig?(node) = @dig_ids[node.__id__]
-    def target?(node) = @target_id == node.__id__
+    def dig?(node) = @dig_ids[node.node_id]
+    def target?(node) = @target_id == node.node_id
     def resolve(type, scope)
       @block.call type, scope
     end
   end
 
-  module LexerElemMatcher
-    refine Ripper::Lexer::Elem do
-      def deconstruct_keys(_keys)
-        {
-          tok: tok,
-          event: event,
-          label: state.allbits?(Ripper::EXPR_LABEL),
-          beg: state.allbits?(Ripper::EXPR_BEG),
-          dot: state.allbits?(Ripper::EXPR_DOT)
-        }
-      end
-    end
+  module ASTNodeMatcher
     refine RubyVM::AbstractSyntaxTree::Node do
       def deconstruct_keys(_keys)
         { type: type, children: children }
       end
     end
   end
-  using LexerElemMatcher
+  using ASTNodeMatcher
 
   OBJECT_METHODS = {
     to_s: KatakataIrb::Types::STRING,
@@ -56,16 +45,19 @@ class KatakataIrb::TypeSimulator
     @dig_targets = dig_targets
   end
 
-  def simulate_evaluate(sexp, scope, case_target: nil)
-    result = simulate_evaluate_inner(sexp, scope, case_target: case_target)
-    @dig_targets.resolve result, scope if @dig_targets.target?(sexp)
+  def simulate_evaluate(node, scope, case_target: nil)
+    result = simulate_evaluate_inner(node, scope, case_target: case_target)
+    binding.irb if node.type == :CALL
+    @dig_targets.resolve result, scope if @dig_targets.target?(node)
     result
   end
 
-  def simulate_evaluate_inner(sexp, scope, case_target: nil)
-    case sexp
-    in [:program, statements]
-      statements.map { simulate_evaluate _1, scope }.last
+  def simulate_evaluate_inner(node, scope, case_target: nil)
+    sexp = node
+    children = node.children
+    case node
+    in { type: :BLOCK }
+      node.children.map { simulate_evaluate _1, scope }.last
     in [:def | :defs,]
       sexp in [:def, _method_name_exp, params, body_stmt]
       sexp in [:defs, receiver_exp, _dot_exp, _method_name_exp, params, body_stmt]
@@ -99,25 +91,15 @@ class KatakataIrb::TypeSimulator
         scope.update method_scope
       end
       KatakataIrb::Types::SYMBOL
-    in [:@int,]
-      KatakataIrb::Types::INTEGER
-    in [:@float,]
-      KatakataIrb::Types::FLOAT
-    in [:@rational,]
-      KatakataIrb::Types::RATIONAL
-    in [:@imaginary,]
-      KatakataIrb::Types::COMPLEX
-    in [:@tstring_content,]
+    in { type: :LIT }
+      KatakataIrb::Types::InstanceType.new node.children.first.class
+    in { type: :STR | :XSTR }
       KatakataIrb::Types::STRING
-    in [:symbol_literal,]
-      KatakataIrb::Types::SYMBOL
+    in { type: :BACK_REF }
+      KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
     in [:dyna_symbol, [:string_content, *statements]]
       statements.each { simulate_evaluate _1, scope }
       KatakataIrb::Types::SYMBOL
-    in [:@CHAR,]
-      KatakataIrb::Types::STRING
-    in [:@backref,]
-      KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
     in [:string_literal, [:string_content, *statements]]
       statements.each { simulate_evaluate _1, scope }
       KatakataIrb::Types::STRING
@@ -235,6 +217,11 @@ class KatakataIrb::TypeSimulator
         end
       end
       simulate_call receiver_type, :[], args_type, kwargs_type(kwargs, scope), nil
+    in { type: :CALL }
+      receiver, name, = node.children
+      receiver_type = simulate_evaluate(receiver, scope)
+      return KatakataIrb::Types::NIL
+      # TODO: response
     in [:call | :vcall | :command | :command_call | :method_add_arg | :method_add_block,]
       if (sexp in [:vcall, [:@ident, name,]]) && scope.has?(name)
         # workaround for https://bugs.ruby-lang.org/issues/19175
@@ -340,10 +327,10 @@ class KatakataIrb::TypeSimulator
       block_scope.merge_jumps
       scope.update block_scope
       KatakataIrb::Types::ProcType.new
-    in [:assign, [:var_field, [:@gvar | :@ivar | :@cvar | :@ident | :@const, name,]], value]
-      res = simulate_evaluate value, scope
-      scope[name] = res
-      res
+    in { type: :LVAR | :GVAR | :IVAR | :CVAR, children: [name] }
+      scope[name]
+    in { type: :LASGN | :GASGN | :IASGN | :CVASGN, children: [name, value] }
+      scope[name] = simulate_evaluate(value, scope)
     in [:assign, [:aref_field, receiver, key], value]
       simulate_evaluate receiver, scope
       args, kwargs, _block = retrieve_method_args key
@@ -581,9 +568,10 @@ class KatakataIrb::TypeSimulator
       scope.conditional { simulate_evaluate expression, _1 }
       KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
     else
-      KatakataIrb.log_puts
       KatakataIrb.log_puts :NOMATCH
-      KatakataIrb.log_puts sexp.inspect
+      KatakataIrb.log_puts node.inspect
+      KatakataIrb.log_puts node.children.inspect
+      KatakataIrb.log_puts
       KatakataIrb::Types::NIL
     end
   end
@@ -993,6 +981,11 @@ class KatakataIrb::TypeSimulator
   def self.calculate_receiver(binding, parents, receiver)
     dig_targets = DigTarget.new(parents, receiver) do |type, _scope|
       return type
+    end
+    lvars = binding.local_variables
+    if parents[0] in { type: :SCOPE }
+      lvars |= parents[0].children[0]
+      parents.shift
     end
     new(dig_targets).simulate_evaluate parents[0], KatakataIrb::Scope.from_binding(binding)
     KatakataIrb::Types::NIL

@@ -15,4 +15,4 @@ module KatakataIrb
   end
 end
 
-KatakataIrb::Completor.setup
+# KatakataIrb::Completor.setup
