@@ -23,23 +23,23 @@ module KatakataIrb::Completor
         else
           IRB::InputCompletor.retrieve_files_to_require_relative_from_current_dir
         end
-      in [:call_or_const, type, name, self_call]
+      in [:call_or_const, name, type, self_call]
         ((self_call ? type.all_methods: type.methods).map(&:to_s) - HIDDEN_METHODS) | type.constants
       in [:const, type, name]
         type.constants
-      in [:ivar, name, *_scope]
+      in [:ivar, name, _scope]
         # TODO: scope
         ivars = binding.eval('self').instance_variables rescue []
         cvars = (binding.eval('self').class_variables rescue nil) if name == '@'
         ivars | (cvars || [])
-      in [:cvar, name, *_scope]
+      in [:cvar, name, _scope]
         # TODO: scope
         binding.eval('self').class_variables rescue []
       in [:gvar, name]
         global_variables
       in [:symbol, name]
         Symbol.all_symbols.map { _1.inspect[1..] }
-      in [:call, type, name, self_call]
+      in [:call, name, type, self_call]
         (self_call ? type.all_methods : type.methods).map(&:to_s) - HIDDEN_METHODS
       in [:lvar_or_method, name, scope]
         scope.self_type.all_methods.map(&:to_s) | scope.local_variables
@@ -82,14 +82,14 @@ module KatakataIrb::Completor
         end
 
         case KatakataIrb::Completor.prev_analyze_result
-        in [:call_or_const, type, _name, _self_call]
+        in [:call_or_const, _name, type, _self_call]
           call_or_const_doc.call type
-        in [:const, type, _name]
+        in [:const, _name, type]
           # when prev_analyze_result is const, current analyze result might be call
           call_or_const_doc.call type
         in [:gvar, _name]
           name
-        in [:call, type, _name, _self_call]
+        in [:call, _name, type, _self_call]
           method_doc.call type
         in [:lvar_or_method, _name, scope]
           method_doc.call scope.self_type unless scope.local_variables.include?(name)
@@ -107,9 +107,9 @@ module KatakataIrb::Completor
       return unless cursor_pos_to_render && autocomplete_dialog&.width && pointer.nil?
       receiver_type = (
         case KatakataIrb::Completor.prev_analyze_result
-        in [:call_or_const, type, name, _self_call] if name.empty?
+        in [:call_or_const, name, type, _self_call] if name.empty?
           type
-        in [:call, type, name, _self_call] if name.empty?
+        in [:call, name, type, _self_call] if name.empty?
           type
         else
           return
@@ -140,7 +140,7 @@ module KatakataIrb::Completor
     Kernel.binding
   end
 
-  def self.analyze(code, binding = empty_binding)
+  def self.completion_ast_targets(code, binding = empty_binding)
     lvars_code = binding.local_variables.map do |name|
       "#{name}="
     end.join + "nil;\n"
@@ -148,144 +148,98 @@ module KatakataIrb::Completor
     tokens = RubyLex.ripper_lex_without_warning code
     tokens = KatakataIrb::NestingParser.interpolate_ripper_ignored_tokens code, tokens
     last_opens = KatakataIrb::NestingParser.open_tokens(tokens)
-    closings = last_opens.map do |t|
-      case t.tok
-      when /\A%.[<>]\z/
-        $/ + '>'
-      when '{', '#{', /\A%.?[{}]\z/
-        $/ + '}'
-      when '(', /\A%.?[()]\z/
-        # do not insert \n before closing paren. workaround to avoid syntax error of "a in ^(b\n)"
-        ')'
-      when '[', /\A%.?[\[\]]\z/
-        $/ + ']'
-      when /\A%.?(.)\z/
-        $1
-      when '"', "'", '/', '`'
-        t.tok
-      when /\A<<[~-]?(?:"(?<s>.+)"|'(?<s>.+)'|(?<s>.+))/
-        $/ + ($1 || $2 || $3) + $/
-      when ':"', ":'", ':'
-        t.tok[1]
-      when '?'
-        # ternary operator
-        ' : value'
-      when '|'
-        # block args
-        '|'
-      else
-        $/ + 'end'
-      end
-    end
     # remove error tokens
     tokens.pop while tokens&.last&.tok&.empty?
 
+    tok = tokens.last&.tok
     case tokens.last
-    in { event: :on_ignored_by_ripper, tok: '.' }
-      suffix = 'method'
-      name = ''
-    in { dot: true }
-      suffix = 'method'
-      name = ''
+    in { event: :on_ignored_by_ripper | :on_op | :on_period, tok: '.' | '::' }
+      mark = tok == '::' ? :IRB_COMPLETION_MARK : :irb_completion_mark
+      tok = ''
     in { event: :on_symbeg }
-      suffix = 'symbol'
-      name = ''
+      mark = :irb_completion_mark
+      tok = ''
     in { event: :on_ident | :on_kw, tok: }
-      return unless code.delete_suffix! tok
-      suffix = 'method'
-      name = tok
+      mark = :irb_completion_mark
     in { event: :on_const, tok: }
-      return unless code.delete_suffix! tok
-      suffix = 'Const'
-      name = tok
+      mark = :IRB_COMPLETION_MARK
     in { event: :on_tstring_content, tok: }
-      return unless code.delete_suffix! tok
-      suffix = 'string'
-      name = tok.rstrip
+      mark = 'irb_completion_mark'
     in { event: :on_gvar, tok: }
-      return unless code.delete_suffix! tok
-      suffix = '$gvar'
-      name = tok
+      mark = :$irb_completion_mark
     in { event: :on_ivar, tok: }
-      return unless code.delete_suffix! tok
-      suffix = '@ivar'
-      name = tok
+      mark = :@irb_completion_mark
     in { event: :on_cvar, tok: }
-      return unless code.delete_suffix! tok
-      suffix = '@@cvar'
-      name = tok
+      mark = :@@irb_completion_mark
     else
       return
     end
-    sexp = Ripper.sexp code + suffix + closings.reverse.join
-    lines = code.lines
-    line_no = lines.size
-    col = lines.last.bytesize
-    if lines.last.end_with? "\n"
-      line_no += 1
-      col = 0
+
+    code = code.delete_suffix(tok) unless tok.empty?
+    last_opens = KatakataIrb::NestingParser.open_tokens(tokens)
+    closing_code = KatakataIrb::NestingParser.closing_code(last_opens)
+
+    begin
+      verbose, $VERBOSE = $VERBOSE, nil
+      ast = RubyVM::AbstractSyntaxTree.parse("#{code}#{mark}#{closing_code}")
+    rescue SyntaxError
+      return
+    ensure
+      $VERBOSE = verbose
     end
 
-    if sexp in [:program, [_lvars_exp, *rest_statements]]
-      sexp = [:program, rest_statements]
-    end
+    matched_nodes = find_target_nodes(ast, mark)
+    [matched_nodes, tok] if matched_nodes
+  end
 
-    *parents, expression, target = find_target sexp, line_no, col
-    in_class_module = parents&.any? { _1 in [:class | :module,] }
-    icvar_available = !in_class_module
-    return unless target in [_type, String, [Integer, Integer]]
-    if target in [:@gvar,]
-      return [:gvar, name]
-    elsif target in [:@ivar,]
-      return [:ivar, name] if icvar_available
-    elsif target in [:@cvar,]
-      return [:cvar, name] if icvar_available
+  def self.find_target_nodes(ast, mark)
+    ast.children.each do |child|
+      if mark == child
+        return [ast]
+      elsif child.is_a?(RubyVM::AbstractSyntaxTree::Node)
+        result = find_target_nodes(child, mark)
+        if result
+          result.unshift ast
+          return result
+        end
+      end
     end
-    return unless expression
-    calculate_scope = -> { KatakataIrb::TypeSimulator.calculate_binding_scope binding, parents, expression }
-    calculate_receiver = -> receiver { KatakataIrb::TypeSimulator.calculate_receiver binding, parents, receiver }
+    nil
+  end
 
-    if (target in [:@tstring_content,]) && (parents[-4] in [:command, [:@ident, 'require' | 'require_relative' => require_method,],])
-      # `require 'target'`
-      return [require_method.to_sym, name.rstrip]
+  def self.analyze(code, binding = empty_binding)
+    (*parents, target), tok = completion_ast_targets code, binding
+    return unless target
+
+    calculate_scope = -> { return KatakataIrb::Scope.from_binding(binding); KatakataIrb::TypeSimulator.calculate_binding_scope binding, parents, target }
+    calculate_receiver = -> receiver { return KatakataIrb::Types::INTEGER; KatakataIrb::TypeSimulator.calculate_receiver binding, parents, receiver }
+
+    case target.type
+    when :GVAR
+      return [:gvar, tok, calculate_scope.call]
+    when :IVAR
+      return [:ivar, tok, calculate_scope.call]
+    when :CVAR
+      return [:cvar, tok, calculate_scope.call]
+    when :LVAR, :VCALL
+      return [:lvar_or_method, tok, calculate_scope.call]
+    when :CONST
+      return [:const_or_method, tok, calculate_scope.call]
+    when :STR
+      if parents[-3] in { type: :FCALL, children: [:require | :require_relative => method, { type: :LIST, children: [target, nil] }] }
+        [method, tok.rstrip]
+      end
+    when :LIT
+      return target.children[0].is_a?(Symbol) ? [:symbol, tok] : nil
+    when :COLON2
+      parent = target.children.first
+      parent ? [:const_ref, tok, calculate_receiver.call(parent)] : [:const_or_method, tok, calculate_scope.call]
+    when :COLON3
+      [:top_const, tok]
+    when :CALL
+      [:call, tok, calculate_receiver.call(target.children.first), false]
     end
-    if (target in [:@ident,]) && (expression in [:symbol,]) && (parents[-2] in [:args_add_block, Array => _args, [:symbol_literal, ^expression]])
-      # `method(&:target)`
-      receiver_ref = [:var_ref, [:@ident, '_1', [0, 0]]]
-      block_statements = [receiver_ref]
-      parents[-1] = parents[-2][-1] = [:brace_block, nil, block_statements]
-      parents << block_statements
-      return [:call, calculate_receiver.call(receiver_ref), name, false]
-    end
-    case expression
-    in [:vcall | :var_ref, [:@ident,]]
-      [:lvar_or_method, name, calculate_scope.call]
-    in [:symbol, [:@ident | :@const | :@op | :@kw,]]
-      [:symbol, name] unless name.empty?
-    in [:var_ref | :const_ref, [:@const,]]
-      # TODO
-      [:const, KatakataIrb::Types::SingletonType.new(Object), name]
-    in [:var_ref, [:@gvar,]]
-      [:gvar, name]
-    in [:var_ref, [:@ivar,]]
-      [:ivar, name, calculate_scope.call.self_type] if icvar_available
-    in [:var_ref, [:@cvar,]]
-      [:cvar, name, calculate_scope.call.self_type] if icvar_available
-    in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::' => dot, [:@ident | :@const,]]
-      self_call = (receiver in [:var_ref, [:@kw, 'self',]])
-      [dot == :'::' ? :call_or_const : :call, calculate_receiver.call(receiver), name, self_call]
-    in [:const_path_ref, receiver, [:@const,]]
-      [:const, calculate_receiver.call(receiver), name]
-    in [:top_const_ref, [:@const,]]
-      [:const, KatakataIrb::Types::SingletonType.new(Object), name]
-    in [:def,] | [:string_content,] | [:field | :var_field | :const_path_field,] | [:defs,] | [:rest_param,] | [:kwrest_param,] | [:blockarg,] | [[:@ident,],]
-    in [Array,] # `xstring`, /regexp/
-    else
-      KatakataIrb.log_puts
-      KatakataIrb.log_puts [:UNIMPLEMENTED_EXPRESSION, expression].inspect
-      KatakataIrb.log_puts
-      nil
-    end
+    # TODO: method(&:name)
   end
 
   def self.find_target(sexp, line, col, stack = [sexp])

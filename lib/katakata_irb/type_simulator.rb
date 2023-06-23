@@ -30,6 +30,11 @@ class KatakataIrb::TypeSimulator
         }
       end
     end
+    refine RubyVM::AbstractSyntaxTree::Node do
+      def deconstruct_keys(_keys)
+        { type: type, children: children }
+      end
+    end
   end
   using LexerElemMatcher
 

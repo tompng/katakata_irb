@@ -237,4 +237,37 @@ module KatakataIrb::NestingParser
     # scan_opens without block will return a list of open tokens at last token position
     scan_opens(tokens)
   end
+
+  def self.closing_code(opens)
+    closing_tokens = opens.map do |t|
+      case t.tok
+      when /\A%.[<>]\z/
+        '>'
+      when '{', '#{', /\A%.?[{}]\z/
+        '}'
+      when '(', /\A%.?[()]\z/
+        # do not insert \n before closing paren. workaround to avoid syntax error of "a in ^(b\n)"
+        ')'
+      when '[', /\A%.?[\[\]]\z/
+        ']'
+      when /\A%.?(.)\z/
+        $1
+      when '"', "'", '/', '`'
+        t.tok
+      when /\A<<[~-]?(?:"(?<s>.+)"|'(?<s>.+)'|(?<s>.+))/
+        "\n#{s}\n"
+      when ':"', ":'", ':'
+        t.tok[1]
+      when '?'
+        # ternary operator
+        ' : value'
+      when '|'
+        # block args
+        '|'
+      else
+        "\nend"
+      end
+    end
+    closing_tokens.reverse.join
+  end
 end

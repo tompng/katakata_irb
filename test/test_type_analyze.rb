@@ -26,7 +26,7 @@ class TestTypeAnalyze < Minitest::Test
 
   def assert_call(code, include: nil, exclude: nil, binding: nil)
     raise ArgumetError if include.nil? && exclude.nil?
-    analyze(code, binding: binding) => [:call, type,]
+    analyze(code, binding: binding) => [:call, _tok, type,]
     klasses = type.types.flat_map do
       _1.klass.singleton_class? ? [_1.klass.superclass, _1.klass] : _1.klass
     end
