@@ -47,17 +47,17 @@ class KatakataIrb::TypeSimulator
 
   def simulate_evaluate(node, scope, case_target: nil)
     result = simulate_evaluate_inner(node, scope, case_target: case_target)
-    binding.irb if node.type == :CALL
     @dig_targets.resolve result, scope if @dig_targets.target?(node)
     result
   end
 
   def simulate_evaluate_inner(node, scope, case_target: nil)
     sexp = node
+    type = node.type
     children = node.children
-    case node
-    in { type: :BLOCK }
-      node.children.map { simulate_evaluate _1, scope }.last
+    case type
+    in :BLOCK
+      children.map { simulate_evaluate _1, scope }.last
     in [:def | :defs,]
       sexp in [:def, _method_name_exp, params, body_stmt]
       sexp in [:defs, receiver_exp, _dot_exp, _method_name_exp, params, body_stmt]
@@ -91,91 +91,55 @@ class KatakataIrb::TypeSimulator
         scope.update method_scope
       end
       KatakataIrb::Types::SYMBOL
-    in { type: :LIT }
-      KatakataIrb::Types::InstanceType.new node.children.first.class
-    in { type: :STR | :XSTR }
+    in :NIL
+      KatakataIrb::Types::NIL
+    in :TRUE
+      KatakataIrb::Types::TRUE
+    in :FALSE
+      KatakataIrb::Types::FALSE
+    in :LIT
+      KatakataIrb::Types::InstanceType.new children.first.class
+    in :STR | :XSTR
       KatakataIrb::Types::STRING
-    in { type: :BACK_REF }
-      KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
-    in [:dyna_symbol, [:string_content, *statements]]
-      statements.each { simulate_evaluate _1, scope }
-      KatakataIrb::Types::SYMBOL
-    in [:string_literal, [:string_content, *statements]]
-      statements.each { simulate_evaluate _1, scope }
-      KatakataIrb::Types::STRING
-    in [:xstring_literal, statements]
-      statements.each { simulate_evaluate _1, scope }
-      KatakataIrb::Types::STRING
-    in [:string_embexpr, statements]
-      statements.each { simulate_evaluate _1, scope }
-      KatakataIrb::Types::STRING
-    in [:string_dvar,]
-      KatakataIrb::Types::STRING
-    in [:regexp_literal, statements, _regexp_end]
-      statements.each { simulate_evaluate _1, scope }
-      KatakataIrb::Types::REGEXP
-    in [:array, [:args_add_star,] => star]
-      args, kwargs = retrieve_method_args star
-      types = args.flat_map do |elem|
-        if elem.is_a? KatakataIrb::Types::Splat
-          splat = simulate_evaluate elem.item, scope
-          array_elem, non_array = partition_to_array splat.nonnillable, :to_a
-          KatakataIrb::Types::UnionType[*array_elem, *non_array]
-        else
-          simulate_evaluate elem, scope
-        end
-      end
-      types << kwargs_type(kwargs, scope) if kwargs && kwargs.any?
-      KatakataIrb::Types::InstanceType.new Array, Elem: KatakataIrb::Types::UnionType[*types]
-    in [:array, statements]
-      if statements.nil? || statements.empty?
-        KatakataIrb::Types::ARRAY
-      elsif statements.all? { _1 in [Symbol,] }
-        # normal array
-        elem = statements ? KatakataIrb::Types::UnionType[*statements.map { simulate_evaluate _1, scope }] : KatakataIrb::Types::NIL
-        KatakataIrb::Types::InstanceType.new Array, Elem: elem
+    in :DREGX | :DSTR | :DXSTR | :DSYM
+      _s, statement, list = children
+      [statement, *list&.children].each {
+        simulate_evaluate _1.children.first, scope if _1.type == :EVSTR
+      }
+      case type
+      when :DREGX
+        KatakataIrb::Types::REGEXP
+      when :DSYM
+        KatakataIrb::Types::SYMBOL
       else
-        # %I[] or %W[]
-        statements.each do |sub_statements|
-          sub_statements.each { simulate_evaluate _1, scope }
-        end
-        # TODO: use AST because Ripper.sexp('%I[a]') == Ripper.sexp('%W[a]')
-        elem = KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::SYMBOL]
-        KatakataIrb::Types::InstanceType.new Array, Elem: elem
+        KatakataIrb::Types::STRING
       end
-    in [:bare_assoc_hash, args]
-      simulate_evaluate [:hash, [:assoclist_from_args, args]], scope
-    in [:hash, [:assoclist_from_args, args]]
-      keys = []
-      values = []
-      args.each do |arg|
-        case arg
-        in [:assoc_new, key, value]
-          if key in [:@label, label, pos]
-            keys << KatakataIrb::Types::SYMBOL
-            name = label.delete ':'
-            value ||= [:__var_ref_or_call, [name =~ /\A[A-Z]/ ? :@const : :@ident, name, pos]]
-          else
-            keys << simulate_evaluate(key, scope)
-          end
-          values << simulate_evaluate(value, scope)
-        in [:assoc_splat, value]
-          hash = simulate_evaluate value, scope
-          unless hash.is_a?(KatakataIrb::Types::InstanceType) && hash.klass == Hash
-            hash = simulate_call hash, :to_hash, [], nil, nil
-          end
-          if hash.is_a?(KatakataIrb::Types::InstanceType) && hash.klass == Hash
-            keys << hash.params[:K] if hash.params[:K]
-            values << hash.params[:V] if hash.params[:V]
-          end
+    in :BACK_REF
+      KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
+    in :ZLIST
+      KatakataIrb::Types::ARRAY
+    in :LIST
+      types = children.compact.map do
+        simulate_evaluate _1, scope
+      end
+      KatakataIrb::Types::InstanceType.new Array, Elem: KatakataIrb::Types::UnionType[*types]
+    in :HASH
+      hash_entries_to_type evaluate_hash_entries(node, scope)
+    in :ARGSPUSH | :ARGSCAT
+      args = evaluate_args(node, scope)
+      types = args.flat_map do |elem|
+        case elem
+        when KatakataIrb::Types::Splat
+          array_elem, non_array = partition_to_array elem.item.nonnillable, :to_a
+          [*array_elem, *non_array]
+        when Array
+          hash_entries_to_type(elem)
+        else
+          elem
         end
       end
-      KatakataIrb::Types::InstanceType.new Hash, K: KatakataIrb::Types::UnionType[*keys], V: KatakataIrb::Types::UnionType[*values]
-    in [:hash, nil]
-      KatakataIrb::Types::InstanceType.new Hash
-    in [:paren, [Symbol,] | false => statement]
-      # workaround for `p ()` and `p (foo)`
-      simulate_evaluate statement, scope if statement
+      elem_type = KatakataIrb::Types::UnionType[*types]
+      KatakataIrb::Types::InstanceType.new(Array, Elem: elem_type)
     in [:paren | :ensure | :else, statements]
       statements.map { simulate_evaluate _1, scope }.last
     in [:const_path_ref, receiver, [:@const, name,]]
@@ -217,8 +181,8 @@ class KatakataIrb::TypeSimulator
         end
       end
       simulate_call receiver_type, :[], args_type, kwargs_type(kwargs, scope), nil
-    in { type: :CALL }
-      receiver, name, = node.children
+    in :CALL
+      receiver, name, = children
       receiver_type = simulate_evaluate(receiver, scope)
       return KatakataIrb::Types::NIL
       # TODO: response
@@ -327,9 +291,11 @@ class KatakataIrb::TypeSimulator
       block_scope.merge_jumps
       scope.update block_scope
       KatakataIrb::Types::ProcType.new
-    in { type: :LVAR | :GVAR | :IVAR | :CVAR, children: [name] }
+    in :LVAR | :GVAR | :IVAR | :CVAR
+      children => [name]
       scope[name]
-    in { type: :LASGN | :GASGN | :IASGN | :CVASGN, children: [name, value] }
+    in :LASGN | :GASGN | :IASGN | :CVASGN
+      children => [name, value]
       scope[name] = simulate_evaluate(value, scope)
     in [:assign, [:aref_field, receiver, key], value]
       simulate_evaluate receiver, scope
@@ -568,11 +534,54 @@ class KatakataIrb::TypeSimulator
       scope.conditional { simulate_evaluate expression, _1 }
       KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
     else
+      $node = node
       KatakataIrb.log_puts :NOMATCH
       KatakataIrb.log_puts node.inspect
       KatakataIrb.log_puts node.children.inspect
       KatakataIrb.log_puts
       KatakataIrb::Types::NIL
+    end
+  end
+
+  def evaluate_hash_entries(node, scope)
+    node.children.first.children.each_slice(2).filter_map do |k, v|
+      next unless v
+      next [nil, simulate_evaluate(v, scope)] unless k
+
+      key = k.type == :LIT && k.children.first.is_a?(Symbol) ? k.children.first : simulate_evaluate(k, scope)
+      value = simulate_evaluate v, scope
+      [key, value]
+    end
+  end
+
+  def hash_entries_to_type(entries)
+    keys = []
+    values = []
+    entries.each do |k, v|
+      next unless k # TODO: splat
+      keys << (k.is_a?(Symbol) ? KatakataIrb::Types::SYMBOL : k)
+      values << v
+    end
+    key_type = KatakataIrb::Types::UnionType[*keys]
+    value_type = KatakataIrb::Types::UnionType[*values]
+    KatakataIrb::Types::InstanceType.new Hash, K: key_type, V: value_type
+  end
+
+  def evaluate_args(node, scope)
+    case node.type
+    when :LIST
+      node.children.compact.map do |value|
+        value.type == :HASH ? evaluate_hash_entries(value, scope) : simulate_evaluate(value, scope)
+      end
+    when :ARGSPUSH
+      args_node, arg_node = node.children
+      args = evaluate_args args_node, scope
+      arg = arg_node.type == :HASH ? evaluate_hash_entries(arg_node, scope) : simulate_evaluate(arg_node, scope)
+      [*args, arg]
+    when :ARGSCAT
+      args_node, splat = node.children
+      args = evaluate_args args_node, scope
+      [*args, KatakataIrb::Types::Splat.new(simulate_evaluate(splat, scope))]
     end
   end
 
