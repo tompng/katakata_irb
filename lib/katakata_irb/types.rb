@@ -193,6 +193,7 @@ module KatakataIrb::Types
     def constants() = @module_or_class.constants
     def types() = [self]
     def nillable?() = false
+    def nil?() = false
     def nonnillable() = self
     def inspect
       "#{module_or_class}.itself"
@@ -210,7 +211,8 @@ module KatakataIrb::Types
     def all_methods() = rbs_methods.keys | @klass.instance_methods | @klass.private_instance_methods
     def constants() = []
     def types() = [self]
-    def nillable?() = (@klass == NilClass)
+    def nillable?() = nil?
+    def nil?() = (@klass == NilClass)
     def nonnillable() = self
     def rbs_methods
       name = KatakataIrb::Types.class_name_of(@klass)
@@ -311,6 +313,8 @@ module KatakataIrb::Types
     def nillable?
       types.any?(&:nillable?)
     end
+
+    def nil?() = false
 
     def nonnillable
       UnionType[*types.reject { _1.is_a?(InstanceType) && _1.klass == NilClass }]

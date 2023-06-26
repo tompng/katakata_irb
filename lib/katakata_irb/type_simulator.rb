@@ -181,102 +181,32 @@ class KatakataIrb::TypeSimulator
         end
       end
       simulate_call receiver_type, :[], args_type, kwargs_type(kwargs, scope), nil
-    in :CALL
-      receiver, name, = children
-      receiver_type = simulate_evaluate(receiver, scope)
-      return KatakataIrb::Types::NIL
-      # TODO: response
-    in [:call | :vcall | :command | :command_call | :method_add_arg | :method_add_block,]
-      if (sexp in [:vcall, [:@ident, name,]]) && scope.has?(name)
-        # workaround for https://bugs.ruby-lang.org/issues/19175
-        return scope[name]
-      end
-      receiver, method, args, kwargs, block, optional_chain = retrieve_method_call sexp
-      if receiver.nil? && method == 'raise'
-        scope.terminate_with KatakataIrb::Scope::RAISE_BREAK, KatakataIrb::Types::TRUE
-        return KatakataIrb::Types::NIL
-      end
-      receiver_type = receiver ? simulate_evaluate(receiver, scope) : scope.self_type
-      evaluate_method = lambda do |scope|
-        args_type = args.map do |arg|
-          if arg.is_a? KatakataIrb::Types::Splat
-            simulate_evaluate arg.item, scope
-            nil # TODO: splat
-          else
-            simulate_evaluate arg, scope
-          end
+    in :VCALL
+      simulate_call scope.self_type, children.first, [], nil, nil
+    in :FCALL
+      name, list = children
+      evaluate_call scope.self_type, name, list, scope: scope
+    in :CALL | :QCALL
+      receiver, name, list = children
+      receiver_type = simulate_evaluate receiver, scope
+      optional_chain = type == :QCALL
+      evaluate_call receiver_type, name, list, scope: scope, optional_chain: type == :QCALL
+    in :ITER
+      call, block = children
+      receiver, method, list, optional_chain = (
+        case call.type
+        in :FCALL
+          [scope.self_type, call.children[0], call.children[1], false]
+        in :CALL | :QCALL
+          [simulate_evaluate(call.children[0], scope), call.children[1], call.children[2], type == :QCALL]
         end
-
-        if block
-          if block in [:symbol_literal, [:symbol, [:@ident, block_name,]]]
-            call_block_proc = ->(block_args, _self_type) do
-              block_receiver, *rest = block_args
-              block_receiver ? simulate_call(block_receiver || KatakataIrb::Types::OBJECT, block_name, rest, nil, nil) : KatakataIrb::Types::OBJECT
-            end
-          elsif block in [:do_block | :brace_block => type, block_var, body]
-            block_var in [:block_var, params,]
-            call_block_proc = ->(block_args, block_self_type) do
-              scope.conditional do |s|
-                if params
-                  names = extract_param_names(params)
-                else
-                  names = (1..max_numbered_params(body)).map { "_#{_1}" }
-                  params = [:params, names.map { [:@ident, _1, [0, 0]] }, nil, nil, nil, nil, nil, nil]
-                end
-                params_table = names.zip(block_args).to_h { [_1, _2 || KatakataIrb::Types::NIL] }
-                table = { **params_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil }
-                table[KatakataIrb::Scope::SELF] = block_self_type if block_self_type
-                block_scope = KatakataIrb::Scope.new s, table
-                evaluate_assign_params params, block_args, block_scope
-                block_scope.conditional { evaluate_param_defaults params, _1 } if params
-                if type == :do_block
-                  result = simulate_evaluate body, block_scope
-                else
-                  result = body.map { simulate_evaluate _1, block_scope }.last
-                end
-                block_scope.merge_jumps
-                s.update block_scope
-                nexts = block_scope[KatakataIrb::Scope::NEXT_RESULT]
-                breaks = block_scope[KatakataIrb::Scope::BREAK_RESULT]
-                if block_scope.terminated?
-                  [KatakataIrb::Types::UnionType[*nexts], breaks]
-                else
-                  [KatakataIrb::Types::UnionType[result, *nexts], breaks]
-                end
-              end
-            end
-          else
-            call_block_proc = ->(_block_args, _self_type) { KatakataIrb::Types::OBJECT }
-            simulate_evaluate block, scope
-          end
-        end
-        simulate_call receiver_type, method, args_type, kwargs_type(kwargs, scope), call_block_proc
-      end
-      if optional_chain
-        result = scope.conditional { evaluate_method.call _1 }
-        if receiver_type.nillable?
-          KatakataIrb::Types::UnionType[result, KatakataIrb::Types::NIL]
-        else
-          result
-        end
-      else
-        evaluate_method.call scope
-      end
-    in [:binary, a, Symbol => op, b]
+      )
+      evaluate_call receiver, method, list, scope: scope, block: block, optional_chain: optional_chain
+    in :OPCALL
+      a, op, b = node.children
       atype = simulate_evaluate a, scope
-      case op
-      when :'&&', :and
-        btype = scope.conditional { simulate_evaluate b, _1 }
-        KatakataIrb::Types::UnionType[btype, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
-      when :'||', :or
-        btype = scope.conditional { simulate_evaluate b, _1 }
-        KatakataIrb::Types::UnionType[atype, btype]
-      else
-        btype = simulate_evaluate b, scope
-        simulate_call atype, op, [btype], nil, nil
-      end
-    in [:unary, op, receiver]
-      simulate_call simulate_evaluate(receiver, scope), op, [], nil, nil
+      args = b ? [simulate_evaluate(b.children.first, scope)] : []
+      simulate_call atype, op, args, nil, nil
     in [:lambda, params, statements]
       params in [:paren, params] # ->{}, -> do end
       statements in [:bodystmt, statements, _unknown, _unknown, _unknown] # -> do end
@@ -291,7 +221,7 @@ class KatakataIrb::TypeSimulator
       block_scope.merge_jumps
       scope.update block_scope
       KatakataIrb::Types::ProcType.new
-    in :LVAR | :GVAR | :IVAR | :CVAR
+    in :DVAR | :LVAR | :GVAR | :IVAR | :CVAR
       children => [name]
       scope[name]
     in :LASGN | :GASGN | :IASGN | :CVASGN
@@ -567,21 +497,35 @@ class KatakataIrb::TypeSimulator
     KatakataIrb::Types::InstanceType.new Hash, K: key_type, V: value_type
   end
 
+  def evaluate_args_block(node, scope)
+    if node.nil?
+      [[], nil]
+    elsif node.type == :BLOCK_PASS
+      arg_node, block_node = node.children
+      args = evaluate_args arg_node, scope
+      block = block_node.type == :LIT ? block_node.children.first : simulate_evaluate(block_node, scope)
+      [args, block]
+    else
+      [evaluate_args(node, scope), nil]
+    end
+  end
+
   def evaluate_args(node, scope)
     case node.type
     when :LIST
-      node.children.compact.map do |value|
+      args = node.children.compact.map do |value|
         value.type == :HASH ? evaluate_hash_entries(value, scope) : simulate_evaluate(value, scope)
       end
+      [args, nil]
     when :ARGSPUSH
       args_node, arg_node = node.children
       args = evaluate_args args_node, scope
       arg = arg_node.type == :HASH ? evaluate_hash_entries(arg_node, scope) : simulate_evaluate(arg_node, scope)
-      [*args, arg]
+      [[*args, arg], nil]
     when :ARGSCAT
       args_node, splat = node.children
       args = evaluate_args args_node, scope
-      [*args, KatakataIrb::Types::Splat.new(simulate_evaluate(splat, scope))]
+      [[*args, KatakataIrb::Types::Splat.new(simulate_evaluate(splat, scope))], nil]
     end
   end
 
@@ -848,6 +792,76 @@ class KatakataIrb::TypeSimulator
     end
   end
 
+  def evaluate_call(receiver, method_name, list, scope:, block: nil, optional_chain: false)
+    evaluate_method = lambda do |receiver, scope|
+      list_args, block_arg = evaluate_args_block(list, scope)
+      block ||= block_arg
+      args = list_args.map do |elem|
+        elem.is_a?(Array) ? hash_entries_to_type(elem) : elem
+      end
+      if list_args.last.is_a?(Array)
+        args.pop
+        kwargs = list_args.last.select { _1.is_a? Symbol }
+      end
+
+      if block
+        if block.is_a?(Symbol)
+          call_block_proc = ->(block_args, _self_type) do
+            block_receiver, *rest = block_args
+            block_receiver ? simulate_call(block_receiver || KatakataIrb::Types::OBJECT, block, rest, nil, nil) : KatakataIrb::Types::OBJECT
+          end
+        elsif block&.type == :SCOPE
+          call_block_proc = ->(block_args, block_self_type) do
+            table, args, body = block.children
+            scope.conditional do |s|
+              if params
+                names = extract_param_names(params)
+              else
+                names = (1..max_numbered_params(body)).map { "_#{_1}" }
+                params = [:params, names.map { [:@ident, _1, [0, 0]] }, nil, nil, nil, nil, nil, nil]
+              end
+              params_table = names.zip(block_args).to_h { [_1, _2 || KatakataIrb::Types::NIL] }
+              table = { **params_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil }
+              table[KatakataIrb::Scope::SELF] = block_self_type if block_self_type
+              block_scope = KatakataIrb::Scope.new s, table
+              evaluate_assign_params params, block_args, block_scope
+              block_scope.conditional { evaluate_param_defaults params, _1 } if params
+              if type == :do_block
+                result = simulate_evaluate body, block_scope
+              else
+                result = body.map { simulate_evaluate _1, block_scope }.last
+              end
+              block_scope.merge_jumps
+              s.update block_scope
+              nexts = block_scope[KatakataIrb::Scope::NEXT_RESULT]
+              breaks = block_scope[KatakataIrb::Scope::BREAK_RESULT]
+              if block_scope.terminated?
+                [KatakataIrb::Types::UnionType[*nexts], breaks]
+              else
+                [KatakataIrb::Types::UnionType[result, *nexts], breaks]
+              end
+            end
+          end
+        else
+          call_block_proc = ->(_block_args, _self_type) { KatakataIrb::Types::OBJECT }
+        end
+      end
+      simulate_call receiver, method_name, args_type, kwargs_type(kwargs, scope), call_block_proc
+    end
+    if !optional_chain
+      evaluate_method.call receiver, scope
+    elsif receiver_type.nil?
+      KatakataIrb::Types::NIL
+    else
+      result = scope.conditional { evaluate_method.call receiver.nonnillable, _1 }
+      if receiver.nillable?
+        KatakataIrb::Types::UnionType[result, KatakataIrb::Types::NIL]
+      else
+        result
+      end
+    end
+  end
+
   def simulate_call(receiver, method_name, args, kwargs, block, name_match: true)
     methods = KatakataIrb::Types.rbs_methods receiver, method_name.to_sym, args, kwargs, !!block
     block_called = false
@@ -962,19 +976,6 @@ class KatakataIrb::TypeSimulator
     end
     if block in [:blockarg, [:@ident, name,]]
       scope[name] = KatakataIrb::Types::PROC
-    end
-  end
-
-  def max_numbered_params(sexp)
-    case sexp
-    in [:do_block | :brace_block | :def | :class | :module,]
-      0
-    in [:var_ref, [:@ident, name,]]
-      name.match?(/\A_[1-9]\z/) ? name[1..].to_i : 0
-    else
-      sexp.filter_map do |s|
-        max_numbered_params s if s.is_a? Array
-      end.max || 0
     end
   end
 
