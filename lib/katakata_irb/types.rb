@@ -22,7 +22,6 @@ module KatakataIrb::Types
         @rbs_builder = load_rbs_builder
       end
     end
-    rbs_builder_loader.run if @rbs_builder.nil?
   end
 
   def self.load_rbs_builder
