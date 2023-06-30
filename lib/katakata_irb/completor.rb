@@ -9,43 +9,52 @@ module KatakataIrb::Completor
   HIDDEN_METHODS = %w[Namespace TypeName] # defined by rbs, should be hidden
   singleton_class.attr_accessor :prev_analyze_result
 
+  def self.calculate_candidates(code, binding)
+    result = analyze code, binding
+    KatakataIrb::Completor.prev_analyze_result = result
+    candidates = case result
+    in [:require | :require_relative => method, name]
+      if method == :require
+        IRB::InputCompletor.retrieve_files_to_require_from_load_path
+      else
+        IRB::InputCompletor.retrieve_files_to_require_relative_from_current_dir
+      end
+    in [:call_or_const, type, name, self_call]
+      ((self_call ? type.all_methods: type.methods).map(&:to_s) - HIDDEN_METHODS) | type.constants
+    in [:const, type, name]
+      if type
+        type.constants
+      else
+        (binding.eval('Module.nesting') | [Object]).flat_map(&:constants).sort
+      end
+    in [:ivar, name, *_scope]
+      # TODO: scope
+      ivars = binding.eval('self').instance_variables rescue []
+      cvars = (binding.eval('self').class_variables rescue nil) if name == '@'
+      ivars | (cvars || [])
+    in [:cvar, name, *_scope]
+      # TODO: scope
+      binding.eval('self').class_variables rescue []
+    in [:gvar, name]
+      global_variables
+    in [:symbol, name]
+      Symbol.all_symbols.map { _1.inspect[1..] }
+    in [:call, type, name, self_call]
+      (self_call ? type.all_methods : type.methods).map(&:to_s) - HIDDEN_METHODS
+    in [:lvar_or_method, name, scope]
+      scope.self_type.all_methods.map(&:to_s) | scope.local_variables
+    else
+      []
+    end
+    [name, candidates]
+  end
+
   def self.setup
     completion_proc = ->(target, preposing = nil, postposing = nil) do
       code = "#{preposing}#{target}"
       irb_context = IRB.conf[:MAIN_CONTEXT]
       binding = irb_context.workspace.binding
-      result = analyze code, binding
-      KatakataIrb::Completor.prev_analyze_result = result
-      candidates = case result
-      in [:require | :require_relative => method, name]
-        if method == :require
-          IRB::InputCompletor.retrieve_files_to_require_from_load_path
-        else
-          IRB::InputCompletor.retrieve_files_to_require_relative_from_current_dir
-        end
-      in [:call_or_const, type, name, self_call]
-        ((self_call ? type.all_methods: type.methods).map(&:to_s) - HIDDEN_METHODS) | type.constants
-      in [:const, type, name]
-        type.constants
-      in [:ivar, name, *_scope]
-        # TODO: scope
-        ivars = binding.eval('self').instance_variables rescue []
-        cvars = (binding.eval('self').class_variables rescue nil) if name == '@'
-        ivars | (cvars || [])
-      in [:cvar, name, *_scope]
-        # TODO: scope
-        binding.eval('self').class_variables rescue []
-      in [:gvar, name]
-        global_variables
-      in [:symbol, name]
-        Symbol.all_symbols.map { _1.inspect[1..] }
-      in [:call, type, name, self_call]
-        (self_call ? type.all_methods : type.methods).map(&:to_s) - HIDDEN_METHODS
-      in [:lvar_or_method, name, scope]
-        scope.self_type.all_methods.map(&:to_s) | scope.local_variables
-      else
-        []
-      end
+      name, candidates = calculate_candidates(code, binding)
       all_symbols_pattern = /\A[ -\/:-@\[-`\{-~]*\z/
       candidates.map(&:to_s).select { !_1.match?(all_symbols_pattern) && _1.start_with?(name) }.uniq.sort.map do
         target + _1[name.size..]
@@ -85,9 +94,18 @@ module KatakataIrb::Completor
         in [:call_or_const, type, _name, _self_call]
           call_or_const_doc.call type
         in [:const, type, _name]
-          # when prev_analyze_result is const, current analyze result might be call
-          call_or_const_doc.call type
-        in [:gvar, _name]
+          if type
+            # when prev_analyze_result is const, current analyze result might be call
+            call_or_const_doc.call type
+          else
+            begin
+              nesting = IRB.CurrentContext.workspace.binding.eval('Module.nesting')
+              parent = nesting.find { _1.constants.include? name.to_sym }
+              [parent&.name, name].compact.join('::')
+            rescue
+            end
+          end
+        in [:gvar,]
           name
         in [:call, type, _name, _self_call]
           method_doc.call type
@@ -263,8 +281,7 @@ module KatakataIrb::Completor
     in [:symbol, [:@ident | :@const | :@op | :@kw,]]
       [:symbol, name] unless name.empty?
     in [:var_ref | :const_ref, [:@const,]]
-      # TODO
-      [:const, KatakataIrb::Types::SingletonType.new(Object), name]
+      [:const, nil, name]
     in [:var_ref, [:@gvar,]]
       [:gvar, name]
     in [:var_ref, [:@ivar,]]

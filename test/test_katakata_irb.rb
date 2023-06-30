@@ -48,6 +48,29 @@ class TestKatakataIrb < Minitest::Test
     assert_equal 'Complex#abs', document
   end
 
+  def completion_candidates(code, binding)
+    name, candidates = KatakataIrb::Completor.calculate_candidates(code, binding)
+    candidates.map(&:to_s).select { _1.start_with? name }.sort
+  end
+
+  def test_const_completion
+    old_context = IRB.conf[:MAIN_CONTEXT]
+    bind = eval 'class ::Encoding; binding; end'
+    assert_equal ['ASCII_8BIT'], completion_candidates('ASCII_8BI', bind)
+    assert_equal ['Encoding', 'EncodingError'], completion_candidates('Encodin', bind)
+    assert_equal ['Array'], completion_candidates('Arra', bind)
+    # TODO: `class A; class B::C; XYZ` to complete A::B::C::XYZ, A::XYZ and XYZ
+
+    IRB.conf[:MAIN_CONTEXT] = Struct.new(:workspace).new(Struct.new(:binding).new(bind))
+    KatakataIrb::Completor.prev_analyze_result = KatakataIrb::Completor.analyze 'ABC', bind
+    assert_equal 'Encoding', IRB::InputCompletor.retrieve_completion_data('Encoding', bind: bind, doc_namespace: true)
+    assert_equal 'Encoding::ASCII_8BIT', IRB::InputCompletor.retrieve_completion_data('ASCII_8BIT', bind: bind, doc_namespace: true)
+    assert_equal 'Array', IRB::InputCompletor.retrieve_completion_data('Array', bind: bind, doc_namespace: true)
+  ensure
+    IRB.conf[:MAIN_CONTEXT] = old_context
+  end
+
+
   SYNTAX_TEST_CODE_3_1_PLUS = <<~'RUBY'
     def f(*,**,&)
       f(&)
