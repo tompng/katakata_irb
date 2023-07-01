@@ -1,4 +1,3 @@
-require 'ripper'
 require 'set'
 require_relative 'types'
 require_relative 'scope'
@@ -585,88 +584,6 @@ class KatakataIrb::TypeSimulator
       end
     end
     KatakataIrb::Types::InstanceType.new(Hash, K: KatakataIrb::Types::UnionType[*keys], V: KatakataIrb::Types::UnionType[*values])
-  end
-
-  def retrieve_method_call(sexp)
-    optional = -> { _1 in [:@op, '&.',] }
-    case sexp
-    in [:fcall | :vcall, [:@ident | :@const | :@kw | :@op, method,]] # hoge
-      [nil, method, [], [], nil, false]
-    in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::' => dot, :call]
-      [receiver, :call, [], [], nil, optional[dot]]
-    in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::' => dot, method]
-      method => [:@ident | :@const | :@kw | :@op, method,] unless method == :call
-      [receiver, method, [], [], nil, optional[dot]]
-    in [:command, [:@ident | :@const | :@kw | :@op, method,], args] # hoge 1, 2
-      args, kwargs, block = retrieve_method_args args
-      [nil, method, args, kwargs, block, false]
-    in [:command_call, receiver, [:@period,] | [:@op, '&.',] | :'::' => dot, [:@ident | :@const | :@kw | :@op, method,], args] # a.hoge 1; a.hoge 1, 2;
-      args, kwargs, block = retrieve_method_args args
-      [receiver, method, args, kwargs, block, optional[dot]]
-    in [:method_add_arg, call, args]
-      receiver, method, _arg, _kwarg, _block, opt = retrieve_method_call call
-      args, kwargs, block = retrieve_method_args args
-      [receiver, method, args, kwargs, block, opt]
-    in [:method_add_block, call, block]
-      receiver, method, args, kwargs, opt = retrieve_method_call call
-      [receiver, method, args, kwargs, block, opt]
-    end
-  end
-
-  def retrieve_method_args(sexp)
-    case sexp
-    in [:mrhs_add_star, args, star]
-      args, = retrieve_method_args args
-      [[*args, KatakataIrb::Types::Splat.new(star)], [], nil]
-    in [:mrhs_new_from_args, [:args_add_star,] => args]
-      args, = retrieve_method_args args
-      [args, [], nil]
-    in [:mrhs_new_from_args, [:args_add_star,] => args, last_arg]
-      args, = retrieve_method_args args
-      [[*args, last_arg], [], nil]
-    in [:mrhs_new_from_args, args, last_arg]
-      [[*args, last_arg], [], nil]
-    in [:mrhs_new_from_args, args]
-      [args, [], nil]
-    in [:args_add_block, [:args_add_star,] => args, block_arg]
-      args, kwargs, = retrieve_method_args args
-      block_arg = [:void_stmt] if block_arg.nil? # method(*splat, &)
-      [args, kwargs, block_arg]
-    in [:args_add_block, [*args, [:bare_assoc_hash,] => kw], block_arg]
-      block_arg = [:void_stmt] if block_arg.nil? # method(**splat, &)
-      _, kwargs = retrieve_method_args kw
-      [args, kwargs, block_arg]
-    in [:args_add_block, [*args], block_arg]
-      block_arg = [:void_stmt] if block_arg.nil? # method(arg, &)
-      [args, [], block_arg]
-    in [:bare_assoc_hash, kws]
-      kwargs = []
-      kws.each do |kw|
-        if kw in [:assoc_splat, value,]
-          kwargs << KatakataIrb::Types::Splat.new(value) if value
-        elsif kw in [:assoc_new, [:@label, label,] => key, nil]
-          name = label.delete ':'
-          kwargs << [key, [:__var_ref_or_call, [name =~ /\A[A-Z]/ ? :@const : :@ident, name, [0, 0]]]]
-        elsif kw in [:assoc_new, key, value]
-          kwargs << [key, value]
-        end
-      end
-      [[], kwargs, nil]
-    in [:args_add_star, *args, [:bare_assoc_hash,] => kwargs]
-      args, = retrieve_method_args [:args_add_star, *args]
-      _, kwargs = retrieve_method_args kwargs
-      [args, kwargs, nil]
-    in [:args_add_star, pre_args, star_arg, *post_args]
-      pre_args, = retrieve_method_args pre_args if pre_args in [:args_add_star,]
-      args = star_arg ? [*pre_args, KatakataIrb::Types::Splat.new(star_arg), *post_args] : pre_args + post_args
-      [args, [], nil]
-    in [:arg_paren, args]
-      args ? retrieve_method_args(args) : [[], [], nil]
-    in [[:command | :command_call, ] => command_arg] # method(a b, c), method(a.b c, d)
-      [[command_arg], [], nil]
-    else
-      [[], [], nil]
-    end
   end
 
   def evaluate_call(receiver, method_name, list, scope:, block: nil, optional_chain: false, context: {})
