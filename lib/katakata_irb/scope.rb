@@ -97,7 +97,7 @@ module KatakataIrb
   class Scope < BaseScope
     attr_reader :parent, :jump_branches, :mergeable_changes, :level, :lvars
 
-    def self.from_binding(binding) = new(BaseScope.new(binding, binding.eval('self')))
+    def self.from_binding(binding, table = {}) = new(BaseScope.new(binding, binding.eval('self')), table)
 
     def initialize(parent, table = {}, trace_cvar: true, trace_ivar: true, trace_lvar: true, passthrough: false)
       @table = table
