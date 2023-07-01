@@ -53,9 +53,8 @@ class KatakataIrb::TypeSimulator
     result
   end
 
-  # context: case_target: nil, errinfo: nil, nil_dvar: nil
+  # Context: case_target, errinfo, nil_dvar. TODO: module_nesting(for const ref), method_name(for super type)
   def simulate_evaluate_inner(node, scope, context)
-    sexp = node
     type = node.type
     children = node.children
     case type
@@ -161,27 +160,19 @@ class KatakataIrb::TypeSimulator
       elem_type = KatakataIrb::Types::UnionType[*types]
       KatakataIrb::Types::InstanceType.new(Array, Elem: elem_type)
     in :CONST
-      scope[children.first]
+      scope[children.first.to_s]
     in :COLON2
-      receiver, name = children
-      r = simulate_evaluate receiver, scope, context
-      r.is_a?(KatakataIrb::Types::SingletonType) ? KatakataIrb::BaseScope.type_of { r.module_or_class.const_get name } : KatakataIrb::Types::NIL
+      receiver_node, name = children
+      if receiver_node
+        receiver = simulate_evaluate receiver_node, scope, context
+        receiver.is_a?(KatakataIrb::Types::SingletonType) ? KatakataIrb::BaseScope.type_of { receiver.module_or_class.const_get name } : KatakataIrb::Types::NIL
+      else
+        scope[name.to_s] || KatakataIrb::Types::NIL
+      end
     in :COLON3
       KatakataIrb::BaseScope.type_of { Object.const_get children.first }
     in :SELF
       scope.self_type
-    in [:aref, receiver, args]
-      # receiver_type = simulate_evaluate receiver, scope, context if receiver
-      # args, kwargs, _block = retrieve_method_args args
-      # args_type = args.map do |arg|
-      #   if arg.is_a? KatakataIrb::Types::Splat
-      #     simulate_evaluate arg.item, scope, context
-      #     nil # TODO: splat
-      #   else
-      #     simulate_evaluate arg, scope, context
-      #   end
-      # end
-      # simulate_call receiver_type, :[], args_type, kwargs_type(kwargs, scope), nil
     in :VCALL
       simulate_call scope.self_type, children.first, [], nil, nil
     in :FCALL
@@ -230,45 +221,14 @@ class KatakataIrb::TypeSimulator
     in :LASGN | :GASGN | :IASGN | :CVASGN | :DASGN
       children => [name, value]
       scope[name] = simulate_evaluate(value, scope, context)
-    in [:assign, [:aref_field, receiver, key], value]
-      # simulate_evaluate receiver, scope, context
-      # args, kwargs, _block = retrieve_method_args key
-      # args.each do |arg|
-      #   item = arg.is_a?(KatakataIrb::Types::Splat) ? arg.item : arg
-      #   simulate_evaluate item, scope, context
-      # end
-      # kwargs_type kwargs, scope
-      # simulate_evaluate value, scope, context
-    in [:assign, [:field, receiver, period, [:@ident,]], value]
-      # simulate_evaluate receiver, scope, context
-      # if period in [:@op, '&.',]
-      #   scope.conditional { simulate_evaluate value, scope, context }
-      # else
-      #   simulate_evaluate value, scope, context
-      # end
-    in [:opassign, target, [:@op, op,], value]
-      # op = op.to_s.delete('=').to_sym
-      # if target in [:var_field, *field]
-      #   receiver = [:var_ref, *field]
-      # elsif target in [:field, *field]
-      #   receiver = [:call, *field]
-      # elsif target in [:aref_field, *field]
-      #   receiver = [:aref, *field]
-      # else
-      #   receiver = target
-      # end
-      # simulate_evaluate [:assign, target, [:binary, receiver, op, value]], scope, context
-    in [:assign, target, value]
-      # simulate_evaluate target, scope, context
-      # simulate_evaluate value, scope, context
-    in [:massign, targets, value]
-      # targets in [:mlhs, *targets] # (a,b) = value
-      # rhs = simulate_evaluate value, scope, context
-      # evaluate_massign targets, rhs, scope
-      # rhs
-    in [:mrhs_new_from_args | :mrhs_add_star,]
-      # values, = evaluate_mrhs sexp, scope
-      # KatakataIrb::Types::InstanceType.new Array, Elem: KatakataIrb::Types::UnionType[*values]
+    in :ATTRASGN
+      children => [receiver, assign_method, value]
+      simulate_evaluate receiver, scope, context
+      simulate_evaluate value, scope, context
+    in :MASGN
+      children => [value_node, pre, post]
+      value = simulate_evaluate value_node, scope, context
+      evaluate_massign node, value, scope: scope, context: context
     in :IF | :UNLESS
       cond, val1, val2 = children
       simulate_evaluate cond, scope, context
@@ -287,24 +247,21 @@ class KatakataIrb::TypeSimulator
     in :BREAK | :NEXT | :RETURN
       value = children.first
       internal_key = type == :BREAK ? KatakataIrb::Scope::BREAK_RESULT : type == :NEXT ? KatakataIrb::Scope::NEXT_RESULT : KatakataIrb::Scope::RETURN_RESULT
-      if value
-        values, kw = evaluate_mrhs value, scope
-        values << kw if kw
+      if value&.type == :LIST
+        values = value.children.compact.map { simulate_evaluate _1, scope, context }
         jump_value = values.size == 1 ? values.first : KatakataIrb::Types::InstanceType.new(Array, Elem: KatakataIrb::Types::UnionType[*values])
       else
         jump_value = KatakataIrb::Types::NIL
       end
       scope.terminate_with internal_key, jump_value
       KatakataIrb::Types::NIL
-    in [:yield, args]
-      # evaluate_mrhs args, scope
-      # KatakataIrb::Types::OBJECT
-    in [:yield0]
-      # KatakataIrb::Types::OBJECT
+    in :YIELD
+      simulate_evaluate children.first, scope, context
+      KatakataIrb::Types::OBJECT
     in :REDO | :RETRY
       scope.terminate
-    in [:zsuper]
-      # KatakataIrb::Types::OBJECT
+    in :ZSUPER
+      KatakataIrb::Types::OBJECT
     in [:super, args]
       # args, kwargs, _block = retrieve_method_args args
       # args.each do |arg|
@@ -336,7 +293,6 @@ class KatakataIrb::TypeSimulator
       end
       error_types << KatakataIrb::Types::InstanceType.new(StandardError) if error_types.empty?
       error_type = KatakataIrb::Types::UnionType[*error_types]
-      # TODO: pass error_type to statement
       if else_statement
         scope.run_branches(
           ->{ simulate_evaluate statement, _1, { **context, errinfo: error_type } },
@@ -346,33 +302,36 @@ class KatakataIrb::TypeSimulator
         simulate_evaluate statement, scope, { **context, errinfo: error_type }
       end
       KatakataIrb::Types::NIL
-    in [:module, module_stmt, body_stmt]
-      # module_types = simulate_evaluate(module_stmt, scope, context).types.grep(KatakataIrb::Types::SingletonType)
-      # module_types << KatakataIrb::Types::MODULE if module_types.empty?
-      # module_scope = KatakataIrb::Scope.new(scope, { KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*module_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
-      # result = simulate_evaluate body_stmt, module_scope, context
-      # scope.update module_scope
-      # result
-    in [:sclass, klass_stmt, body_stmt]
-      # klass_types = simulate_evaluate(klass_stmt, scope, context).types.filter_map do |type|
-      #   KatakataIrb::Types::SingletonType.new type.klass if type.is_a? KatakataIrb::Types::InstanceType
-      # end
-      # klass_types = [KatakataIrb::Types::CLASS] if klass_types.empty?
-      # sclass_scope = KatakataIrb::Scope.new(scope, { KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*klass_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
-      # result = simulate_evaluate body_stmt, sclass_scope, context
-      # scope.update sclass_scope
-      # result
-    in [:class, klass_stmt, superclass_stmt, body_stmt]
-      # klass_types = simulate_evaluate(klass_stmt, scope, context).types
-      # klass_types += simulate_evaluate(superclass_stmt, scope, context).types if superclass_stmt
-      # klass_types = klass_types.select do |type|
-      #   type.is_a?(KatakataIrb::Types::SingletonType) && type.module_or_class.is_a?(Class)
-      # end
-      # klass_types << KatakataIrb::Types::CLASS if klass_types.empty?
-      # klass_scope = KatakataIrb::Scope.new(scope, { KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*klass_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
-      # result = simulate_evaluate body_stmt, klass_scope, context
-      # scope.update klass_scope
-      # result
+    in :MODULE
+      children => [module_stmt, body_stmt]
+      module_types = simulate_evaluate(module_stmt, scope, context).types.grep(KatakataIrb::Types::SingletonType)
+      module_types << KatakataIrb::Types::MODULE if module_types.empty?
+      module_scope = KatakataIrb::Scope.new(scope, { KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*module_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
+      result = simulate_evaluate body_stmt, module_scope, context
+      scope.update module_scope
+      result
+    in :SCLASS
+      children => [klass_stmt, body_stmt]
+      klass_types = simulate_evaluate(klass_stmt, scope, context).types.filter_map do |type|
+        KatakataIrb::Types::SingletonType.new type.klass if type.is_a? KatakataIrb::Types::InstanceType
+      end
+      klass_types = [KatakataIrb::Types::CLASS] if klass_types.empty?
+      sclass_scope = KatakataIrb::Scope.new(scope, { KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*klass_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
+      result = simulate_evaluate body_stmt, sclass_scope, context
+      scope.update sclass_scope
+      result
+    in :CLASS
+      children => [klass_stmt, superclass_stmt, body_stmt]
+      klass_types = simulate_evaluate(klass_stmt, scope, context).types
+      klass_types += simulate_evaluate(superclass_stmt, scope, context).types if superclass_stmt
+      klass_types = klass_types.select do |type|
+        type.is_a?(KatakataIrb::Types::SingletonType) && type.module_or_class.is_a?(Class)
+      end
+      klass_types << KatakataIrb::Types::CLASS if klass_types.empty?
+      klass_scope = KatakataIrb::Scope.new(scope, { KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*klass_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
+      result = simulate_evaluate body_stmt, klass_scope, context
+      scope.update klass_scope
+      result
     in :FOR
       list_node, statement = children
       list_type = simulate_evaluate list_node, scope, context
@@ -421,9 +380,10 @@ class KatakataIrb::TypeSimulator
       # pattern_scope.merge_jumps
       # scope.update pattern_scope
       # KatakataIrb::Types::UnionType[*results]
-    in [:case, target_exp, match_exp]
-      # target = target_exp ? simulate_evaluate(target_exp, scope, context) : KatakataIrb::Types::NIL
-      # simulate_evaluate match_exp, scope, { **context, case_target: target }
+    in :CASE
+      children => [target_node, match_node]
+      target = target_exp ? simulate_evaluate(target_node, scope, context) : KatakataIrb::Types::NIL
+      simulate_evaluate match_node, scope, { **context, case_target: target }
     in :DOT2 | :DOT3
       range_beg, range_end = children
       beg_type = simulate_evaluate range_beg, scope, context
@@ -486,16 +446,16 @@ class KatakataIrb::TypeSimulator
       args = node.children.compact.map do |value|
         value.type == :HASH ? evaluate_hash_entries(value, scope, context) : simulate_evaluate(value, scope, context)
       end
-      [args, nil]
+      args
     when :ARGSPUSH
       args_node, arg_node = node.children
       args = evaluate_args args_node, scope, context
       arg = arg_node.type == :HASH ? evaluate_hash_entries(arg_node, scope, context) : simulate_evaluate(arg_node, scope, context)
-      [[*args, arg], nil]
+      [*args, arg]
     when :ARGSCAT
       args_node, splat = node.children
       args = evaluate_args args_node, scope, context
-      [[*args, KatakataIrb::Types::Splat.new(simulate_evaluate(splat, scope, context))], nil]
+      [*args, KatakataIrb::Types::Splat.new(simulate_evaluate(splat, scope, context))]
     end
   end
 
@@ -569,41 +529,16 @@ class KatakataIrb::TypeSimulator
     end
   end
 
-  def evaluate_mrhs(sexp, scope, context)
-    args, kwargs, = retrieve_method_args sexp
-    values = args.filter_map do |t|
-      if t.is_a? KatakataIrb::Types::Splat
-        simulate_evaluate t.item, scope, context
-        # TODO
-        nil
-      else
-        simulate_evaluate t, scope, context
-      end
-    end
-    unless kwargs.empty?
-      kvs = kwargs.map do |t|
-        case t
-        in KatakataIrb::Types::Splat
-          simulate_evaluate t.item, scope, context
-          # TODO
-          [KatakataIrb::Types::SYMBOL, KatakataIrb::Types::OBJECT]
-        in [key, value]
-          key_type = (key in [:@label,]) ? KatakataIrb::Types::SYMBOL : simulate_evaluate(key, scope, context)
-          [key_type, simulate_evaluate(value, scope, context)]
-        end
-      end
-      key_type = KatakataIrb::Types::UnionType[*kvs.map(&:first)]
-      value_type = KatakataIrb::Types::UnionType[*kvs.map(&:last)]
-      kw = KatakataIrb::Types::InstanceType.new(Hash, K: key_type, V: value_type)
-    end
-    [values, kw]
-  end
-
   def sized_splat(value, method, size)
     array_elem, non_array = partition_to_array value, method
     values = [KatakataIrb::Types::UnionType[*array_elem, *non_array]]
     values += [array_elem] * (size - 1) if array_elem && size >= 1
     values
+  end
+
+  def to_array_item(value, method)
+    array_elem, non_array = partition_to_array value, method
+    KatakataIrb::Types::UnionType[*array_elem, *non_array]
   end
 
   def partition_to_array(value, method)
@@ -622,38 +557,31 @@ class KatakataIrb::TypeSimulator
     [array_elem, non_array]
   end
 
-  def evaluate_massign(sexp, values, scope)
-    values = sized_splat values, :to_ary, sexp.size unless values.is_a? Array
-    rest_index = sexp.find_index { _1 in [:rest_param, ]}
-    if rest_index
-      pre = rest_index ? sexp[0...rest_index] : sexp
-      post = rest_index ? sexp[rest_index + 1..] : []
-      sexp[rest_index] in [:rest_param, rest_field]
-      rest_values = values[pre.size...values.size - post.size] || []
-      rest_type = KatakataIrb::Types::InstanceType.new Array, Elem: KatakataIrb::Types::UnionType[*rest_values]
-      pairs = pre.zip(values.first(pre.size)) + [[rest_field, rest_type]] + post.zip(values.last(post.size))
-    else
-      pairs = sexp.zip values
-    end
-    pairs.each do |field, value|
-      case field
-      in [:@ident, name,]
-        # block arg mlhs
-        scope[name] = value || KatakataIrb::Types::OBJECT
-      in [:var_field, [:@gvar | :@ivar | :@cvar | :@ident | :@const, name,]]
-        # massign
-        scope[name] = value || KatakataIrb::Types::OBJECT
-      in [:mlhs, *mlhs]
-        evaluate_massign mlhs, value || [], scope
-      in [:field, receiver,]
-        # (a=x).b, c = value
-        simulate_evaluate receiver, scope, context
-      in [:aref_field, *field]
-        # (a=x)[i=y, j=z], b = value
-        simulate_evaluate [:aref, *field], scope, context
-      in nil
-        # a, *, b = value
+  def evaluate_massign(target, value, scope:, context:)
+    case target.type
+    in :ATTRASGN
+      target.children => [receiver, _method, list]
+      simulate_evaluate receiver, scope, context
+      if list
+        list.children.compact.each { simulate_evaluate _1, scope, context }
       end
+    in :POSTARG
+      target.children => [splat, rest]
+      array = KatakataIrb::Types::InstanceType.new Array, Elem: value
+      evaluate_massign splat, array, scope: scope, context: context
+      evaluate_massign rest, value, scope: scope, context: context
+    in :LASGN | :GASGN | :IASGN | :CVASGN | :DASGN
+      target.children => [name, nil]
+      scope[name] = value
+    in :LIST
+      target.children.compact.each do
+        evaluate_massign _1, value, scope: scope, context: context
+      end
+    in :MASGN
+      elem = to_array_item value, :to_ary
+      target.children => [_value, pre, post]
+      evaluate_massign pre, elem, scope: scope, context: context if pre
+      evaluate_massign post, elem, scope: scope, context: context if post
     end
   end
 
@@ -954,7 +882,7 @@ class KatakataIrb::TypeSimulator
       return scope
     end
     scope = KatakataIrb::Scope.from_binding(binding)
-    new(dig_targets).simulate_evaluate parents[0], scope, context
+    new(dig_targets).simulate_evaluate parents[0], scope, {}
     scope
   end
 
