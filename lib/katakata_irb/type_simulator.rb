@@ -71,45 +71,34 @@ class KatakataIrb::TypeSimulator
       table, args, statement = children
       table = table.compact
       new_scope = KatakataIrb::Scope.new(scope, table.to_h { [_1, nil] })
-      simulate_evaluate args.children[1], new_scope, context if args
+      # TODO: method params
+      simulate_evaluate args.children[1], new_scope, context if args && args.children[1]
       result = simulate_evaluate statement, new_scope, context
       scope.update new_scope
       result
     in :ERRINFO
       context[:errinfo] || KatakataIrb::Types::NIL
-    in [:def | :defs,]
-      # sexp in [:def, _method_name_exp, params, body_stmt]
-      # sexp in [:defs, receiver_exp, _dot_exp, _method_name_exp, params, body_stmt]
-      # if receiver_exp
-      #   receiver_exp in [:paren, receiver_exp]
-      #   self_type = simulate_evaluate receiver_exp, scope, context
-      # else
-      #   current_self_types = scope.self_type.types
-      #   self_types = current_self_types.map do |type|
-      #     if type.is_a?(KatakataIrb::Types::SingletonType) && type.module_or_class.is_a?(Class)
-      #       KatakataIrb::Types::InstanceType.new type.module_or_class
-      #     else
-      #       type
-      #     end
-      #   end
-      #   self_type = KatakataIrb::Types::UnionType[*self_types]
-      # end
-      # if @dig_targets.dig? sexp
-      #   params in [:paren, params]
-      #   params ||= [:params, nil, nil, nil, nil, nil, nil, nil] # params might be nil in ruby 3.0
-      #   params_table = extract_param_names(params).to_h { [_1, KatakataIrb::Types::NIL] }
-      #   method_scope = KatakataIrb::Scope.new(
-      #     scope,
-      #     { **params_table, KatakataIrb::Scope::SELF => self_type, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil },
-      #     trace_lvar: false
-      #   )
-      #   evaluate_assign_params params, [], method_scope
-      #   method_scope.conditional { evaluate_param_defaults params, _1 }
-      #   simulate_evaluate body_stmt, method_scope, context
-      #   method_scope.merge_jumps
-      #   scope.update method_scope
-      # end
-      # KatakataIrb::Types::SYMBOL
+    in :DEFN | :DEFS
+      type == :DEFN ? (children => [_method_name, statement]) : (children => [receiver, _method_name, statement])
+      if receiver
+        self_type = simulate_evaluate receiver, scope, context
+      end
+      if @dig_targets.dig? statement
+        unless receiver
+          self_type = scope.self_type
+          klass_types, other_types = self_type.types.partition { _1.is_a?(KatakataIrb::Types::SingletonType) }
+          instance_types = klass_types.filter_map { KatakataIrb::InstanceType.new _1.module_or_class if _1.module_or_class.is_a? Class }
+          self_type = KatakataIrb::Typs::UnionType[*instance_types, *other_types]
+        end
+        method_scope = KatakataIrb::Scope.new(
+          scope,
+          { KatakataIrb::Scope::SELF => self_type, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil },
+          trace_lvar: false
+        )
+        method_scope.conditional { simulate_evaluate statement, _1, context }
+        scope.update method_scope
+      end
+      KatakataIrb::Types::SYMBOL
     in :NIL
       KatakataIrb::Types::NIL
     in :TRUE
@@ -199,20 +188,10 @@ class KatakataIrb::TypeSimulator
       atype = simulate_evaluate a, scope, context
       args = b ? [simulate_evaluate(b.children.first, scope, context)] : []
       simulate_call atype, op, args, nil, nil
-    in [:lambda, params, statements]
-      # params in [:paren, params] # ->{}, -> do end
-      # statements in [:bodystmt, statements, _unknown, _unknown, _unknown] # -> do end
-      # params in [:paren, params]
-      # params_table = extract_param_names(params).to_h { [_1, KatakataIrb::Types::NIL] }
-      # block_scope = KatakataIrb::Scope.new scope, { **params_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }
-      # block_scope.conditional do |s|
-      #   evaluate_assign_params params, [], s
-      #   s.conditional { evaluate_param_defaults params, _1 }
-      #   statements.each { simulate_evaluate _1, s, context }
-      # end
-      # block_scope.merge_jumps
-      # scope.update block_scope
-      # KatakataIrb::Types::ProcType.new
+    in :LAMBDA
+      block_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }
+      block_scope.conditional { simulate_evaluate children.first, _1, context }
+      KatakataIrb::Types::ProcType.new
     in :DVAR
       children => [name]
       (name ? scope[name] : context[:nil_dvar]) || KatakataIrb::Types::NIL
