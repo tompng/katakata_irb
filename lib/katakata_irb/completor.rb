@@ -150,7 +150,7 @@ module KatakataIrb::Completor
     last_opens = KatakataIrb::NestingParser.open_tokens(tokens)
     closings = last_opens.map do |t|
       case t.tok
-      when /\A%.[<>]\z/
+      when /\A%.?[<>]\z/
         $/ + '>'
       when '{', '#{', /\A%.?[{}]\z/
         $/ + '}'
