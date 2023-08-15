@@ -2,6 +2,7 @@ require 'ripper'
 require 'set'
 require_relative 'types'
 require_relative 'scope'
+require 'yarp'
 
 class KatakataIrb::TypeSimulator
   class DigTarget
@@ -47,8 +48,14 @@ class KatakataIrb::TypeSimulator
     to_r: KatakataIrb::Types::RATIONAL
   }
 
-  def initialize(dig_targets)
+  def initialize(dig_targets, code)
     @dig_targets = dig_targets
+    @code = code
+  end
+
+  def node_source(node)
+    # https://github.com/ruby/yarp/issues/1133
+    @code.byteslice node.location
   end
 
   def simulate_evaluate(sexp, scope, case_target: nil)
@@ -57,11 +64,17 @@ class KatakataIrb::TypeSimulator
     result
   end
 
-  def simulate_evaluate_inner(sexp, scope, case_target: nil)
-    case sexp
-    in [:program, statements]
-      statements.map { simulate_evaluate _1, scope }.last
-    in [:def | :defs,]
+  def simulate_evaluate_inner(node, scope, case_target: nil)
+    case node
+    when YARP::ProgramNode
+      simulate_evaluate node.statements, scope
+    when YARP::StatementsNode
+      if node.body.empty?
+        KatakataIrb::NIL
+      else
+        node.body.map { simulate_evaluate _1, scope }.last
+      end
+    when YARP::DefNode
       sexp in [:def, _method_name_exp, params, body_stmt]
       sexp in [:defs, receiver_exp, _dot_exp, _method_name_exp, params, body_stmt]
       if receiver_exp
@@ -94,86 +107,58 @@ class KatakataIrb::TypeSimulator
         scope.update method_scope
       end
       KatakataIrb::Types::SYMBOL
-    in [:@int,]
+    when YARP::IntegerNode
       KatakataIrb::Types::INTEGER
-    in [:@float,]
+    when YARP::FloatNode
       KatakataIrb::Types::FLOAT
-    in [:@rational,]
+    when YARP::RationalNode
       KatakataIrb::Types::RATIONAL
-    in [:@imaginary,]
+    when YARP::ImaginaryNode
       KatakataIrb::Types::COMPLEX
-    in [:@tstring_content,]
+    when YARP::StringNode
       KatakataIrb::Types::STRING
-    in [:symbol_literal,]
-      KatakataIrb::Types::SYMBOL
-    in [:dyna_symbol, [:string_content, *statements]]
-      statements.each { simulate_evaluate _1, scope }
-      KatakataIrb::Types::SYMBOL
-    in [:@CHAR,]
-      KatakataIrb::Types::STRING
-    in [:@backref,]
+    when YARP::XStringNode
       KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
-    in [:string_literal, [:string_content, *statements]]
-      statements.each { simulate_evaluate _1, scope }
-      KatakataIrb::Types::STRING
-    in [:xstring_literal, statements]
-      statements.each { simulate_evaluate _1, scope }
-      KatakataIrb::Types::STRING
-    in [:string_embexpr, statements]
-      statements.each { simulate_evaluate _1, scope }
-      KatakataIrb::Types::STRING
-    in [:string_dvar,]
-      KatakataIrb::Types::STRING
-    in [:regexp_literal, statements, _regexp_end]
-      statements.each { simulate_evaluate _1, scope }
+    when YARP::SymbolNode
+      KatakataIrb::Types::SYMBOL
+    when YARP::RegularExpressionNode
       KatakataIrb::Types::REGEXP
-    in [:array, [:args_add_star,] => star]
-      args, kwargs = retrieve_method_args star
-      types = args.flat_map do |elem|
-        if elem.is_a? KatakataIrb::Types::Splat
-          splat = simulate_evaluate elem.item, scope
+    when YARP::InterpolatedStringNode
+      node.parts.each { simulate_evaluate _1, scope }
+      KatakataIrb::Types::STRING
+    when YARP::InterpolatedXStringNode
+      node.parts.each { simulate_evaluate _1, scope }
+      KatakataIrb::Types::STRING
+    when YARP::InterpolatedSymbolNode
+      node.parts.each { simulate_evaluate _1, scope }
+      KatakataIrb::Types::SYMBOL
+    when YARP::InterpolatedRegularExpressionNode
+      node.parts.each { simulate_evaluate _1, scope }
+      KatakataIrb::Types::STRING
+    when YARP::EmbeddedStatementsNode
+      node.statements ? simulate_evaluate(node.statements, scope) : KatakataIrb::Types::NIL
+      KatakataIrb::Types::STRING
+    when YARP::ArrayNode
+      types = node.elements.map do |elem|
+        if elem.is_a? YARP::SplatNode
+          splat = simulate_evaluate elem.expression, scope
           array_elem, non_array = partition_to_array splat.nonnillable, :to_a
           KatakataIrb::Types::UnionType[*array_elem, *non_array]
         else
           simulate_evaluate elem, scope
         end
       end
-      types << kwargs_type(kwargs, scope) if kwargs && kwargs.any?
       KatakataIrb::Types::InstanceType.new Array, Elem: KatakataIrb::Types::UnionType[*types]
-    in [:array, statements]
-      if statements.nil? || statements.empty?
-        KatakataIrb::Types::ARRAY
-      elsif statements.all? { _1 in [Symbol,] }
-        # normal array
-        elem = statements ? KatakataIrb::Types::UnionType[*statements.map { simulate_evaluate _1, scope }] : KatakataIrb::Types::NIL
-        KatakataIrb::Types::InstanceType.new Array, Elem: elem
-      else
-        # %I[] or %W[]
-        statements.each do |sub_statements|
-          sub_statements.each { simulate_evaluate _1, scope }
-        end
-        # TODO: use AST because Ripper.sexp('%I[a]') == Ripper.sexp('%W[a]')
-        elem = KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::SYMBOL]
-        KatakataIrb::Types::InstanceType.new Array, Elem: elem
-      end
-    in [:bare_assoc_hash, args]
-      simulate_evaluate [:hash, [:assoclist_from_args, args]], scope
-    in [:hash, [:assoclist_from_args, args]]
+    when YARP::HashNode
       keys = []
       values = []
-      args.each do |arg|
-        case arg
-        in [:assoc_new, key, value]
-          if key in [:@label, label, pos]
-            keys << KatakataIrb::Types::SYMBOL
-            name = label.delete ':'
-            value ||= [:__var_ref_or_call, [name =~ /\A[A-Z]/ ? :@const : :@ident, name, pos]]
-          else
-            keys << simulate_evaluate(key, scope)
-          end
-          values << simulate_evaluate(value, scope)
-        in [:assoc_splat, value]
-          hash = simulate_evaluate value, scope
+      node.elements.each do |assoc|
+        case assoc.is_a?
+        when YARP::AssocNode
+          keys << simulate_evaluate(assoc.key, scope)
+          values << simulate_evaluate(assoc.value, scope)
+        when YARP::AssocSplatNode
+          hash = simulate_evaluate assoc.value, scope
           unless hash.is_a?(KatakataIrb::Types::InstanceType) && hash.klass == Hash
             hash = simulate_call hash, :to_hash, [], nil, nil
           end
@@ -183,58 +168,39 @@ class KatakataIrb::TypeSimulator
           end
         end
       end
-      KatakataIrb::Types::InstanceType.new Hash, K: KatakataIrb::Types::UnionType[*keys], V: KatakataIrb::Types::UnionType[*values]
-    in [:hash, nil]
-      KatakataIrb::Types::InstanceType.new Hash
-    in [:paren, [Symbol,] | false => statement]
-      # workaround for `p ()` and `p (foo)`
-      simulate_evaluate statement, scope if statement
-    in [:paren | :ensure | :else, statements]
-      statements.map { simulate_evaluate _1, scope }.last
-    in [:const_path_ref, receiver, [:@const, name,]]
-      r = simulate_evaluate receiver, scope
-      r.is_a?(KatakataIrb::Types::SingletonType) ? KatakataIrb::BaseScope.type_of { r.module_or_class.const_get name } : KatakataIrb::Types::NIL
-    in [:__var_ref_or_call, [type, name, pos]]
-      sexp = scope.has?(name) ? [:var_ref, [type, name, pos]] : [:vcall, [:@ident, name, pos]]
-      simulate_evaluate sexp, scope
-    in [:var_ref, [:@kw, name,]]
-      case name
-      in 'self'
-        scope.self_type
-      in 'true'
-        KatakataIrb::Types::TRUE
-      in 'false'
-        KatakataIrb::Types::FALSE
-      in 'nil'
-        KatakataIrb::Types::NIL
-      in '__FILE__'
+      if keys.empty? && values.empty?
+        KatakataIrb::Types::InstanceType.new Hash
+      else
+        KatakataIrb::Types::InstanceType.new Hash, K: KatakataIrb::Types::UnionType[*keys], V: KatakataIrb::Types::UnionType[*values]
+      end
+    when YARP::ParenthesesNode
+      node.statements ? simulate_evaluate(node.statements, scope) : KatakataIrb::Types::NIL
+    when YARP::ConstantPathNode
+      name = node_source node.child
+      return KatakataIrb::BaseScope.type_of { Object.const_get name } if node.parent.nil?
+      receiver = simulate_evaluate node.parent, scope
+      receiver.is_a?(KatakataIrb::Types::SingletonType) ? KatakataIrb::BaseScope.type_of { receiver.module_or_class.const_get name } : KatakataIrb::Types::NIL
+    when YARP::SelfNode
+      scope.self_type
+    when YARP::TrueNode
+      KatakataIrb::Types::TRUE
+    when YARP::FalseNode
+      KatakataIrb::Types::FALSE
+    when YARP::NilNode
+      KatakataIrb::Types::NIL
+    when YARP::SourceFileNode
         KatakataIrb::Types::STRING
-      in '__LINE__'
+    when YARP::SourceLineNode
         KatakataIrb::Types::INTEGER
-      in '__ENCODING__'
-        KatakataIrb::Types::InstanceType.new Encoding
-      end
-    in [:var_ref, [:@const | :@ivar | :@cvar | :@gvar | :@ident, name,]]
-      scope[name] || KatakataIrb::Types::NIL
-    in [:const_ref, [:@const, name,]]
-      scope[name] || KatakataIrb::Types::NIL
-    in [:aref, receiver, args]
-      receiver_type = simulate_evaluate receiver, scope if receiver
-      args, kwargs, _block = retrieve_method_args args
-      args_type = args.map do |arg|
-        if arg.is_a? KatakataIrb::Types::Splat
-          simulate_evaluate arg.item, scope
-          nil # TODO: splat
-        else
-          simulate_evaluate arg, scope
-        end
-      end
-      simulate_call receiver_type, :[], args_type, kwargs_type(kwargs, scope), nil
-    in [:call | :vcall | :command | :command_call | :method_add_arg | :method_add_block,]
-      if (sexp in [:vcall, [:@ident, name,]]) && scope.has?(name)
-        # workaround for https://bugs.ruby-lang.org/issues/19175
-        return scope[name]
-      end
+    when YARP::SourceEncodingNode
+      KatakataIrb::Types::InstanceType.new Encoding
+    when YARP::LocalVariableReadNode
+      scope[node.constant_id] || KatakataIrb::Types::NIL
+    when YARP::ConstantReadNode, YARP::GlobalVariableReadNode, YARP::InstanceVariableReadNode, YARP::ClassVariableReadNode
+      scope[node_source(node)] || KatakataIrb::Types::NIL
+    when YARP::CallNode
+      return nil # NOT IMPLEMENTED
+
       receiver, method, args, kwargs, block, optional_chain = retrieve_method_call sexp
       if receiver.nil? && method == 'raise'
         scope.terminate_with KatakataIrb::Scope::RAISE_BREAK, KatakataIrb::Types::TRUE
@@ -306,22 +272,15 @@ class KatakataIrb::TypeSimulator
       else
         evaluate_method.call scope
       end
-    in [:binary, a, Symbol => op, b]
-      atype = simulate_evaluate a, scope
-      case op
-      when :'&&', :and
-        btype = scope.conditional { simulate_evaluate b, _1 }
-        KatakataIrb::Types::UnionType[btype, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
-      when :'||', :or
-        btype = scope.conditional { simulate_evaluate b, _1 }
-        KatakataIrb::Types::UnionType[atype, btype]
-      else
-        btype = simulate_evaluate b, scope
-        simulate_call atype, op, [btype], nil, nil
-      end
-    in [:unary, op, receiver]
-      simulate_call simulate_evaluate(receiver, scope), op, [], nil, nil
-    in [:lambda, params, statements]
+    when YARP::AndNode
+      simulate_evaluate node.left, scope
+      right = scope.conditional { simulate_evaluate node.right, _1 }
+      KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
+    when YARP::OrNode
+      left = simulate_evaluate node.left, scope
+      right = scope.conditional { simulate_evaluate node.right, _1 }
+      KatakataIrb::Types::UnionType[left, right]
+    when %[:lambda, params, statements]
       params in [:paren, params] # ->{}, -> do end
       statements in [:bodystmt, statements, _unknown, _unknown, _unknown] # -> do end
       params in [:paren, params]
@@ -335,11 +294,11 @@ class KatakataIrb::TypeSimulator
       block_scope.merge_jumps
       scope.update block_scope
       KatakataIrb::Types::ProcType.new
-    in [:assign, [:var_field, [:@gvar | :@ivar | :@cvar | :@ident | :@const, name,]], value]
+    when %[:assign, [:var_field, [:@gvar | :@ivar | :@cvar | :@ident | :@const, name,]], value]
       res = simulate_evaluate value, scope
       scope[name] = res
       res
-    in [:assign, [:aref_field, receiver, key], value]
+    when %[:assign, [:aref_field, receiver, key], value]
       simulate_evaluate receiver, scope
       args, kwargs, _block = retrieve_method_args key
       args.each do |arg|
@@ -348,53 +307,41 @@ class KatakataIrb::TypeSimulator
       end
       kwargs_type kwargs, scope
       simulate_evaluate value, scope
-    in [:assign, [:field, receiver, period, [:@ident,]], value]
+    when %[:assign, [:field, receiver, period, [:@ident,]], value]
       simulate_evaluate receiver, scope
       if period in [:@op, '&.',]
         scope.conditional { simulate_evaluate value, scope }
       else
         simulate_evaluate value, scope
       end
-    in [:opassign, target, [:@op, op,], value]
-      op = op.to_s.delete('=').to_sym
-      if target in [:var_field, *field]
-        receiver = [:var_ref, *field]
-      elsif target in [:field, *field]
-        receiver = [:call, *field]
-      elsif target in [:aref_field, *field]
-        receiver = [:aref, *field]
-      else
-        receiver = target
-      end
-      simulate_evaluate [:assign, target, [:binary, receiver, op, value]], scope
-    in [:assign, target, value]
+    when %[:assign, target, value]
       simulate_evaluate target, scope
       simulate_evaluate value, scope
-    in [:massign, targets, value]
+    when %[:massign, targets, value]
       targets in [:mlhs, *targets] # (a,b) = value
       rhs = simulate_evaluate value, scope
       evaluate_massign targets, rhs, scope
       rhs
-    in [:mrhs_new_from_args | :mrhs_add_star,]
+    when %[:mrhs_new_from_args | :mrhs_add_star,]
       values, = evaluate_mrhs sexp, scope
       KatakataIrb::Types::InstanceType.new Array, Elem: KatakataIrb::Types::UnionType[*values]
-    in [:ifop, cond, tval, fval]
+    when %[:ifop, cond, tval, fval]
       simulate_evaluate cond, scope
       KatakataIrb::Types::UnionType[*scope.run_branches(
         -> { simulate_evaluate tval, _1 },
         -> { simulate_evaluate fval, _1 }
       )]
-    in [:if_mod | :unless_mod, cond, statement]
+    when %[:if_mod | :unless_mod, cond, statement]
       simulate_evaluate cond, scope
       KatakataIrb::Types::UnionType[scope.conditional { simulate_evaluate statement, _1 }, KatakataIrb::Types::NIL]
-    in [:if | :unless | :elsif, cond, statements, else_statement]
+    when %[:if | :unless | :elsif, cond, statements, else_statement]
       simulate_evaluate cond, scope
       results = scope.run_branches(
         ->(s) { statements.map { simulate_evaluate _1, s }.last },
         ->(s) { else_statement ? simulate_evaluate(else_statement, s) : KatakataIrb::Types::NIL }
       )
       results.empty? ? KatakataIrb::Types::NIL : KatakataIrb::Types::UnionType[*results]
-    in [:while | :until, cond, statements]
+    when %[:while | :until, cond, statements]
       inner_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::BREAK_RESULT => nil }, passthrough: true
       simulate_evaluate cond, inner_scope
       inner_scope.conditional { |s| statements.each { simulate_evaluate _1, s } }
@@ -402,7 +349,7 @@ class KatakataIrb::TypeSimulator
       scope.update inner_scope
       breaks = inner_scope[KatakataIrb::Scope::BREAK_RESULT]
       breaks ? KatakataIrb::Types::UnionType[breaks, KatakataIrb::Types::NIL] : KatakataIrb::Types::NIL
-    in [:while_mod | :until_mod, cond, statement]
+    when %[:while_mod | :until_mod, cond, statement]
       inner_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::BREAK_RESULT => nil }, passthrough: true
       simulate_evaluate cond, inner_scope
       inner_scope.conditional { |s| simulate_evaluate statement, s }
@@ -410,7 +357,7 @@ class KatakataIrb::TypeSimulator
       scope.update inner_scope
       breaks = inner_scope[KatakataIrb::Scope::BREAK_RESULT]
       breaks ? KatakataIrb::Types::UnionType[breaks, KatakataIrb::Types::NIL] : KatakataIrb::Types::NIL
-    in [:break | :next | :return => jump_type, value]
+    when %[:break | :next | :return => jump_type, value]
       internal_key = jump_type == :break ? KatakataIrb::Scope::BREAK_RESULT : jump_type == :next ? KatakataIrb::Scope::NEXT_RESULT : KatakataIrb::Scope::RETURN_RESULT
       if value.empty?
         jump_value = KatakataIrb::Types::NIL
@@ -421,19 +368,19 @@ class KatakataIrb::TypeSimulator
       end
       scope.terminate_with internal_key, jump_value
       KatakataIrb::Types::NIL
-    in [:return0]
+    when %[:return0]
       scope.terminate_with KatakataIrb::Scope::RETURN_RESULT, KatakataIrb::Types::NIL
       KatakataIrb::Types::NIL
-    in [:yield, args]
+    when %[:yield, args]
       evaluate_mrhs args, scope
       KatakataIrb::Types::OBJECT
-    in [:yield0]
+    when %[:yield0]
       KatakataIrb::Types::OBJECT
-    in [:redo | :retry]
+    when %[:redo | :retry]
       scope.terminate
-    in [:zsuper]
+    when %[:zsuper]
       KatakataIrb::Types::OBJECT
-    in [:super, args]
+    when %[:super, args]
       args, kwargs, _block = retrieve_method_args args
       args.each do |arg|
         item = arg.is_a?(KatakataIrb::Types::Splat) ? arg.item : arg
@@ -441,51 +388,58 @@ class KatakataIrb::TypeSimulator
       end
       kwargs_type kwargs, scope
       KatakataIrb::Types::OBJECT
-    in [:begin, body_stmt]
-      simulate_evaluate body_stmt, scope
-    in [:bodystmt, statements, rescue_stmt, _unknown, ensure_stmt]
-      statements = [statements] if statements in [Symbol,] # oneliner-def body
-      rescue_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::RAISE_BREAK => nil }, passthrough: true if rescue_stmt
-      return_type = statements.map { simulate_evaluate _1, rescue_scope || scope }.last
-      if rescue_stmt
+    when YARP::BeginNode
+      rescue_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::RAISE_BREAK => nil }, passthrough: true if node.rescue_clause
+      return_type = node.statements ? simulate_evaluate(node.statements, rescue_scope || scope) : KatakataIrb::Types::NIL
+      if node.rescue_clause
         rescue_scope.merge_jumps
         scope.update rescue_scope
-        return_type = KatakataIrb::Types::UnionType[return_type, scope.conditional { simulate_evaluate rescue_stmt, _1 }]
+        rescue_return_type = scope.run_branches(
+          ->{ simulate_evaluate node.rescue_clause, _1 },
+          ->{ simulate_evaluate node.else_clause, _1 if node.else_clause }
+        )
+        return_type = KatakataIrb::Types::UnionType[return_type, rescue_return_type]
       end
-      simulate_evaluate ensure_stmt, scope if ensure_stmt
+      simulate_evaluate node.ensure_clause, scope if node.ensure_clause
       return_type
-    in [:rescue, error_class_stmts, error_var_stmt, statements, rescue_stmt]
+    when YARP::RescueNode
       return_type = scope.conditional do |s|
-        if error_var_stmt in [:var_field, [:@ident, error_var,]]
-          if (error_class_stmts in [:mrhs_new_from_args, Array => stmts, stmt])
-            error_class_stmts = [*stmts, stmt]
-          end
-          error_classes = (error_class_stmts || []).flat_map { simulate_evaluate _1, s }.uniq
+        if node.reference
+          error_classes = node.exceptions.flat_map do |e|
+            if e.is_a? YARP::SplatNode
+              splat = simulate_evaluate e.expression, s
+              array_elem, non_array = partition_to_array splat.nonnillable, :to_a
+              [*array_elem, *non_array]
+            else
+              simulate_evaluate e, s
+            end
+          end.uniq
           error_types = error_classes.filter_map { KatakataIrb::Types::InstanceType.new _1.module_or_class if _1.is_a?(KatakataIrb::Types::SingletonType) }
           error_types << KatakataIrb::Types::InstanceType.new(StandardError) if error_types.empty?
-          s[error_var] = KatakataIrb::Types::UnionType[*error_types]
+          s[node.reference.constant_id] = KatakataIrb::Types::UnionType[*error_types]
         end
-        statements.map { simulate_evaluate _1, s }.last
+        node.statements ? simulate_evaluate(node.statements, s) : KatakataIrb::Types::NIL
       end
-      if rescue_stmt
-        return_type = KatakataIrb::Types::UnionType[return_type, scope.conditional { simulate_evaluate rescue_stmt, _1 }]
+      if node.consequent # begin; rescue A; rescue B; end
+        KatakataIrb::Types::UnionType[return_type, scope.conditional { simulate_evaluate node.consequent, _1 }]
+      else
+        return_type
       end
-      return_type
-    in [:rescue_mod, statement1, statement2]
+    when YARP::RescueModifierNode
       rescue_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::RAISE_BREAK => nil }, passthrough: true
-      a = simulate_evaluate statement1, rescue_scope
+      a = simulate_evaluate node.expression, rescue_scope
       rescue_scope.merge_jumps
       scope.update rescue_scope
-      b = scope.conditional { simulate_evaluate statement2, _1 }
+      b = scope.conditional { simulate_evaluate node.rescue_expression, _1 }
       KatakataIrb::Types::UnionType[a, b]
-    in [:module, module_stmt, body_stmt]
+    when YARP::ModuleNode #[:module, module_stmt, body_stmt]
       module_types = simulate_evaluate(module_stmt, scope).types.grep(KatakataIrb::Types::SingletonType)
       module_types << KatakataIrb::Types::MODULE if module_types.empty?
       module_scope = KatakataIrb::Scope.new(scope, { KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*module_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
       result = simulate_evaluate body_stmt, module_scope
       scope.update module_scope
       result
-    in [:sclass, klass_stmt, body_stmt]
+    when YARP::SingletonClassNode # [:sclass, klass_stmt, body_stmt]
       klass_types = simulate_evaluate(klass_stmt, scope).types.filter_map do |type|
         KatakataIrb::Types::SingletonType.new type.klass if type.is_a? KatakataIrb::Types::InstanceType
       end
@@ -494,7 +448,7 @@ class KatakataIrb::TypeSimulator
       result = simulate_evaluate body_stmt, sclass_scope
       scope.update sclass_scope
       result
-    in [:class, klass_stmt, superclass_stmt, body_stmt]
+    when YARP::ClassNode # [:class, klass_stmt, superclass_stmt, body_stmt]
       klass_types = simulate_evaluate(klass_stmt, scope).types
       klass_types += simulate_evaluate(superclass_stmt, scope).types if superclass_stmt
       klass_types = klass_types.select do |type|
@@ -505,7 +459,7 @@ class KatakataIrb::TypeSimulator
       result = simulate_evaluate body_stmt, klass_scope
       scope.update klass_scope
       result
-    in [:for, fields, enum, statements]
+    when YARP::ForNode # [:for, fields, enum, statements]
       fields = [fields] if fields in [:var_field | :field | :aref_field,]
       params = [:params, fields, nil, nil, nil, nil, nil, nil]
       enum = simulate_evaluate enum, scope
@@ -520,7 +474,10 @@ class KatakataIrb::TypeSimulator
       scope.update inner_scope
       breaks = inner_scope[KatakataIrb::Scope::BREAK_RESULT]
       breaks ? KatakataIrb::Types::UnionType[breaks, enum] : enum
-    in [:when, pattern, if_statements, else_statement]
+    when YARP::CaseNode # [:case, target_exp, match_exp]
+      target = target_exp ? simulate_evaluate(target_exp, scope) : KatakataIrb::Types::NIL
+      simulate_evaluate match_exp, scope, case_target: target
+    when YARP::WhenNode # in [:when, pattern, if_statements, else_statement]
       eval_pattern = lambda do |s, pattern, *rest|
         simulate_evaluate pattern, s
         scope.conditional { eval_pattern.call(_1, *rest) } if rest.any?
@@ -538,47 +495,39 @@ class KatakataIrb::TypeSimulator
       else
         KatakataIrb::Types::UnionType[scope.conditional { (if_branch || else_branch).call _1 }, KatakataIrb::Types::NIL]
       end
-    in [:in, [:var_field, [:@ident, name,]], if_statements, else_statement]
-      scope.never { simulate_evaluate else_statement, scope } if else_statement
-      scope[name] = case_target || KatakataIrb::Types::OBJECT
-      if_statements ? if_statements.map { simulate_evaluate _1, scope }.last : KatakataIrb::Types::NIL
-    in [:in, pattern, if_statements, else_statement]
-      pattern_scope = KatakataIrb::Scope.new(scope, { KatakataIrb::Scope::PATTERNMATCH_BREAK => nil }, passthrough: true)
-      results = pattern_scope.run_branches(
-        ->(s) {
-          match_pattern case_target, pattern, s
-          if_statements ? if_statements.map { simulate_evaluate _1, s }.last : KatakataIrb::Types::NIL
-        },
-        ->(s) {
-          else_statement ? simulate_evaluate(else_statement, s, case_target: case_target) : KatakataIrb::Types::NIL
-        }
-      )
-      pattern_scope.merge_jumps
-      scope.update pattern_scope
-      KatakataIrb::Types::UnionType[*results]
-    in [:case, target_exp, match_exp]
-      target = target_exp ? simulate_evaluate(target_exp, scope) : KatakataIrb::Types::NIL
-      simulate_evaluate match_exp, scope, case_target: target
-    in [:void_stmt]
-      KatakataIrb::Types::NIL
-    in [:dot2 | :dot3, range_beg, range_end]
-      beg_type = simulate_evaluate range_beg, scope if range_beg
-      end_type = simulate_evaluate range_end, scope if range_end
+    when YARP::InNode
+    when YARP::MatchRequiredNode, YARP::MatchPredicateNode
+      if node in [:in, [:var_field, [:@ident, name,]], if_statements, else_statement]
+        scope.never { simulate_evaluate else_statement, scope } if else_statement
+        scope[name] = case_target || KatakataIrb::Types::OBJECT
+        if_statements ? if_statements.map { simulate_evaluate _1, scope }.last : KatakataIrb::Types::NIL
+      elsif node in [:in, pattern, if_statements, else_statement]
+        pattern_scope = KatakataIrb::Scope.new(scope, { KatakataIrb::Scope::PATTERNMATCH_BREAK => nil }, passthrough: true)
+        results = pattern_scope.run_branches(
+          ->(s) {
+            match_pattern case_target, pattern, s
+            if_statements ? if_statements.map { simulate_evaluate _1, s }.last : KatakataIrb::Types::NIL
+          },
+          ->(s) {
+            else_statement ? simulate_evaluate(else_statement, s, case_target: case_target) : KatakataIrb::Types::NIL
+          }
+        )
+        pattern_scope.merge_jumps
+        scope.update pattern_scope
+        KatakataIrb::Types::UnionType[*results]
+      end
+    when YARP::RangeNode
+      beg_type = simulate_evaluate node.left, scope if range_beg
+      end_type = simulate_evaluate node.right, scope if range_end
       elem = (KatakataIrb::Types::UnionType[*[beg_type, end_type].compact]).nonnillable
       KatakataIrb::Types::InstanceType.new Range, { Elem: elem }
-    in [:top_const_ref, [:@const, name,]]
-      KatakataIrb::BaseScope.type_of { Object.const_get name }
-    in [:string_concat, a, b]
-      simulate_evaluate a, scope
-      simulate_evaluate b, scope
-      KatakataIrb::Types::STRING
-    in [:defined, expression]
-      scope.conditional { simulate_evaluate expression, _1 }
+    when YARP::DefinedNode
+      scope.conditional { simulate_evaluate node.value, _1 }
       KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
     else
       KatakataIrb.log_puts
       KatakataIrb.log_puts :NOMATCH
-      KatakataIrb.log_puts sexp.inspect
+      KatakataIrb.log_puts node.inspect
       KatakataIrb::Types::NIL
     end
   end
@@ -976,20 +925,20 @@ class KatakataIrb::TypeSimulator
     end
   end
 
-  def self.calculate_binding_scope(binding, parents, target)
+  def self.calculate_binding_scope(binding, code, parents, target)
     dig_targets = DigTarget.new(parents, target) do |_types, scope|
       return scope
     end
     scope = KatakataIrb::Scope.from_binding(binding)
-    new(dig_targets).simulate_evaluate parents[0], scope
+    new(dig_targets, code).simulate_evaluate parents[0], scope
     scope
   end
 
-  def self.calculate_receiver(binding, parents, receiver)
+  def self.calculate_receiver(binding, code, parents, receiver)
     dig_targets = DigTarget.new(parents, receiver) do |type, _scope|
       return type
     end
-    new(dig_targets).simulate_evaluate parents[0], KatakataIrb::Scope.from_binding(binding)
+    new(dig_targets, code).simulate_evaluate parents[0], KatakataIrb::Scope.from_binding(binding)
     KatakataIrb::Types::NIL
   end
 end

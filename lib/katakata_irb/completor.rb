@@ -255,13 +255,14 @@ module KatakataIrb::Completor
     else
       return
     end
-    ast = YARP.parse(code + suffix + closings.reverse.join).value
+    full_code = code + suffix + closings.reverse.join
+    ast = YARP.parse(full_code).value
 
     *parents, target_node = find_target ast, code.bytesize
 
     return unless target_node
-    calculate_scope = -> { KatakataIrb::TypeSimulator.calculate_binding_scope binding, parents, target_node }
-    calculate_receiver = -> receiver { KatakataIrb::TypeSimulator.calculate_receiver binding, parents, receiver }
+    calculate_scope = -> { KatakataIrb::TypeSimulator.calculate_binding_scope binding, full_code, parents, target_node }
+    calculate_receiver = -> receiver { KatakataIrb::TypeSimulator.calculate_receiver binding, full_code, parents, receiver }
 
     if target_node.is_a?(YARP::StringNode)
       args_node = parents[-1]
