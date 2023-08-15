@@ -3,6 +3,7 @@ require_relative 'type_simulator'
 require 'rbs'
 require 'rbs/cli'
 require 'irb'
+require 'yarp'
 
 module KatakataIrb::Completor
   using KatakataIrb::TypeSimulator::LexerElemMatcher
@@ -254,98 +255,89 @@ module KatakataIrb::Completor
     else
       return
     end
-    sexp = Ripper.sexp code + suffix + closings.reverse.join
-    lines = code.lines
-    line_no = lines.size
-    col = lines.last.bytesize
-    if lines.last.end_with? "\n"
-      line_no += 1
-      col = 0
-    end
+    ast = YARP.parse(code + suffix + closings.reverse.join).value
 
-    if sexp in [:program, [_lvars_exp, *rest_statements]]
-      sexp = [:program, rest_statements]
-    end
+    *parents, target_node = find_target ast, code.bytesize
 
-    *parents, expression, target = find_target sexp, line_no, col
-    in_class_module = parents&.any? { _1 in [:class | :module,] }
-    icvar_available = !in_class_module
-    return unless target in [_type, String, [Integer, Integer]]
-    if target in [:@gvar,]
-      return [:gvar, name]
-    elsif target in [:@ivar,]
-      return [:ivar, name] if icvar_available
-    elsif target in [:@cvar,]
-      return [:cvar, name] if icvar_available
-    end
-    return unless expression
-    calculate_scope = -> { KatakataIrb::TypeSimulator.calculate_binding_scope binding, parents, expression }
+    return unless target_node
+    calculate_scope = -> { KatakataIrb::TypeSimulator.calculate_binding_scope binding, parents, target_node }
     calculate_receiver = -> receiver { KatakataIrb::TypeSimulator.calculate_receiver binding, parents, receiver }
 
-    if (target in [:@tstring_content,]) && (parents[-4] in [:command, [:@ident, 'require' | 'require_relative' => require_method,],])
-      # `require 'target'`
-      return [require_method.to_sym, name.rstrip]
+    if target_node.is_a?(YARP::StringNode)
+      args_node = parents[-1]
+      call_node = parents[-2]
+      return unless args_node.is_a?(YARP::ArgumentsNode) && args_node.arguments.size == 1
+      return unless call_node.is_a?(YARP::CallNode) && call_node.receiver.nil? && (call_node.message in 'require' | 'require_relative')
+      return [call_node.message.to_sym, name.rstrip]
     end
-    if (target in [:@ident,]) && (expression in [:symbol,]) && (parents[-2] in [:args_add_block, Array => _args, [:symbol_literal, ^expression]])
-      # `method(&:target)`
-      receiver_ref = [:var_ref, [:@ident, '_1', [0, 0]]]
-      block_statements = [receiver_ref]
-      parents[-1] = parents[-2][-1] = [:brace_block, nil, block_statements]
-      parents << block_statements
-      return [:call, calculate_receiver.call(receiver_ref), name, false]
-    end
-    case expression
-    in [:vcall | :var_ref, [:@ident,]]
-      [:lvar_or_method, name, calculate_scope.call]
-    in [:symbol, [:@ident | :@const | :@op | :@kw,]]
+
+    # if (target in [:@ident,]) && (expression in [:symbol,]) && (parents[-2] in [:args_add_block, Array => _args, [:symbol_literal, ^expression]])
+    #   # `method(&:target)`
+    #   receiver_ref = [:var_ref, [:@ident, '_1', [0, 0]]]
+    #   block_statements = [receiver_ref]
+    #   parents[-1] = parents[-2][-1] = [:brace_block, nil, block_statements]
+    #   parents << block_statements
+    #   return [:call, calculate_receiver.call(receiver_ref), name, false]
+    # end
+    case target_node
+    when YARP::SymbolNode
+      # TODO: method(&:target)
       [:symbol, name] unless name.empty?
-    in [:var_ref | :const_ref, [:@const,]]
-      # TODO
+    when YARP::CallNode
+      return [:lvar_or_method, name, calculate_scope.call] if target_node.receiver.nil?
+      self_call = target_node.receiver.is_a? YARP::SelfNode
+      op = target_node.operator
+      receiver_type = calculate_receiver.call target_node.receiver
+      receiver_type = receiver_type.nonnillable if op == '&.'
+      [op == :'::' ? :call_or_const : :call, receiver_type, name, self_call]
+    when YARP::LocalVariableReadNode
+      [:lvar_or_method, name, calculate_scope.call]
+    when YARP::ConstantReadNode
+      # TODO: scope
       [:const, KatakataIrb::Types::SingletonType.new(Object), name]
-    in [:var_ref, [:@gvar,]]
+    when YARP::GlobalVariableReadNode
       [:gvar, name]
-    in [:var_ref, [:@ivar,]]
-      [:ivar, name, calculate_scope.call.self_type] if icvar_available
-    in [:var_ref, [:@cvar,]]
-      [:cvar, name, calculate_scope.call.self_type] if icvar_available
-    in [:call, receiver, [:@op, '::',] | :'::', [:@ident | :@const,]]
-      self_call = (receiver in [:var_ref, [:@kw, 'self',]])
-      [:call_or_const, calculate_receiver.call(receiver), name, self_call]
-    in [:call, receiver, [:@period,], [:@ident | :@const,]]
-      self_call = (receiver in [:var_ref, [:@kw, 'self',]])
-      [:call, calculate_receiver.call(receiver), name, self_call]
-    in [:call, receiver, [:@op, '&.',], [:@ident | :@const,]]
-      self_call = (receiver in [:var_ref, [:@kw, 'self',]])
-      [:call, calculate_receiver.call(receiver).nonnillable, name, self_call]
-    in [:const_path_ref, receiver, [:@const,]]
-      [:const, calculate_receiver.call(receiver), name]
-    in [:top_const_ref, [:@const,]]
-      [:const, KatakataIrb::Types::SingletonType.new(Object), name]
-    in [:def,] | [:string_content,] | [:field | :var_field | :const_path_field,] | [:defs,] | [:rest_param,] | [:kwrest_param,] | [:blockarg,] | [[:@ident,],]
-    in [Array,] # `xstring`, /regexp/
+    when YARP::InstanceVariableReadNode
+      [:ivar, name, calculate_scope.call.self_type]
+    when YARP::ClassVariableReadNode
+      [:cvar, name, calculate_scope.call.self_type]
+    when YARP::ConstantPathNode
+      if target_node.receiver.nil?
+        [:const, KatakataIrb::Types::SingletonType.new(Object), name]
+      else
+        [:const, calculate_receiver.call(target_node.receiver), name]
+      end
+    when DefNode
+      # do nothing
     else
       KatakataIrb.log_puts
-      KatakataIrb.log_puts [:UNIMPLEMENTED_EXPRESSION, expression].inspect
+      KatakataIrb.log_puts [:UNIMPLEMENTED_EXPRESSION, target_node].inspect
       KatakataIrb.log_puts
       nil
     end
   end
 
-  def self.find_target(sexp, line, col, stack = [sexp])
-    return unless sexp.is_a? Array
-    sexp.each do |child|
-      case child
-      in [Symbol, String, [Integer => l, Integer => c]]
-        if l == line && c == col
-          stack << child
-          return stack
-        end
-      else
-        stack << child
-        result = find_target(child, line, col, stack)
-        return result if result
-        stack.pop
+  def self.find_target(node, position)
+    location = (
+      case node
+      when YARP::CallNode
+        node.message_loc
+      when YARP::SymbolNode
+        node.value_loc
+      when YARP::StringNode
+        node.content_loc
+      when YARP::Node
+        node.location
       end
+    )
+    return [node] if location&.start_offset == position
+
+    node.child_nodes.each do |n|
+      next unless n.is_a? YARP::Node
+      match = find_target(n, position)
+      next unless match
+      match.unshift node
+      return match
     end
     nil
   end
