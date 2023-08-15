@@ -769,9 +769,9 @@ class KatakataIrb::TypeSimulator
     case sexp
     in [:fcall | :vcall, [:@ident | :@const | :@kw | :@op, method,]] # hoge
       [nil, method, [], [], nil, false]
-    in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::' => dot, :call]
+    in [:call, receiver, [:@period,] | [:@op, '&.',] | [:@op, '::',] | :'::' => dot, :call]
       [receiver, :call, [], [], nil, optional[dot]]
-    in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::' => dot, method]
+    in [:call, receiver, [:@period,] | [:@op, '&.',] | [:@op, '::',] | :'::' => dot, method]
       method => [:@ident | :@const | :@kw | :@op, method,] unless method == :call
       [receiver, method, [], [], nil, optional[dot]]
     in [:command, [:@ident | :@const | :@kw | :@op, method,], args] # hoge 1, 2
