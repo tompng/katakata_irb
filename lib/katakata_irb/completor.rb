@@ -308,7 +308,7 @@ module KatakataIrb::Completor
       else
         [:const, calculate_receiver.call(target_node.receiver), name]
       end
-    when DefNode
+    when YARP::DefNode
       # do nothing
     else
       KatakataIrb.log_puts
