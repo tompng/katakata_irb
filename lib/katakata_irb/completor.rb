@@ -271,9 +271,12 @@ module KatakataIrb::Completor
       [:ivar, name, calculate_scope.call.self_type] if icvar_available
     in [:var_ref, [:@cvar,]]
       [:cvar, name, calculate_scope.call.self_type] if icvar_available
-    in [:call, receiver, [:@period,] | [:@op, '&.',] | :'::' => dot, [:@ident | :@const,]]
+    in [:call, receiver, [:@period,] | :'::' => dot, [:@ident | :@const,]]
       self_call = (receiver in [:var_ref, [:@kw, 'self',]])
       [dot == :'::' ? :call_or_const : :call, calculate_receiver.call(receiver), name, self_call]
+    in [:call, receiver, [:@op, '&.',], [:@ident | :@const,]]
+      self_call = (receiver in [:var_ref, [:@kw, 'self',]])
+      [:call, calculate_receiver.call(receiver).nonnillable, name, self_call]
     in [:const_path_ref, receiver, [:@const,]]
       [:const, calculate_receiver.call(receiver), name]
     in [:top_const_ref, [:@const,]]
