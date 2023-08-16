@@ -274,9 +274,12 @@ module KatakataIrb::Completor
     in [:call, receiver, [:@op, '::',] | :'::', [:@ident | :@const,]]
       self_call = (receiver in [:var_ref, [:@kw, 'self',]])
       [:call_or_const, calculate_receiver.call(receiver), name, self_call]
-    in [:call, receiver, [:@period,] | [:@op, '&.',], [:@ident | :@const,]]
+    in [:call, receiver, [:@period,], [:@ident | :@const,]]
       self_call = (receiver in [:var_ref, [:@kw, 'self',]])
       [:call, calculate_receiver.call(receiver), name, self_call]
+    in [:call, receiver, [:@op, '&.',], [:@ident | :@const,]]
+      self_call = (receiver in [:var_ref, [:@kw, 'self',]])
+      [:call, calculate_receiver.call(receiver).nonnillable, name, self_call]
     in [:const_path_ref, receiver, [:@const,]]
       [:const, calculate_receiver.call(receiver), name]
     in [:top_const_ref, [:@const,]]
