@@ -48,9 +48,8 @@ class KatakataIrb::TypeSimulator
     to_r: KatakataIrb::Types::RATIONAL
   }
 
-  def initialize(dig_targets, code)
+  def initialize(dig_targets)
     @dig_targets = dig_targets
-    @code = code
   end
 
   def simulate_evaluate(node, scope, case_target: nil)
@@ -938,20 +937,29 @@ class KatakataIrb::TypeSimulator
     end
   end
 
-  def self.calculate_binding_scope(binding, code, parents, target)
+  def evaluate_program(program, scope)
+    # statements.body[0] is local variable assign code
+    program.statements.body[1..].each do |statement|
+      simulate_evaluate statement, scope
+    end
+  end
+
+  def self.calculate_binding_scope(binding, parents, target)
     dig_targets = DigTarget.new(parents, target) do |_types, scope|
       return scope
     end
-    scope = KatakataIrb::Scope.from_binding(binding)
-    new(dig_targets, code).simulate_evaluate parents[0], scope
+    program = parents.first
+    scope = KatakataIrb::Scope.from_binding(binding, program.locals)
+    new(dig_targets).evaluate_program program, scope
     scope
   end
 
-  def self.calculate_receiver(binding, code, parents, receiver)
+  def self.calculate_receiver(binding, parents, receiver)
     dig_targets = DigTarget.new([*parents, receiver], receiver) do |type, _scope|
       return type
     end
-    new(dig_targets, code).simulate_evaluate parents[0], KatakataIrb::Scope.from_binding(binding)
+    program = parents.first
+    new(dig_targets).evaluate_program program, KatakataIrb::Scope.from_binding(binding, program.locals)
     KatakataIrb::Types::NIL
   end
 end

@@ -10,10 +10,13 @@ module KatakataIrb
     PATTERNMATCH_BREAK = '%match'
     RAISE_BREAK = '%raise'
 
-    def initialize(binding, self_object)
+    def initialize(binding, self_object, local_variables)
       @binding, @self_object = binding, self_object
       @cache = { SELF => KatakataIrb::Types.type_from_object(self_object) }
-      @local_variables = binding.local_variables.map(&:to_s).to_set
+      binding_local_variables = binding.local_variables
+      uninitialized_locals = local_variables - binding_local_variables
+      uninitialized_locals.each { @cache[_1] = KatakataIrb::Types::NIL }
+      @local_variables = (local_variables | binding_local_variables).map(&:to_s).to_set
       @global_variables = global_variables.map(&:to_s).to_set
     end
 
@@ -97,7 +100,7 @@ module KatakataIrb
   class Scope < BaseScope
     attr_reader :parent, :jump_branches, :mergeable_changes, :level, :lvars
 
-    def self.from_binding(binding) = new(BaseScope.new(binding, binding.eval('self')))
+    def self.from_binding(binding, locals) = new(BaseScope.new(binding, binding.eval('self'), locals))
 
     def initialize(parent, table = {}, trace_cvar: true, trace_ivar: true, trace_lvar: true, passthrough: false)
       @table = table
