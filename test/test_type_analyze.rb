@@ -1,4 +1,5 @@
 require 'test_helper'
+KatakataIrb::Types.preload_in_thread.join
 
 class TestTypeAnalyze < Minitest::Test
   def empty_binding() = binding
