@@ -305,6 +305,7 @@ class TestTypeAnalyze < Minitest::Test
 
   def test_optional_chain
     assert_call('[1,nil].sample.', include: [Integer, NilClass])
+    assert_call('[1,nil].sample&.', include: [Integer], exclude: [NilClass])
     assert_call('[1,nil].sample.chr.', include: [String], exclude: [NilClass])
     assert_call('[1,nil].sample&.chr.', include: [String, NilClass])
     assert_call('[1,nil].sample.chr&.ord.', include: [Integer], exclude: [NilClass])
