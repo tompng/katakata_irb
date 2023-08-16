@@ -325,8 +325,6 @@ module KatakataIrb::Completor
         node.value_loc
       when YARP::StringNode
         node.content_loc
-      when YARP::Node
-        node.location
       end
     )
     return [node] if location&.start_offset == position
@@ -338,6 +336,8 @@ module KatakataIrb::Completor
       match.unshift node
       return match
     end
+
+    return [node] if node.location.start_offset == position
     nil
   end
 end
