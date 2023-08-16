@@ -10,6 +10,7 @@ module KatakataIrb::Completor
   singleton_class.attr_accessor :prev_analyze_result
 
   def self.setup
+    KatakataIrb::Types.preload_in_thread
     completion_proc = ->(target, preposing = nil, postposing = nil) do
       code = "#{preposing}#{target}"
       irb_context = IRB.conf[:MAIN_CONTEXT]
@@ -100,32 +101,39 @@ module KatakataIrb::Completor
     setup_type_dialog
   end
 
+  def self.type_dialog_content
+    receiver_type = (
+      case KatakataIrb::Completor.prev_analyze_result
+      in [:call_or_const, type, name, _self_call] if name.empty?
+        type
+      in [:call, type, name, _self_call] if name.empty?
+        type
+      else
+        return
+      end
+    )
+    if KatakataIrb::Types.rbs_builder.nil? && !KatakataIrb::Types.rbs_load_error
+      return [' Loading ', ' RBS... ']
+    end
+    types = receiver_type.types
+    contents = types.filter_map do |type|
+      case type
+      when KatakataIrb::Types::InstanceType
+        type.inspect_without_params
+      else
+        type.inspect
+      end
+    end.uniq
+    contents if contents.any?
+  end
+
   def self.setup_type_dialog
     type_dialog_proc = -> {
       return if just_cursor_moving && completion_journey_data
       cursor_pos_to_render, _result, pointer, autocomplete_dialog = context.last(4)
       return unless cursor_pos_to_render && autocomplete_dialog&.width && pointer.nil?
-      receiver_type = (
-        case KatakataIrb::Completor.prev_analyze_result
-        in [:call_or_const, type, name, _self_call] if name.empty?
-          type
-        in [:call, type, name, _self_call] if name.empty?
-          type
-        else
-          return
-        end
-      )
-      return unless receiver_type
-      types = type.types
-      contents = types.filter_map do |type|
-        case type
-        when KatakataIrb::Types::InstanceType
-          type.inspect_without_params
-        else
-          type.inspect
-        end
-      end.uniq
-      return if contents.empty?
+      contents = KatakataIrb::Completor.type_dialog_content
+      return unless contents&.any?
 
       width = contents.map { Reline::Unicode.calculate_width _1 }.max
       x = cursor_pos_to_render.x + autocomplete_dialog.width

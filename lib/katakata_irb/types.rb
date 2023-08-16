@@ -3,24 +3,11 @@ require 'rbs/cli'
 
 module KatakataIrb; end
 module KatakataIrb::Types
-  def self.rbs_builder
-    preload if @rbs_builder.nil?
+  singleton_class.attr_reader :rbs_builder, :rbs_load_error
 
-    @rbs_builder
-  end
-
-  def self.loader_type=(loader_type)
-    @loader_type = loader_type
-  end
-
-  def self.preload
-    case @loader_type
-    when :sync, nil
+  def self.preload_in_thread
+    @loader_thread ||= Thread.new do
       @rbs_builder = load_rbs_builder
-    when :async
-      @loader_thread ||= Thread.new do
-        @rbs_builder = load_rbs_builder
-      end
     end
   end
 
@@ -29,8 +16,10 @@ module KatakataIrb::Types
     loader.add path: Pathname('sig')
     RBS::DefinitionBuilder.new env: RBS::Environment.from_loader(loader).resolve_type_names
   rescue => e
-    puts "\r\nKatakataIRB failed to initialize RBS::DefinitionBuilder\r\n#{e}\r\n"
-    Object.new
+    @rbs_load_error = e
+    puts "\r\nKatakataIRB failed to initialize RBS::DefinitionBuilder: #{e.class}\r\n"
+    puts "See `KatakataIrb::Types.rbs_load_error` for more details.\r\n"
+    nil
   end
 
   Splat = Struct.new :item
