@@ -454,27 +454,14 @@ class KatakataIrb::TypeSimulator
       end
       branches << ->(s) { simulate_evaluate node.consequent, condition, s } if node.consequent
       KatakataIrb::Types::UnionType[*scope.run_branches(*branches)]
-    when YARP::MatchRequiredNode, YARP::MatchPredicateNode
-      return nil # TODO
-      if node in [:in, [:var_field, [:@ident, name,]], if_statements, else_statement]
-        scope.never { simulate_evaluate else_statement, scope } if else_statement
-        scope[name] = case_target || KatakataIrb::Types::OBJECT
-        if_statements ? if_statements.map { simulate_evaluate _1, scope }.last : KatakataIrb::Types::NIL
-      elsif node in [:in, pattern, if_statements, else_statement]
-        pattern_scope = KatakataIrb::Scope.new(scope, { KatakataIrb::Scope::PATTERNMATCH_BREAK => nil }, passthrough: true)
-        results = pattern_scope.run_branches(
-          ->(s) {
-            match_pattern case_target, pattern, s
-            if_statements ? if_statements.map { simulate_evaluate _1, s }.last : KatakataIrb::Types::NIL
-          },
-          ->(s) {
-            else_statement ? simulate_evaluate(else_statement, s, case_target: case_target) : KatakataIrb::Types::NIL
-          }
-        )
-        pattern_scope.merge_jumps
-        scope.update pattern_scope
-        KatakataIrb::Types::UnionType[*results]
-      end
+    when YARP::MatchRequiredNode
+      value_type = simulate_evaluate node.value, scope
+      evaluate_match_pattern value_type, node.pattern, scope
+      KatakataIrb::Types::TRUE
+    when YARP::MatchPredicateNode
+      value_type = simulate_evaluate node.value, scope
+      evaluate_match_pattern value_type, node.pattern, scope
+      KatakataIrb::Types::BOOLEAN
     when YARP::RangeNode
       beg_type = simulate_evaluate node.left, scope if range_beg
       end_type = simulate_evaluate node.right, scope if range_end
@@ -502,9 +489,67 @@ class KatakataIrb::TypeSimulator
       node.conditions.each { simulate_evaluate _1, scope }
       node.statements ? simulate_evaluate(node.statements, scope) : KatakataIrb::Types::NIL
     when YARP::InNode
-      # TODO: match pattern
+      pattern = node.pattern
+      if pattern in YARP::IfNode | YARP::UnlessNode
+        pattern = node.pattern
+        cond_node = node.statements.body.first
+      end
+      evaluate_match_pattern(target, pattern, scope)
+      simulate_evaluate cond_node, scope if cond_node # TODO: conditional branch
       node.statements ? simulate_evaluate(node.statements, scope) : KatakataIrb::Types::NIL
     end
+  end
+
+  def evaluate_match_pattern(value, pattern, scope)
+    case pattern
+    when YARP::FindPatternNode
+      # TODO
+      evaluate_match_pattern KatakataIrb::Types::OBJECT, pattern.left, scope
+      pattern.requireds.each { evaluate_match_pattern KatakataIrb::Types::OBJECT, _1, scope }
+      evaluate_match_pattern KatakataIrb::Types::OBJECT, pattern.right, scope
+    when YARP::ArrayPatternNode
+      # TODO
+      pattern.requireds.each { evaluate_match_pattern KatakataIrb::Types::OBJECT, _1, scope }
+      evaluate_match_pattern KatakataIrb::Types::OBJECT, pattern.rest, scope
+      pattern.posts.each { evaluate_match_pattern KatakataIrb::Types::OBJECT, _1, scope }
+      KatakataIrb::Types::ARRAY
+    when YARP::HashPatternNode
+      # TODO
+      pattern.assocs.each { evaluate_match_pattern KatakataIrb::Types::OBJECT, _1, scope }
+      KatakataIrb::Types::HASH
+    when YARP::AssocNode
+      evaluate_match_pattern value, pattern.value, scope
+      KatakataIrb::Types::OBJECT
+    when YARP::AssocSplatNode
+      # TODO
+      evaluate_match_pattern KatakataIrb::Types::HASH, pattern.value, scope
+      KatakataIrb::Types::OBJECT
+    when YARP::PinnedVariableNode
+      simulate_evaluate pattern.variable, scope
+    when YARP::LocalVariableWriteNode
+      scope[pattern.name_loc.slice] = value
+    when YARP::AlternationPatternNode
+      KatakataIrb::Types::UnionType[evaluate_match_pattern(value, pattern.left, scope), evaluate_match_pattern(value, pattern.right, scope)]
+    when YARP::CapturePatternNode
+      capture_type = class_or_value_to_instance simulate_evaluate(pattern.value, scope)
+      value = capture_type unless capture_type.types.empty? || capture_type.types == [KatakataIrb::Types::OBJECT]
+      evaluate_match_pattern value, pattern.target, scope
+    when YARP::SplatNode
+      value = KatakataIrb::Types::InstanceType.new(Array, Elem: value)
+      evaluate_match_pattern value, pattern.expression, scope if pattern.expression
+      value
+    else
+      # literal node
+      type = simulate_evaluate(pattern, scope)
+      class_or_value_to_instance(type)
+    end
+  end
+
+  def class_or_value_to_instance(type)
+    instance_types = type.types.map do |t|
+      t.is_a?(KatakataIrb::Types::SingletonType) ? KatakataIrb::Types::InstanceType.new(t.module_or_class) : t
+    end
+    KatakataIrb::Types::UnionType[*instance_types]
   end
 
   def evaluate_multi_write(node, values, scope)
