@@ -404,48 +404,48 @@ class KatakataIrb::TypeSimulator
       scope.update rescue_scope
       b = scope.conditional { simulate_evaluate node.rescue_expression, _1 }
       KatakataIrb::Types::UnionType[a, b]
-    when YARP::ModuleNode #[:module, module_stmt, body_stmt]
-      module_types = simulate_evaluate(module_stmt, scope).types.grep(KatakataIrb::Types::SingletonType)
+    when YARP::ModuleNode
+      module_types = simulate_evaluate(node.constant_path, scope).types.grep(KatakataIrb::Types::SingletonType)
       module_types << KatakataIrb::Types::MODULE if module_types.empty?
-      module_scope = KatakataIrb::Scope.new(scope, { KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*module_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
-      result = simulate_evaluate body_stmt, module_scope
+      table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
+      module_scope = KatakataIrb::Scope.new(scope, { **table, KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*module_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
+      result = node.statements ? simulate_evaluate(node.statements, module_scope) : KatakataIrb::Types::NIL
       scope.update module_scope
       result
-    when YARP::SingletonClassNode # [:sclass, klass_stmt, body_stmt]
-      klass_types = simulate_evaluate(klass_stmt, scope).types.filter_map do |type|
+    when YARP::SingletonClassNode
+      klass_types = simulate_evaluate(node.expression, scope).types.filter_map do |type|
         KatakataIrb::Types::SingletonType.new type.klass if type.is_a? KatakataIrb::Types::InstanceType
       end
       klass_types = [KatakataIrb::Types::CLASS] if klass_types.empty?
-      sclass_scope = KatakataIrb::Scope.new(scope, { KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*klass_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
-      result = simulate_evaluate body_stmt, sclass_scope
+      table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
+      sclass_scope = KatakataIrb::Scope.new(scope, { **table, KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*klass_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
+      result = node.statements ? simulate_evaluate(node.statements, sclass_scope) : KatakataIrb::Types::NIL
       scope.update sclass_scope
       result
-    when YARP::ClassNode # [:class, klass_stmt, superclass_stmt, body_stmt]
-      klass_types = simulate_evaluate(klass_stmt, scope).types
-      klass_types += simulate_evaluate(superclass_stmt, scope).types if superclass_stmt
+    when YARP::ClassNode
+      klass_types = simulate_evaluate(node.constant_path, scope).types
+      klass_types += simulate_evaluate(node.superclass, scope).types if node.superclass
       klass_types = klass_types.select do |type|
         type.is_a?(KatakataIrb::Types::SingletonType) && type.module_or_class.is_a?(Class)
       end
       klass_types << KatakataIrb::Types::CLASS if klass_types.empty?
-      klass_scope = KatakataIrb::Scope.new(scope, { KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*klass_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
-      result = simulate_evaluate body_stmt, klass_scope
+      table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
+      klass_scope = KatakataIrb::Scope.new(scope, { **table, KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*klass_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
+      result = node.statements ? simulate_evaluate(node.statements, klass_scope) : KatakataIrb::Types::NIL
       scope.update klass_scope
       result
-    when YARP::ForNode # [:for, fields, enum, statements]
-      fields = [fields] if fields in [:var_field | :field | :aref_field,]
-      params = [:params, fields, nil, nil, nil, nil, nil, nil]
-      enum = simulate_evaluate enum, scope
-      extract_param_names(params).each { scope[_1] = KatakataIrb::Types::NIL }
-      response = simulate_call enum, :first, [], nil, nil
-      evaluate_assign_params params, [response], scope
+    when YARP::ForNode
+      node.statements
+      collection = simulate_evaluate node.collection, scope
       inner_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::BREAK_RESULT => nil }, passthrough: true
-      scope.conditional do |s|
-        statements.each { simulate_evaluate _1, s }
+      inner_scope.conditional do |s|
+        evaluate_multi_write node.index, collection, s
+        simulate_evaluate node.statements, s
       end
       inner_scope.merge_jumps
       scope.update inner_scope
       breaks = inner_scope[KatakataIrb::Scope::BREAK_RESULT]
-      breaks ? KatakataIrb::Types::UnionType[breaks, enum] : enum
+      breaks ? KatakataIrb::Types::UnionType[breaks, collection] : collection
     when YARP::CaseNode # [:case, target_exp, match_exp]
       target = target_exp ? simulate_evaluate(target_exp, scope) : KatakataIrb::Types::NIL
       simulate_evaluate match_exp, scope, case_target: target
@@ -523,6 +523,26 @@ class KatakataIrb::TypeSimulator
       when YARP::LocalVariableWriteNode, YARP::GlobalVariableWriteNode, YARP::InstanceVariableWriteNode, YARP::ClassVariableWriteNode
         scope[target.name_loc.slice] = value
       end
+    end
+  end
+
+  def evaluate_write(node, value, scope)
+    case node
+    when YARP::MultiWriteNode
+      evaluate_multi_write node, value, scope
+    when YARP::CallNode
+      # ignore
+    when YARP::SplatNode
+      evaluate_write node.expression, KatakataIrb::Types::InstanceType.new(Array, Elem: value), scope
+    when YARP::LocalVariableWriteNode, YARP::GlobalVariableWriteNode, YARP::InstanceVariableWriteNode, YARP::ClassVariableWriteNode
+      scope[node.name_loc.slice] = value
+    end
+  end
+
+  def evaluate_multi_write(node, values, scope)
+    values = sized_splat values, :to_ary, node.targets.size unless values.is_a? Array
+    node.targets.zip values do |target, value|
+      evaluate_write target, value, scope
     end
   end
 
