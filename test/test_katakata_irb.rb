@@ -3,6 +3,7 @@ require 'test_helper'
 
 # Needed for ruby 3.0 test
 Refinement = Object unless defined? Refinement
+KatakataIrb::Types.preload_in_thread.join
 
 class TestKatakataIrb < Minitest::Test
   def test_analyze_does_not_raise_error
