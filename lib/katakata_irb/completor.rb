@@ -153,8 +153,7 @@ module KatakataIrb::Completor
       "#{name}="
     end.join + "nil;\n"
     code = lvars_code + code
-    tokens = RubyLex.ripper_lex_without_warning code
-    tokens = KatakataIrb::NestingParser.interpolate_ripper_ignored_tokens code, tokens
+    tokens = KatakataIrb::NestingParser.tokenize code
     last_opens = KatakataIrb::NestingParser.open_tokens(tokens)
     closings = last_opens.map do |t|
       case t.tok
