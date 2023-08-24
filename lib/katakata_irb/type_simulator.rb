@@ -82,7 +82,7 @@ class KatakataIrb::TypeSimulator
         end
         self_type = KatakataIrb::Types::UnionType[*self_types]
       end
-      if @dig_targets.dig? node.statements
+      if @dig_targets.dig?(node.statements) || @dig_targets.dig?(node.parameters)
         params_table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
         method_scope = KatakataIrb::Scope.new(
           scope,
@@ -92,10 +92,10 @@ class KatakataIrb::TypeSimulator
         # evaluate_assign_params params, [], method_scope
         # method_scope.conditional { evaluate_param_defaults params, _1 }
         if node.parameters
-          assign_parameters node.parameters.parameters, method_scope, [], {}, nil
+          assign_parameters node.parameters, method_scope, [], {}
         end
 
-        if node.statements
+        if @dig_targets.dig?(node.statements)
           method_scope.conditional do |s|
             simulate_evaluate node.statements, s
           end
@@ -289,7 +289,7 @@ class KatakataIrb::TypeSimulator
       local_table = (node.locals + numbered_params).to_h { [_1.to_s, KatakataIrb::Types::NIL] }
       block_scope = KatakataIrb::Scope.new scope, { **local_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }
       block_scope.conditional do |s|
-        assign_parameters node.parameters.parameters, s, [], {}, nil if node.parameters
+        assign_parameters node.parameters, s, [], {} if node.parameters
         simulate_evaluate node.statements, s if node.statements
       end
       block_scope.merge_jumps
@@ -470,6 +470,8 @@ class KatakataIrb::TypeSimulator
     when YARP::DefinedNode
       scope.conditional { simulate_evaluate node.value, _1 }
       KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
+    when YARP::MissingNode
+      # do nothing
     else
       KatakataIrb.log_puts
       KatakataIrb.log_puts :NOMATCH
@@ -478,7 +480,60 @@ class KatakataIrb::TypeSimulator
     end
   end
 
-  def assign_parameters(node, scope, args, kwargs, block_args)
+  def assign_required_parameter(node, value, scope)
+    case node
+    when YARP::RequiredParameterNode
+      scope[node.constant_id.to_s] = value || KatakataIrb::Types::OBJECT
+    when YARP::RequiredDestructuredParameterNode
+      values = value ? sized_splat(value, :to_ary, node.parameters.size) : []
+      node.parameters.zip values do |n, v|
+        assign_required_parameter n, v, scope
+      end
+    when YARP::SplatNode
+      splat_value = value ? KatakataIrb::Types::InstanceType.new(Array, Elem: value) : KatakataIrb::Types::ARRAY
+      assign_required_parameter node.expression, splat_value, scope
+    end
+  end
+
+  def assign_parameters(node, scope, args, kwargs)
+    args = args.dup
+    kwargs = kwargs.dup
+    reqs = args.shift node.requireds.size
+    if node.rest
+      posts = []
+      opts = args.shift node.optionals.size
+      rest = args
+    else
+      posts = args.pop node.posts.size
+      opts = args
+      rest = []
+    end
+    node.requireds.zip reqs do |n, v|
+      assign_required_parameter n, v, scope
+    end
+    node.optionals.zip opts do |n, v|
+      values = [v]
+      values << simulate_evaluate(n.value, scope) if n.value
+      scope[n.name] = KatakataIrb::Types::UnionType[*values.compact]
+    end
+    node.posts.zip posts do |n, v|
+      assign_required_parameter n, v, scope
+    end
+    if node.rest&.name
+      scope[node.rest.name] = KatakataIrb::Types::InstanceType.new(Array, Elem: KatakataIrb::Types::UnionType[*rest])
+    end
+    node.keywords.each do |n|
+      name = n.name.delete(':')
+      values = [kwargs.delete(name)]
+      values << simulate_evaluate(n.value, scope) if n.value
+      scope[name] = KatakataIrb::Types::UnionType[*values.compact]
+    end
+    if node.keyword_rest&.name
+      scope[node.keyword_rest.name] = KatakataIrb::Types::InstanceType.new(Hash, K: KatakataIrb::Types::SYMBOL, V: KatakataIrb::Types::UnionType[*kwargs.values])
+    end
+    if node.block&.name
+      scope[node.block.name] = KatakataIrb::Types::ProcType
+    end
     YARP::ParametersNode
     # TODO
   end
