@@ -405,8 +405,8 @@ module KatakataIrb::Types
 
   def self.match_free_variables(vars, types, values)
     accumulator = {}
-    types.zip(values).each do |t, v|
-      _match_free_variable(vars, t, v, accumulator)
+    types.zip values do |t, v|
+      _match_free_variable(vars, t, v, accumulator) if v
     end
     accumulator.transform_values { UnionType[*_1] }
   end
