@@ -1,4 +1,18 @@
 module KatakataIrb::NestingParser
+  ERROR_TOKENS = %i[
+    on_parse_error
+    compile_error
+    on_assign_error
+    on_alias_error
+    on_class_name_error
+    on_param_error
+  ]
+
+  def self.tokenize(code)
+    tokens = Ripper::Lexer.new(code).scan.reject { ERROR_TOKENS.include? _1.event }
+    KatakataIrb::NestingParser.interpolate_ripper_ignored_tokens code, tokens
+  end
+
   def self.interpolate_ripper_ignored_tokens(code, tokens)
     line_positions = code.lines.reduce([0]) { _1 << _1.last + _2.bytesize }
     prev_byte_pos = 0
