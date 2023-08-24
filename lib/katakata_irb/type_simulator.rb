@@ -89,8 +89,6 @@ class KatakataIrb::TypeSimulator
           { **params_table, KatakataIrb::Scope::SELF => self_type, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil },
           trace_lvar: false
         )
-        # evaluate_assign_params params, [], method_scope
-        # method_scope.conditional { evaluate_param_defaults params, _1 }
         if node.parameters
           assign_parameters node.parameters, method_scope, [], {}
         end
@@ -607,22 +605,6 @@ class KatakataIrb::TypeSimulator
     KatakataIrb::Types::UnionType[*instance_types]
   end
 
-  def evaluate_multi_write(node, values, scope)
-    values = sized_splat values, :to_ary, node.targets.size unless values.is_a? Array
-    node.targets.zip values do |target, value|
-      case target
-      when YARP::MultiWriteNode
-        evaluate_multi_write target, value, scope
-      when YARP::CallNode
-        # ignore
-      when YARP::SplatNode
-        evaluate_multi_write target.expression, KatakataIrb::Types::InstanceType.new(Array, Elem: value), scope
-      when YARP::LocalVariableWriteNode, YARP::GlobalVariableWriteNode, YARP::InstanceVariableWriteNode, YARP::ClassVariableWriteNode
-        scope[target.name_loc.slice] = value
-      end
-    end
-  end
-
   def evaluate_write(node, value, scope)
     case node
     when YARP::MultiWriteNode
@@ -771,41 +753,6 @@ class KatakataIrb::TypeSimulator
     [array_elem, non_array]
   end
 
-  def evaluate_massign(sexp, values, scope)
-    values = sized_splat values, :to_ary, sexp.size unless values.is_a? Array
-    rest_index = sexp.find_index { _1 in [:rest_param, ]}
-    if rest_index
-      pre = rest_index ? sexp[0...rest_index] : sexp
-      post = rest_index ? sexp[rest_index + 1..] : []
-      sexp[rest_index] in [:rest_param, rest_field]
-      rest_values = values[pre.size...values.size - post.size] || []
-      rest_type = KatakataIrb::Types::InstanceType.new Array, Elem: KatakataIrb::Types::UnionType[*rest_values]
-      pairs = pre.zip(values.first(pre.size)) + [[rest_field, rest_type]] + post.zip(values.last(post.size))
-    else
-      pairs = sexp.zip values
-    end
-    pairs.each do |field, value|
-      case field
-      in [:@ident, name,]
-        # block arg mlhs
-        scope[name] = value || KatakataIrb::Types::OBJECT
-      in [:var_field, [:@gvar | :@ivar | :@cvar | :@ident | :@const, name,]]
-        # massign
-        scope[name] = value || KatakataIrb::Types::OBJECT
-      in [:mlhs, *mlhs]
-        evaluate_massign mlhs, value || [], scope
-      in [:field, receiver,]
-        # (a=x).b, c = value
-        simulate_evaluate receiver, scope
-      in [:aref_field, *field]
-        # (a=x)[i=y, j=z], b = value
-        simulate_evaluate [:aref, *field], scope
-      in nil
-        # a, *, b = value
-      end
-    end
-  end
-
   def simulate_call(receiver, method_name, args, kwargs, block, name_match: true)
     methods = KatakataIrb::Types.rbs_methods receiver, method_name.to_sym, args, kwargs, !!block
     block_called = false
@@ -837,52 +784,6 @@ class KatakataIrb::TypeSimulator
       end
     end
     KatakataIrb::Types::UnionType[*types, *breaks]
-  end
-
-  def evaluate_assign_params(params, values, scope)
-    values = values.dup
-    params => [:params, pre_required, optional, rest, post_required, _keywords, keyrest, block]
-    size = (pre_required&.size || 0) + (optional&.size || 0) + (post_required&.size || 0) + (rest ? 1 : 0)
-    values = sized_splat values.first, :to_ary, size if values.size == 1 && size >= 2
-    pre_values = values.shift pre_required.size if pre_required
-    post_values = values.pop post_required.size if post_required
-    opt_values = values.shift optional.size if optional
-    rest_values = values
-    evaluate_massign pre_required, pre_values, scope if pre_required
-    evaluate_massign optional.map(&:first), opt_values, scope if optional
-    if rest in [:rest_param, [:@ident, name,]]
-      scope[name] = KatakataIrb::Types::InstanceType.new Array, Elem: KatakataIrb::Types::UnionType[*rest_values]
-    end
-    evaluate_massign post_required, post_values, scope if post_required
-    # TODO: assign keywords
-    if keyrest in [:kwrest_param, [:@ident, name,]]
-      scope[name] = KatakataIrb::Types::InstanceType.new Hash, K: KatakataIrb::Types::SYMBOL, V: KatakataIrb::Types::OBJECT
-    end
-    if block in [:blockarg, [:@ident, name,]]
-      scope[name] = KatakataIrb::Types::PROC
-    end
-  end
-
-  def evaluate_param_defaults(params, scope)
-    params => [:params, _pre_required, optional, rest, _post_required, keywords, keyrest, block]
-    optional&.each do |item, value|
-      item => [:@ident, name,]
-      scope[name] = simulate_evaluate value, scope
-    end
-    if rest in [:rest_param, [:@ident, name,]]
-      scope[name] = KatakataIrb::Types::ARRAY
-    end
-    keywords&.each do |key, value|
-      key => [:@label, label,]
-      name = label.delete ':'
-      scope[name] = value ? simulate_evaluate(value, scope) : KatakataIrb::Types::OBJECT
-    end
-    if keyrest in [:kwrest_param, [:@ident, name,]]
-        scope[name] = KatakataIrb::Types::HASH
-    end
-    if block in [:blockarg, [:@ident, name,]]
-      scope[name] = KatakataIrb::Types::PROC
-    end
   end
 
   def max_numbered_params(node)
