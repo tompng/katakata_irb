@@ -247,7 +247,7 @@ class KatakataIrb::TypeSimulator
               block_scope = KatakataIrb::Scope.new s, table
               # evaluate_assign_params params, block_args, block_scope
               # block_scope.conditional { evaluate_param_defaults params, _1 } if params
-              result = node.block.statements ? simulate_evaluate(node.block.statements, block_scope) : KatakataIrb::Types::NIL
+              result = node.block.body ? simulate_evaluate(node.block.body, block_scope) : KatakataIrb::Types::NIL
               block_scope.merge_jumps
               s.update block_scope
               nexts = block_scope[KatakataIrb::Scope::NEXT_RESULT]
@@ -283,11 +283,12 @@ class KatakataIrb::TypeSimulator
       right = scope.conditional { simulate_evaluate node.right, _1 }
       KatakataIrb::Types::UnionType[left, right]
     when YARP::LambdaNode
-      numbered_params = (1..max_numbered_params(node.body)).map { "_#{_1}" }
-      local_table = (node.locals + numbered_params).to_h { [_1.to_s, KatakataIrb::Types::NIL] }
+      locals = node.locals
+      locals += (1..max_numbered_params(node.body)).map { "_#{_1}" } unless node.parameters&.parameters
+      local_table = locals.to_h { [_1, KatakataIrb::Types::OBJECT] }
       block_scope = KatakataIrb::Scope.new scope, { **local_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }
       block_scope.conditional do |s|
-        assign_parameters node.parameters.parameters, s, [], {} if node.parameters
+        assign_parameters node.parameters.parameters, s, [], {} if node.parameters&.parameters
         simulate_evaluate node.body, s if node.body
       end
       block_scope.merge_jumps
@@ -717,14 +718,18 @@ class KatakataIrb::TypeSimulator
     KatakataIrb::Types::UnionType[*types, *breaks]
   end
 
+  # Workaround for numbered params not in locals
   def max_numbered_params(node)
     case node
     when YARP::BlockNode, YARP::DefNode, YARP::ClassNode, YARP::ModuleNode, YARP::SingletonClassNode, YARP::LambdaNode
       0
-    when YARP::CallNode
-      node.message.match?(/\A_[1-9]\z/) ? node.message[1].to_i : 0
     when YARP::Node
-      node.child_nodes.map { max_numbered_params _1 }.max
+      max = node.child_nodes.map { max_numbered_params _1 }.max || 0
+      if node.is_a?(YARP::CallNode) && node.receiver.nil? && node.message.match?(/\A_[1-9]\z/)
+        [max, node.message[1].to_i].max
+      else
+        max
+      end
     else
       0
     end
