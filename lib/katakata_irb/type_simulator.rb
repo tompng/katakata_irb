@@ -287,7 +287,7 @@ class KatakataIrb::TypeSimulator
       local_table = (node.locals + numbered_params).to_h { [_1.to_s, KatakataIrb::Types::NIL] }
       block_scope = KatakataIrb::Scope.new scope, { **local_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }
       block_scope.conditional do |s|
-        assign_parameters node.parameters, s, [], {} if node.parameters
+        assign_parameters node.parameters.parameters, s, [], {} if node.parameters
         simulate_evaluate node.statements, s if node.statements
       end
       block_scope.merge_jumps
