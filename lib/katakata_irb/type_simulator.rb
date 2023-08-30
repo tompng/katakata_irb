@@ -554,6 +554,7 @@ class KatakataIrb::TypeSimulator
   end
 
   def evaluate_match_pattern(value, pattern, scope)
+    # TODO: scope.terminate_with KatakataIrb::Scope::PATTERNMATCH_BREAK, KatakataIrb::Types::NIL
     case pattern
     when YARP::FindPatternNode
       # TODO
@@ -644,76 +645,6 @@ class KatakataIrb::TypeSimulator
       when YARP::SplatNode
         evaluate_multi_write_recevier n.expression, scope if n.receiver
       end
-    end
-  end
-
-  def match_pattern(target, pattern, scope)
-    breakable = -> { scope.terminate_with KatakataIrb::Scope::PATTERNMATCH_BREAK, KatakataIrb::Types::NIL }
-    types = target.types
-    case pattern
-    in [:var_field, [:@ident, name,]]
-      scope[name] = target
-    in [:var_ref,] # in Array, in ^a, in nil
-    in [:@int | :@float | :@rational | :@imaginary | :@CHAR | :symbol_literal | :string_literal | :regexp_literal,]
-    in [:begin, statement] # in (statement)
-      simulate_evaluate statement, scope
-      breakable.call
-    in [:binary, lpattern, :|, rpattern]
-      match_pattern target, lpattern, scope
-      scope.conditional { match_pattern target, rpattern, _1 }
-      breakable.call
-    in [:binary, lpattern, :'=>', [:var_field, [:@ident, name,]] => rpattern]
-      if lpattern in [:var_ref, [:@const, _const_name,]]
-        const_value = simulate_evaluate lpattern, scope
-        if const_value.is_a?(KatakataIrb::Types::SingletonType) && const_value.module_or_class.is_a?(Class)
-          scope[name] = KatakataIrb::Types::InstanceType.new const_value.module_or_class
-        else
-          scope[name] = KatakataIrb::Types::OBJECT
-        end
-        breakable.call
-      else
-        match_pattern target, lpattern, scope
-        match_pattern target, rpattern, scope
-      end
-    in [:aryptn, _unknown, items, splat, post_items]
-      # TODO: deconstruct keys
-      array_types = types.select { _1.is_a?(KatakataIrb::Types::InstanceType) && _1.klass == Array }
-      elem = KatakataIrb::Types::UnionType[*array_types.filter_map { _1.params[:Elem] }]
-      items&.each do |item|
-        match_pattern elem, item, scope
-      end
-      if splat in [:var_field, [:@ident, name,]]
-        scope[name] = KatakataIrb::Types::InstanceType.new Array, Elem: elem
-        breakable.call
-      end
-      post_items&.each do |item|
-        match_pattern elem, item, scope
-      end
-    in [:hshptn, _unknown, items, splat]
-      # TODO: deconstruct keys
-      hash_types = types.select { _1.is_a?(KatakataIrb::Types::InstanceType) && _1.klass == Hash }
-      key_type = KatakataIrb::Types::UnionType[*hash_types.filter_map { _1.params[:K] }]
-      value_type = KatakataIrb::Types::UnionType[*hash_types.filter_map { _1.params[:V] }]
-      items&.each do |key_pattern, value_pattern|
-        if (key_pattern in [:@label, label,]) && !value_pattern
-          name = label.delete ':'
-          scope[name] = value_type
-          breakable.call
-        end
-        match_pattern value_type, value_pattern, scope if value_pattern
-      end
-      if splat in [:var_field, [:@ident, name,]]
-        scope[name] = KatakataIrb::Types::InstanceType.new Hash, K: key_type, V: value_type
-        breakable.call
-      end
-    in [:if_mod, cond, ifpattern]
-      match_pattern target, ifpattern, scope
-      simulate_evaluate cond, scope
-      breakable.call
-    in [:dyna_symbol,]
-    in [:const_path_ref,]
-    else
-      KatakataIrb.log_puts "Unimplemented match pattern: #{pattern}"
     end
   end
 
