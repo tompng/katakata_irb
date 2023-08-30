@@ -82,7 +82,7 @@ class KatakataIrb::TypeSimulator
         end
         self_type = KatakataIrb::Types::UnionType[*self_types]
       end
-      if @dig_targets.dig?(node.statements) || @dig_targets.dig?(node.parameters)
+      if @dig_targets.dig?(node.body) || @dig_targets.dig?(node.parameters)
         params_table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
         method_scope = KatakataIrb::Scope.new(
           scope,
@@ -93,9 +93,9 @@ class KatakataIrb::TypeSimulator
           assign_parameters node.parameters, method_scope, [], {}
         end
 
-        if @dig_targets.dig?(node.statements)
+        if @dig_targets.dig?(node.body)
           method_scope.conditional do |s|
-            simulate_evaluate node.statements, s
+            simulate_evaluate node.body, s
           end
         end
         method_scope.merge_jumps
@@ -161,7 +161,7 @@ class KatakataIrb::TypeSimulator
         KatakataIrb::Types::InstanceType.new Hash, K: KatakataIrb::Types::UnionType[*keys], V: KatakataIrb::Types::UnionType[*values]
       end
     when YARP::ParenthesesNode
-      node.statements ? simulate_evaluate(node.statements, scope) : KatakataIrb::Types::NIL
+      node.body ? simulate_evaluate(node.body, scope) : KatakataIrb::Types::NIL
     when YARP::ConstantPathNode
       name = node.child.slice
       return KatakataIrb::BaseScope.type_of { Object.const_get name } if node.parent.nil?
@@ -283,12 +283,12 @@ class KatakataIrb::TypeSimulator
       right = scope.conditional { simulate_evaluate node.right, _1 }
       KatakataIrb::Types::UnionType[left, right]
     when YARP::LambdaNode
-      numbered_params = (1..max_numbered_params(node.statements)).map { "_#{_1}" }
+      numbered_params = (1..max_numbered_params(node.body)).map { "_#{_1}" }
       local_table = (node.locals + numbered_params).to_h { [_1.to_s, KatakataIrb::Types::NIL] }
       block_scope = KatakataIrb::Scope.new scope, { **local_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }
       block_scope.conditional do |s|
         assign_parameters node.parameters.parameters, s, [], {} if node.parameters
-        simulate_evaluate node.statements, s if node.statements
+        simulate_evaluate node.body, s if node.body
       end
       block_scope.merge_jumps
       scope.update block_scope
@@ -407,7 +407,7 @@ class KatakataIrb::TypeSimulator
       module_types << KatakataIrb::Types::MODULE if module_types.empty?
       table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
       module_scope = KatakataIrb::Scope.new(scope, { **table, KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*module_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
-      result = node.statements ? simulate_evaluate(node.statements, module_scope) : KatakataIrb::Types::NIL
+      result = node.body ? simulate_evaluate(node.body, module_scope) : KatakataIrb::Types::NIL
       scope.update module_scope
       result
     when YARP::SingletonClassNode
@@ -417,7 +417,7 @@ class KatakataIrb::TypeSimulator
       klass_types = [KatakataIrb::Types::CLASS] if klass_types.empty?
       table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
       sclass_scope = KatakataIrb::Scope.new(scope, { **table, KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*klass_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
-      result = node.statements ? simulate_evaluate(node.statements, sclass_scope) : KatakataIrb::Types::NIL
+      result = node.body ? simulate_evaluate(node.body, sclass_scope) : KatakataIrb::Types::NIL
       scope.update sclass_scope
       result
     when YARP::ClassNode
@@ -429,7 +429,7 @@ class KatakataIrb::TypeSimulator
       klass_types << KatakataIrb::Types::CLASS if klass_types.empty?
       table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
       klass_scope = KatakataIrb::Scope.new(scope, { **table, KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*klass_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
-      result = node.statements ? simulate_evaluate(node.statements, klass_scope) : KatakataIrb::Types::NIL
+      result = node.body ? simulate_evaluate(node.body, klass_scope) : KatakataIrb::Types::NIL
       scope.update klass_scope
       result
     when YARP::ForNode
