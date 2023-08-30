@@ -245,8 +245,8 @@ class KatakataIrb::TypeSimulator
               table = { **params_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil }
               table[KatakataIrb::Scope::SELF] = block_self_type if block_self_type
               block_scope = KatakataIrb::Scope.new s, table
-              # evaluate_assign_params params, block_args, block_scope
-              # block_scope.conditional { evaluate_param_defaults params, _1 } if params
+              # TODO kwargs
+              assign_parameters node.block.parameters.parameters, block_scope, block_args, {} if node.block.parameters&.parameters
               result = node.block.body ? simulate_evaluate(node.block.body, block_scope) : KatakataIrb::Types::NIL
               block_scope.merge_jumps
               s.update block_scope
@@ -344,26 +344,27 @@ class KatakataIrb::TypeSimulator
         end
       )
       jump_value = (
-        if node.arguments.nil? || node.arguments.empty?
+        arguments = node.arguments&.arguments
+        if arguments.nil? || arguments.empty?
           KatakataIrb::Types::NIL
-        elsif node.arguments.size == 1 && !node.arguments.first.is_a(YAPR::SplatNode)
-          simulate_evaluate node.arguments.first, scope
+        elsif arguments.size == 1 && !arguments.first.is_a?(YARP::SplatNode)
+          simulate_evaluate arguments.first, scope
         else
-          elem_type = evaluate_list_splat_items node.arguments, scope
+          elem_type = evaluate_list_splat_items arguments, scope
           KatakataIrb::Types::InstanceType.new(Array, Elem: elem_type)
         end
       )
       scope.terminate_with internal_key, jump_value
       KatakataIrb::Types::NIL
     when YARP::YieldNode
-      evaluate_list_splat_items node.arguments, scope if node.arguments
+      evaluate_list_splat_items node.arguments.arguments, scope if node.arguments
       KatakataIrb::Types::OBJECT
     when YARP::RedoNode, YARP::RetryNode
       scope.terminate
     when YARP::ForwardingSuperNode
       KatakataIrb::Types::OBJECT
     when YARP::SuperNode
-      evaluate_list_splat_items node.arguments, scope if node.arguments
+      evaluate_list_splat_items node.arguments.arguments, scope if node.arguments
       KatakataIrb::Types::OBJECT
     when YARP::BeginNode
       rescue_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::RAISE_BREAK => nil }, passthrough: true if node.rescue_clause
@@ -462,8 +463,8 @@ class KatakataIrb::TypeSimulator
       evaluate_match_pattern value_type, node.pattern, scope
       KatakataIrb::Types::BOOLEAN
     when YARP::RangeNode
-      beg_type = simulate_evaluate node.left, scope if range_beg
-      end_type = simulate_evaluate node.right, scope if range_end
+      beg_type = simulate_evaluate node.left, scope if node.left
+      end_type = simulate_evaluate node.right, scope if node.right
       elem = (KatakataIrb::Types::UnionType[*[beg_type, end_type].compact]).nonnillable
       KatakataIrb::Types::InstanceType.new Range, { Elem: elem }
     when YARP::DefinedNode
@@ -644,7 +645,7 @@ class KatakataIrb::TypeSimulator
           end
         end
       when YARP::SplatNode
-        evaluate_multi_write_recevier n.expression, scope if n.receiver
+        evaluate_multi_write_recevier n.expression, scope if n.expression
       end
     end
   end

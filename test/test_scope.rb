@@ -16,7 +16,7 @@ class TestScope < Minitest::Test
   end
 
   def base_scope
-    BaseScope.new(binding, Object.new)
+    BaseScope.new(binding, Object.new, [])
   end
 
   def test_lvar
