@@ -193,53 +193,17 @@ class KatakataIrb::TypeSimulator
       scope[node.slice] || KatakataIrb::Types::NIL
     when YARP::CallNode
       # TODO: return type of []=, field= when operator_loc.nil?
-      if node.receiver.nil? && node.message.match?(/\A_[1-9]\z/) && node.opening_loc.nil?
+      if node.receiver.nil? && node.name.match?(/\A_[1-9]\z/) && node.opening_loc.nil?
         # Numbered parameter is CallNode. `_1` is numbered parameter but `_1()` is method call.
         # https://github.com/ruby/yarp/issues/1158
-        return scope[node.message] || KatakataIrb::Types::NIL
-      elsif node.receiver.nil? && node.message == 'raise'
+        return scope[node.name] || KatakataIrb::Types::NIL
+      elsif node.receiver.nil? && node.name == 'raise'
         scope.terminate_with KatakataIrb::Scope::RAISE_BREAK, KatakataIrb::Types::TRUE
         return KatakataIrb::Types::NIL
       end
       receiver_type = node.receiver ? simulate_evaluate(node.receiver, scope) : scope.self_type
       evaluate_method = lambda do |scope|
-        arguments = node.arguments&.arguments&.dup || []
-        block_arg = arguments.pop.expression if arguments.last.is_a? YARP::BlockArgumentNode
-        kwargs = arguments.pop.elements if arguments.last.is_a?(YARP::KeywordHashNode)
-        args_type = arguments.map do |arg|
-          case arg
-          when YARP::ForwardingArgumentsNode
-            # `f(a, ...)` treat like splat
-            nil
-          when YARP::SplatNode
-            simulate_evaluate arg.expression, scope
-            nil # TODO: splat
-          else
-            simulate_evaluate arg, scope
-          end
-        end
-        if kwargs
-          kwargs_type = kwargs.map do |arg|
-            case arg
-            when YARP::AssocNode
-              if arg.key.is_a?(SymbolNode)
-                [arg.key.value, simulate_evaluate(arg.value, scope)]
-              else
-                simulate_evaluate arg.key, scope
-                simulate_evaluate arg.value, scope
-                nil
-              end
-            when YARP::AssocSplatNode
-              simulate_evaluate arg.value, scope
-              nil
-            end
-          end.compact.to_h
-        end
-        if block_arg.is_a? YARP::SymbolNode
-          block_sym = block_arg.value
-        elsif block_arg
-          simulate_evaluate block_arg, scope
-        end
+        args_types, kwargs_types, block_sym, _has_block = evaluate_call_node_arguments node, scope
 
         if block_sym
           call_block_proc = ->(block_args, _self_type) do
@@ -272,7 +236,7 @@ class KatakataIrb::TypeSimulator
         else
           call_block_proc = ->(_block_args, _self_type) { KatakataIrb::Types::OBJECT }
         end
-        simulate_call receiver_type, node.message, args_type, kwargs_type, call_block_proc
+        simulate_call receiver_type, node.name, args_types, kwargs_types, call_block_proc
       end
       if node.operator == '&.'
         result = scope.conditional { evaluate_method.call _1 }
@@ -284,13 +248,75 @@ class KatakataIrb::TypeSimulator
       else
         evaluate_method.call scope
       end
-    when YARP::AndNode
-      simulate_evaluate node.left, scope
-      right = scope.conditional { simulate_evaluate node.right, _1 }
-      KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
-    when YARP::OrNode
+    when YARP::AndNode, YARP::OrNode
       left = simulate_evaluate node.left, scope
       right = scope.conditional { simulate_evaluate node.right, _1 }
+      if node.operator == '&&='
+        KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
+      else
+        KatakataIrb::Types::UnionType[left, right]
+      end
+    when YARP::CallOperatorWriteNode, YARP::CallOperatorAndWriteNode, YARP::CallOperatorOrWriteNode
+      receiver_type = simulate_evaluate node.target.receiver, scope
+      args_types, kwargs_types, block_sym, has_block = evaluate_call_node_arguments node.target, scope
+      if block_sym
+        call_block_proc = ->(block_args, _self_type) do
+          block_receiver, *rest = block_args
+          block_receiver ? simulate_call(block_receiver || KatakataIrb::Types::OBJECT, block_sym, rest, nil, nil) : KatakataIrb::Types::OBJECT
+        end
+      elsif has_block
+        call_block_proc = ->(_block_args, _self_type) { KatakataIrb::Types::OBJECT }
+      end
+      method = node.target.name[...-1] # remove trailing `=`
+      left = simulate_call receiver_type, method, args_types, kwargs_types, call_block_proc
+      if node.operator == '&&='
+        right = scope.conditional { simulate_evaluate node.value, _1 }
+        KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
+      elsif node.operator == '||='
+        right = scope.conditional { simulate_evaluate node.value, _1 }
+        KatakataIrb::Types::UnionType[left, right]
+      else
+        right = simulate_evaluate node.value, _1
+        simulate_call left, node.operator, [right], nil, nil, name_match: false
+      end
+    when YARP::ClassVariableOperatorWriteNode, YARP::InstanceVariableOperatorWriteNode, YARP::LocalVariableOperatorWriteNode, YARP::GlobalVariableOperatorWriteNode
+      left = scope[node.name] || KatakataIrb::Types::OBJECT
+      right = simulate_evaluate node.value, scope
+      scope[node.name] = simulate_call left, node.operator, [right], nil, nil, name_match: false
+    when YARP::ClassVariableAndWriteNode, YARP::InstanceVariableAndWriteNode, YARP::LocalVariableAndWriteNode, YARP::GlobalVariableAndWriteNode
+      right = scope.conditional { simulate_evaluate node.value, scope }
+      scope[node.name] = KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
+    when YARP::ClassVariableOrWriteNode, YARP::InstanceVariableOrWriteNode, YARP::LocalVariableOrWriteNode, YARP::GlobalVariableOrWriteNode
+      left = scope[node.name] || KatakataIrb::Types::OBJECT
+      right = scope.conditional { simulate_evaluate node.value, scope }
+      scope[node.name] = KatakataIrb::Types::UnionType[left, right]
+    when YARP::ConstantOperatorWriteNode
+      left = scope[node.name] || KatakataIrb::Types::OBJECT
+      right = simulate_evaluate node.value, scope
+      # TODO: write
+      simulate_call left, node.operator, [right], nil, nil, name_match: false
+    when YARP::ConstantAndWriteNode
+      right = scope.conditional { simulate_evaluate node.value, scope }
+      # TODO: write
+      KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
+    when YARP::ConstantOrWriteNode
+      left = scope[node.name] || KatakataIrb::Types::OBJECT
+      right = scope.conditional { simulate_evaluate node.value, scope }
+      # TODO: write
+      KatakataIrb::Types::UnionType[left, right]
+    when YARP::ConstantPathOperatorWriteNode
+      left = simulate_evaluate node.target, scope
+      right = simulate_evaluate node.value, scope
+      # TODO: write
+      simulate_call left, node.operator, [right], nil, nil, name_match: false
+    when YARP::ConstantPathAndWriteNode
+      right = scope.conditional { simulate_evaluate node.value, scope }
+      # TODO: write
+      KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
+    when YARP::ConstantPathOrWriteNode
+      left = simulate_evaluate node.target, scope
+      right = scope.conditional { simulate_evaluate node.value, scope }
+      # TODO: write
       KatakataIrb::Types::UnionType[left, right]
     when YARP::LambdaNode
       locals = node.locals
@@ -491,6 +517,47 @@ class KatakataIrb::TypeSimulator
       KatakataIrb.log_puts node.inspect
       KatakataIrb::Types::NIL
     end
+  end
+
+  def evaluate_call_node_arguments(call_node, scope)
+    arguments = call_node.arguments&.arguments&.dup || []
+    block_arg = arguments.pop.expression if arguments.last.is_a? YARP::BlockArgumentNode
+    kwargs = arguments.pop.elements if arguments.last.is_a?(YARP::KeywordHashNode)
+    args_types = arguments.map do |arg|
+      case arg
+      when YARP::ForwardingArgumentsNode
+        # `f(a, ...)` treat like splat
+        nil
+      when YARP::SplatNode
+        simulate_evaluate arg.expression, scope
+        nil # TODO: splat
+      else
+        simulate_evaluate arg, scope
+      end
+    end
+    if kwargs
+      kwargs_types = kwargs.map do |arg|
+        case arg
+        when YARP::AssocNode
+          if arg.key.is_a?(SymbolNode)
+            [arg.key.value, simulate_evaluate(arg.value, scope)]
+          else
+            simulate_evaluate arg.key, scope
+            simulate_evaluate arg.value, scope
+            nil
+          end
+        when YARP::AssocSplatNode
+          simulate_evaluate arg.value, scope
+          nil
+        end
+      end.compact.to_h
+    end
+    if block_arg.is_a? YARP::SymbolNode
+      block_sym = block_arg.value
+    elsif block_arg
+      simulate_evaluate block_arg, scope
+    end
+    [args_types, kwargs_types, block_sym, !!block_arg]
   end
 
   def assign_required_parameter(node, value, scope)
@@ -737,8 +804,8 @@ class KatakataIrb::TypeSimulator
       0
     when YARP::Node
       max = node.child_nodes.map { max_numbered_params _1 }.max || 0
-      if node.is_a?(YARP::CallNode) && node.receiver.nil? && node.message.match?(/\A_[1-9]\z/)
-        [max, node.message[1].to_i].max
+      if node.is_a?(YARP::CallNode) && node.receiver.nil? && node.name.match?(/\A_[1-9]\z/)
+        [max, node.name[1].to_i].max
       else
         max
       end
