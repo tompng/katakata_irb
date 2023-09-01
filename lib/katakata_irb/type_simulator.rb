@@ -215,7 +215,7 @@ class KatakataIrb::TypeSimulator
             scope.conditional do |s|
               locals = node.block.locals
               locals += (1..max_numbered_params(node.block)).map { "_#{_1}" } unless node.block.parameters
-              params_table = locals.to_h { [_1, KatakataIrb::Types::NIL] }
+              params_table = locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
               table = { **params_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil }
               table[KatakataIrb::Scope::SELF] = block_self_type if block_self_type
               block_scope = KatakataIrb::Scope.new s, table
@@ -321,7 +321,7 @@ class KatakataIrb::TypeSimulator
     when YARP::LambdaNode
       locals = node.locals
       locals += (1..max_numbered_params(node.body)).map { "_#{_1}" } unless node.parameters&.parameters
-      local_table = locals.to_h { [_1, KatakataIrb::Types::OBJECT] }
+      local_table = locals.to_h { [_1.to_s, KatakataIrb::Types::OBJECT] }
       block_scope = KatakataIrb::Scope.new scope, { **local_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }
       block_scope.conditional do |s|
         assign_parameters node.parameters.parameters, s, [], {} if node.parameters&.parameters
@@ -430,7 +430,7 @@ class KatakataIrb::TypeSimulator
           error_type = KatakataIrb::Types::UnionType[*error_types]
           case node.reference
           when YARP::LocalVariableTargetNode
-            s[node.reference.constant_id] = error_type
+            s[node.reference.constant_id.to_s] = error_type
           when YARP::InstanceVariableTargetNode, YARP::ClassVariableTargetNode, YARP::GlobalVariableTargetNode
             s[node.reference.slice] = error_type
           when YARP::CallNode
@@ -670,7 +670,7 @@ class KatakataIrb::TypeSimulator
     when YARP::PinnedVariableNode
       simulate_evaluate pattern.variable, scope
     when YARP::LocalVariableTargetNode
-      scope[pattern.constant_id] = value
+      scope[pattern.constant_id.to_s] = value
     when YARP::AlternationPatternNode
       KatakataIrb::Types::UnionType[evaluate_match_pattern(value, pattern.left, scope), evaluate_match_pattern(value, pattern.right, scope)]
     when YARP::CapturePatternNode
