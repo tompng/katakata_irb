@@ -257,8 +257,8 @@ module KatakataIrb::Completor
     end
     ast = YARP.parse(code + suffix + closings.reverse.join).value
     *parents, target_node = find_target ast, code.bytesize
-
     return unless target_node
+
     calculate_scope = -> { KatakataIrb::TypeSimulator.calculate_binding_scope binding, parents, target_node }
     calculate_receiver = -> receiver { KatakataIrb::TypeSimulator.calculate_receiver binding, parents, receiver }
 
@@ -289,18 +289,18 @@ module KatakataIrb::Completor
       receiver_type = calculate_receiver.call target_node.receiver
       receiver_type = receiver_type.nonnillable if op == '&.'
       [op == :'::' ? :call_or_const : :call, receiver_type, name, self_call]
-    when YARP::LocalVariableReadNode
+    when YARP::LocalVariableReadNode, YARP::LocalVariableTargetNode
       [:lvar_or_method, name, calculate_scope.call]
-    when YARP::ConstantReadNode
+    when YARP::ConstantReadNode, YARP::ConstantTargetNode
       # TODO: scope
       [:const, KatakataIrb::Types::SingletonType.new(Object), name]
-    when YARP::GlobalVariableReadNode
+    when YARP::GlobalVariableReadNode, YARP::GlobalVariableTargetNode
       [:gvar, name]
-    when YARP::InstanceVariableReadNode
+    when YARP::InstanceVariableReadNode, YARP::InstanceVariableTargetNode
       [:ivar, name, calculate_scope.call.self_type]
-    when YARP::ClassVariableReadNode
+    when YARP::ClassVariableReadNode, YARP::ClassVariableTargetNode
       [:cvar, name, calculate_scope.call.self_type]
-    when YARP::ConstantPathNode
+    when YARP::ConstantPathNode, YARP::ConstantPathTargetNode
       if target_node.receiver.nil?
         [:const, KatakataIrb::Types::SingletonType.new(Object), name]
       else

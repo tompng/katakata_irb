@@ -427,7 +427,15 @@ class KatakataIrb::TypeSimulator
             KatakataIrb::Types::InstanceType.new _1.module_or_class if _1.is_a?(KatakataIrb::Types::SingletonType)
           end
           error_types << KatakataIrb::Types::InstanceType.new(StandardError) if error_types.empty?
-          s[node.reference.constant_id] = KatakataIrb::Types::UnionType[*error_types]
+          error_type = KatakataIrb::Types::UnionType[*error_types]
+          case node.reference
+          when YARP::LocalVariableTargetNode
+            s[node.reference.constant_id] = error_type
+          when YARP::InstanceVariableTargetNode, YARP::ClassVariableTargetNode, YARP::GlobalVariableTargetNode
+            s[node.reference.slice] = error_type
+          when YARP::CallNode
+            simulate_evaluate node.reference, scope
+          end
         end
         node.statements ? simulate_evaluate(node.statements, s) : KatakataIrb::Types::NIL
       end
