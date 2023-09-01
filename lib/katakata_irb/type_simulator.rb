@@ -417,7 +417,7 @@ class KatakataIrb::TypeSimulator
         )
         return_type = KatakataIrb::Types::UnionType[return_type, *rescue_return_types]
       end
-      simulate_evaluate node.ensure_clause, scope if node.ensure_clause
+      simulate_evaluate node.ensure_clause.statements, scope if node.ensure_clause&.statements
       return_type
     when YARP::RescueNode
       return_type = scope.conditional do |s|
@@ -539,7 +539,7 @@ class KatakataIrb::TypeSimulator
       kwargs_types = kwargs.map do |arg|
         case arg
         when YARP::AssocNode
-          if arg.key.is_a?(SymbolNode)
+          if arg.key.is_a?(YARP::SymbolNode)
             [arg.key.value, simulate_evaluate(arg.value, scope)]
           else
             simulate_evaluate arg.key, scope
@@ -612,10 +612,9 @@ class KatakataIrb::TypeSimulator
       scope[node.keyword_rest.name] = KatakataIrb::Types::InstanceType.new(Hash, K: KatakataIrb::Types::SYMBOL, V: KatakataIrb::Types::UnionType[*kwargs.values])
     end
     if node.block&.name
-      scope[node.block.name] = KatakataIrb::Types::ProcType
+      scope[node.block.name] = KatakataIrb::Types::PROC
     end
-    YARP::ParametersNode
-    # TODO
+    # TODO YARP::ParametersNode
   end
 
   def evaluate_case_match(target, node, scope)

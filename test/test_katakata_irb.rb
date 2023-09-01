@@ -10,7 +10,7 @@ class TestKatakataIrb < Minitest::Test
     original_output = KatakataIrb.log_output
     KatakataIrb::TypeSimulator::DigTarget.class_eval do
       alias_method :original_dig?, :dig?
-      def dig?(*) = true
+      def dig?(node) = !!node
     end
     KatakataIrb.log_output = Object.new.tap do |output|
       def output.puts(*)
