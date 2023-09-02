@@ -214,13 +214,18 @@ class KatakataIrb::TypeSimulator
           call_block_proc = ->(block_args, block_self_type) do
             scope.conditional do |s|
               locals = node.block.locals
-              locals += (1..max_numbered_params(node.block)).map { "_#{_1}" } unless node.block.parameters
+              max_numparams = max_numbered_params(node.block.body)
+              locals += (1..max_numparams).map { "_#{_1}" } unless node.block.parameters
               params_table = locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
               table = { **params_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil }
               table[KatakataIrb::Scope::SELF] = block_self_type if block_self_type
               block_scope = KatakataIrb::Scope.new s, table
               # TODO kwargs
-              assign_parameters node.block.parameters.parameters, block_scope, block_args, {} if node.block.parameters&.parameters
+              if node.block.parameters&.parameters
+                assign_parameters node.block.parameters.parameters, block_scope, block_args, {}
+              elsif max_numparams != 0
+                assign_numbered_parameters max_numparams, block_scope, block_args, {}
+              end
               result = node.block.body ? simulate_evaluate(node.block.body, block_scope) : KatakataIrb::Types::NIL
               block_scope.merge_jumps
               s.update block_scope
@@ -623,6 +628,25 @@ class KatakataIrb::TypeSimulator
       scope[node.block.name] = KatakataIrb::Types::PROC
     end
     # TODO YARP::ParametersNode
+  end
+
+  def assign_numbered_parameters(max_num, scope, args, _kwargs)
+    return if max_num == 0
+    if max_num == 1
+      if args.size == 0
+        scope['_1'] = KatakataIrb::Types::NIL
+      elsif args.size == 1
+        scope['_1'] = args.first
+      else
+        elem = KatakataIrb::Types::UnionType[*args]
+        scope['_1'] = KatakataIrb::Types::InstanceType.new(Array, Elem: elem)
+      end
+    else
+      args = sized_splat(args.first, :to_ary, max_num) if args.size == 1
+      max_num.times do |i|
+        scope["_#{i + 1}"] = args[i] || KatakataIrb::Types::NIL
+      end
+    end
   end
 
   def evaluate_case_match(target, node, scope)
