@@ -19,21 +19,6 @@ class KatakataIrb::TypeSimulator
     end
   end
 
-  module LexerElemMatcher
-    refine Ripper::Lexer::Elem do
-      def deconstruct_keys(_keys)
-        {
-          tok: tok,
-          event: event,
-          label: state.allbits?(Ripper::EXPR_LABEL),
-          beg: state.allbits?(Ripper::EXPR_BEG),
-          dot: state.allbits?(Ripper::EXPR_DOT)
-        }
-      end
-    end
-  end
-  using LexerElemMatcher
-
   OBJECT_METHODS = {
     to_s: KatakataIrb::Types::STRING,
     to_str: KatakataIrb::Types::STRING,

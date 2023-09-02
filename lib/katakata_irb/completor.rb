@@ -6,7 +6,20 @@ require 'irb'
 require 'yarp'
 
 module KatakataIrb::Completor
-  using KatakataIrb::TypeSimulator::LexerElemMatcher
+  module LexerElemMatcher
+    refine Ripper::Lexer::Elem do
+      def deconstruct_keys(_keys)
+        {
+          tok: tok,
+          event: event,
+          label: state.allbits?(Ripper::EXPR_LABEL),
+          beg: state.allbits?(Ripper::EXPR_BEG),
+          dot: state.allbits?(Ripper::EXPR_DOT)
+        }
+      end
+    end
+  end
+  using LexerElemMatcher
   HIDDEN_METHODS = %w[Namespace TypeName] # defined by rbs, should be hidden
   singleton_class.attr_accessor :prev_analyze_result
 
