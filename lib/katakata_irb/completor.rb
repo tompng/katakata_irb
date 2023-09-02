@@ -278,34 +278,39 @@ module KatakataIrb::Completor
     #   parents << block_statements
     #   return [:call, calculate_receiver.call(receiver_ref), name, false]
     # end
+
     case target_node
     when YARP::SymbolNode
       # TODO: method(&:target)
       [:symbol, name] unless name.empty?
     when YARP::CallNode
       return [:lvar_or_method, name, calculate_scope.call] if target_node.receiver.nil?
+
       self_call = target_node.receiver.is_a? YARP::SelfNode
       op = target_node.operator
       receiver_type = calculate_receiver.call target_node.receiver
       receiver_type = receiver_type.nonnillable if op == '&.'
-      [op == :'::' ? :call_or_const : :call, receiver_type, name, self_call]
+      [op == '::' ? :call_or_const : :call, receiver_type, name, self_call]
     when YARP::LocalVariableReadNode, YARP::LocalVariableTargetNode
       [:lvar_or_method, name, calculate_scope.call]
     when YARP::ConstantReadNode, YARP::ConstantTargetNode
-      # TODO: scope
-      [:const, KatakataIrb::Types::SingletonType.new(Object), name]
+      if parents.last.is_a? YARP::ConstantPathNode
+        path_node = parents.last
+        if path_node.parent # A::B
+          [:const, calculate_receiver.call(path_node.parent), name]
+        else # ::A
+          [:const, KatakataIrb::Types::SingletonType.new(Object), name]
+        end
+      else
+        # TODO: module nesting
+        [:const, KatakataIrb::Types::SingletonType.new(Object), name]
+      end
     when YARP::GlobalVariableReadNode, YARP::GlobalVariableTargetNode
       [:gvar, name]
     when YARP::InstanceVariableReadNode, YARP::InstanceVariableTargetNode
       [:ivar, name, calculate_scope.call.self_type]
     when YARP::ClassVariableReadNode, YARP::ClassVariableTargetNode
       [:cvar, name, calculate_scope.call.self_type]
-    when YARP::ConstantPathNode, YARP::ConstantPathTargetNode
-      if target_node.receiver.nil?
-        [:const, KatakataIrb::Types::SingletonType.new(Object), name]
-      else
-        [:const, calculate_receiver.call(target_node.receiver), name]
-      end
     when YARP::DefNode, YARP::RequiredParameterNode
       # do nothing
     else
