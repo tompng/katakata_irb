@@ -22,8 +22,8 @@ module KatakataIrb
 
     def level() = 0
 
-    def level_of(name)
-      has?(name) ? 0 : nil
+    def level_of(_name)
+      0
     end
 
     def mutable?() = false
@@ -77,33 +77,14 @@ module KatakataIrb
         :lvar
       end
     end
-
-    def has?(name)
-      case BaseScope.type_by_name name
-      when :lvar
-        @local_variables.include? name
-      when :const
-        begin
-          @binding.eval(name)
-          true
-        rescue
-          false
-        end
-      when :gvar, :cvar, :ivar
-        true
-      when :internal
-        true
-      end
-    end
   end
 
   class Scope < BaseScope
-    attr_reader :parent, :jump_branches, :mergeable_changes, :level
+    attr_reader :parent, :mergeable_changes, :level
 
     def self.from_binding(binding, locals) = new(BaseScope.new(binding, binding.eval('self'), locals))
 
     def initialize(parent, table = {}, trace_cvar: true, trace_ivar: true, trace_lvar: true)
-      @table = table
       @parent = parent
       @level = parent.level + 1
       @trace_cvar = trace_cvar
@@ -111,7 +92,7 @@ module KatakataIrb
       @trace_lvar = trace_lvar
       @terminated = false
       @jump_branches = []
-      @mergeable_changes = @changes = table.transform_values { [level, _1] }
+      @mergeable_changes = @table = table.transform_values { [level, _1] }
     end
 
     def mutable? = true
@@ -139,10 +120,8 @@ module KatakataIrb
     def terminate
       return if terminated?
       @terminated = true
-      @changes = @mergeable_changes.dup
+      @table = @mergeable_changes.dup
     end
-
-    def branch_table_clone() = @tables.last.dup
 
     def trace?(name)
       return false unless @parent
@@ -151,12 +130,12 @@ module KatakataIrb
     end
 
     def level_of(name)
-      variable_level, = @changes[name]
+      variable_level, = @table[name]
       variable_level || parent.level_of(name)
     end
 
     def [](name)
-      level, value = @changes[name]
+      level, value = @table[name]
       if level
         value
       elsif trace? name
@@ -166,7 +145,7 @@ module KatakataIrb
 
     def []=(name, value)
       variable_level = level_of name
-      @changes[name] = [variable_level, value] if variable_level
+      @table[name] = [variable_level, value] if variable_level
     end
 
     def self_type
@@ -174,7 +153,7 @@ module KatakataIrb
     end
 
     def local_variables
-      lvar_keys = @changes.keys.select do |name|
+      lvar_keys = @table.keys.select do |name|
         BaseScope.type_by_name(name) == :lvar
       end
       lvar_keys |= @parent.local_variables if @trace_lvar
@@ -184,7 +163,7 @@ module KatakataIrb
     def merge_jumps
       if terminated?
         @terminated = false
-        @changes = @mergeable_changes
+        @table = @mergeable_changes
         merge @jump_branches
         @terminated = true
       else
@@ -222,12 +201,8 @@ module KatakataIrb
       results
     end
 
-    def has?(name)
-      has_own?(name) || (trace?(name) && @parent.has?(name))
-    end
-
     def has_own?(name)
-      @changes.key? name
+      @table.key? name
     end
 
     def update(child_scope)

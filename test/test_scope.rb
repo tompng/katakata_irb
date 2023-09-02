@@ -53,6 +53,18 @@ class TestScope < Minitest::Test
     assert_type [C, D, E], scope['d']
   end
 
+  def test_scope_local_variables
+    scope1 = Scope.new base_scope, table('a', 'b')
+    scope2 = Scope.new scope1, table('b', 'c'), trace_lvar: false
+    scope3 = Scope.new scope2, table('c', 'd')
+    scope4 = Scope.new scope2, table('d', 'e')
+    assert_empty base_scope.local_variables
+    assert_equal %w[a b], scope1.local_variables.sort
+    assert_equal %w[b c], scope2.local_variables.sort
+    assert_equal %w[b c d], scope3.local_variables.sort
+    assert_equal %w[b c d e], scope4.local_variables.sort
+  end
+
   def test_nested_scope
     scope = Scope.new base_scope, table('a', 'b', 'c')
     scope['a'] = A
