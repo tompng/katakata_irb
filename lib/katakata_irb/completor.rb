@@ -260,7 +260,7 @@ module KatakataIrb::Completor
     return unless target_node
 
     calculate_scope = -> { KatakataIrb::TypeSimulator.calculate_binding_scope binding, parents, target_node }
-    calculate_receiver = -> receiver { KatakataIrb::TypeSimulator.calculate_receiver binding, parents, receiver }
+    calculate_receiver = ->(receiver) { KatakataIrb::TypeSimulator.calculate_receiver binding, parents, receiver }
 
     if target_node.is_a?(YARP::StringNode)
       args_node = parents[-1]
@@ -270,19 +270,14 @@ module KatakataIrb::Completor
       return [call_node.message.to_sym, name.rstrip]
     end
 
-    # if (target in [:@ident,]) && (expression in [:symbol,]) && (parents[-2] in [:args_add_block, Array => _args, [:symbol_literal, ^expression]])
-    #   # `method(&:target)`
-    #   receiver_ref = [:var_ref, [:@ident, '_1', [0, 0]]]
-    #   block_statements = [receiver_ref]
-    #   parents[-1] = parents[-2][-1] = [:brace_block, nil, block_statements]
-    #   parents << block_statements
-    #   return [:call, calculate_receiver.call(receiver_ref), name, false]
-    # end
-
     case target_node
     when YARP::SymbolNode
-      # TODO: method(&:target)
-      [:symbol, name] unless name.empty?
+      if parents.last.is_a? YARP::BlockArgumentNode # method(&:target)
+        receiver_type = KatakataIrb::TypeSimulator.calculate_block_symbol_receiver binding, parents, target_node
+        [:call, receiver_type, name, false]
+      else
+        [:symbol, name] unless name.empty?
+      end
     when YARP::CallNode
       return [:lvar_or_method, name, calculate_scope.call] if target_node.receiver.nil?
 

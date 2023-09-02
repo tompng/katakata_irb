@@ -99,7 +99,7 @@ class TestTypeAnalyze < Minitest::Test
   end
 
   def test_block_symbol
-    assert_call('1.times.map(&:', include: Integer)
+    assert_call('[1].map(&:', include: Integer)
     assert_call('1.to_s.tap(&:', include: String)
   end
 
@@ -203,6 +203,8 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('([]*unknown).', include: [String, Array])
     assert_call('p(1).', include: Integer)
     assert_call('p(1, 2).', include: Array, exclude: Integer)
+    assert_call('2.times.', include: Enumerator, exclude: Integer)
+    assert_call('2.times{}.', include: Integer, exclude: Enumerator)
   end
 
   def test_interface_match_var

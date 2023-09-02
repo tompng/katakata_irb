@@ -206,9 +206,19 @@ class KatakataIrb::TypeSimulator
         args_types, kwargs_types, block_sym, _has_block = evaluate_call_node_arguments node, scope
 
         if block_sym
-          call_block_proc = ->(block_args, _self_type) do
-            block_receiver, *rest = block_args
-            block_receiver ? simulate_call(block_receiver || KatakataIrb::Types::OBJECT, block_sym, rest, nil, nil) : KatakataIrb::Types::OBJECT
+          block_sym_node = node.arguments.arguments.last.expression
+          if @dig_targets.target? block_sym_node
+            # method(args, &:completion_target)
+            call_block_proc = ->(block_args, _self_type) do
+              block_receiver = block_args.first || KatakataIrb::Types::OBJECT
+              @dig_targets.resolve block_receiver, scope
+              KatakataIrb::Types::OBJECT
+            end
+          else
+            call_block_proc = ->(block_args, _self_type) do
+              block_receiver, *rest = block_args
+              block_receiver ? simulate_call(block_receiver || KatakataIrb::Types::OBJECT, block_sym, rest, nil, nil) : KatakataIrb::Types::OBJECT
+            end
           end
         elsif node.block
           call_block_proc = ->(block_args, block_self_type) do
@@ -881,5 +891,9 @@ class KatakataIrb::TypeSimulator
     program = parents.first
     new(dig_targets).evaluate_program program, KatakataIrb::Scope.from_binding(binding, program.locals)
     KatakataIrb::Types::NIL
+  end
+
+  def self.calculate_block_symbol_receiver(binding, parents, symbol_node)
+    calculate_receiver binding, parents, symbol_node
   end
 end
