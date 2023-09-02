@@ -703,14 +703,26 @@ class KatakataIrb::TypeSimulator
       # ignore
     when YARP::SplatNode
       evaluate_write node.expression, KatakataIrb::Types::InstanceType.new(Array, Elem: value), scope
-    when YARP::LocalVariableWriteNode, YARP::GlobalVariableWriteNode, YARP::InstanceVariableWriteNode, YARP::ClassVariableWriteNode
-      scope[node.name_loc.slice] = value
+    when YARP::LocalVariableTargetNode, YARP::GlobalVariableTargetNode, YARP::InstanceVariableTargetNode, YARP::ClassVariableTargetNode
+      scope[node.slice] = value
     end
   end
 
   def evaluate_multi_write(node, values, scope)
     values = sized_splat values, :to_ary, node.targets.size unless values.is_a? Array
-    node.targets.zip values do |target, value|
+    splat_index = node.targets.find_index { _1.is_a? YARP::SplatNode }
+    if splat_index
+      pre_targets = node.targets[0...splat_index]
+      splat_target = node.targets[splat_index]
+      post_targets = node.targets[splat_index + 1..]
+      pre_values = values.shift pre_targets.size
+      post_values = values.pop post_targets.size
+      splat_value = KatakataIrb::Types::UnionType[*values]
+      zips = pre_targets.zip(pre_values) + [[splat_target, splat_value]] + post_targets.zip(post_values)
+    else
+      zips = node.targets.zip(values)
+    end
+    zips.each do |target, value|
       evaluate_write target, value, scope
     end
   end
