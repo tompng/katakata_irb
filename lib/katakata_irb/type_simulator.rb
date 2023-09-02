@@ -203,7 +203,7 @@ class KatakataIrb::TypeSimulator
       end
       receiver_type = node.receiver ? simulate_evaluate(node.receiver, scope) : scope.self_type
       evaluate_method = lambda do |scope|
-        args_types, kwargs_types, block_sym, _has_block = evaluate_call_node_arguments node, scope
+        args_types, kwargs_types, block_sym, has_block = evaluate_call_node_arguments node, scope
 
         if block_sym
           block_sym_node = node.arguments.arguments.last.expression
@@ -248,7 +248,7 @@ class KatakataIrb::TypeSimulator
               end
             end
           end
-        else
+        elsif has_block
           call_block_proc = ->(_block_args, _self_type) { KatakataIrb::Types::OBJECT }
         end
         simulate_call receiver_type, node.name, args_types, kwargs_types, call_block_proc
