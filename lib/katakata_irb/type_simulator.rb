@@ -359,7 +359,7 @@ class KatakataIrb::TypeSimulator
     when YARP::ElseNode
       node.statements ? simulate_evaluate(node.statements, scope) : KatakataIrb::Types::NIL
     when YARP::WhileNode, YARP::UntilNode
-      inner_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::BREAK_RESULT => nil }, passthrough: true
+      inner_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::BREAK_RESULT => nil }
       simulate_evaluate node.predicate, inner_scope
       if node.statements
         inner_scope.conditional do |s|
@@ -404,7 +404,7 @@ class KatakataIrb::TypeSimulator
       evaluate_list_splat_items node.arguments.arguments, scope if node.arguments
       KatakataIrb::Types::OBJECT
     when YARP::BeginNode
-      rescue_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::RAISE_BREAK => nil }, passthrough: true if node.rescue_clause
+      rescue_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::RAISE_BREAK => nil } if node.rescue_clause
       return_type = node.statements ? simulate_evaluate(node.statements, rescue_scope || scope) : KatakataIrb::Types::NIL
       if node.rescue_clause
         rescue_scope.merge_jumps
@@ -443,7 +443,7 @@ class KatakataIrb::TypeSimulator
         return_type
       end
     when YARP::RescueModifierNode
-      rescue_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::RAISE_BREAK => nil }, passthrough: true
+      rescue_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::RAISE_BREAK => nil }
       a = simulate_evaluate node.expression, rescue_scope
       rescue_scope.merge_jumps
       scope.update rescue_scope
@@ -482,7 +482,7 @@ class KatakataIrb::TypeSimulator
     when YARP::ForNode
       node.statements
       collection = simulate_evaluate node.collection, scope
-      inner_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::BREAK_RESULT => nil }, passthrough: true
+      inner_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::BREAK_RESULT => nil }
       inner_scope.conditional do |s|
         evaluate_multi_write node.index, collection, s
         simulate_evaluate node.statements, s if node.statements

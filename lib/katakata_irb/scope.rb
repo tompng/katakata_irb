@@ -102,14 +102,13 @@ module KatakataIrb
 
     def self.from_binding(binding, locals) = new(BaseScope.new(binding, binding.eval('self'), locals))
 
-    def initialize(parent, table = {}, trace_cvar: true, trace_ivar: true, trace_lvar: true, passthrough: false)
+    def initialize(parent, table = {}, trace_cvar: true, trace_ivar: true, trace_lvar: true)
       @table = table
       @parent = parent
-      @level = parent.level + (passthrough ? 0 : 1)
+      @level = parent.level + 1
       @trace_cvar = trace_cvar
       @trace_ivar = trace_ivar
       @trace_lvar = trace_lvar
-      @passthrough = passthrough
       @terminated = false
       @jump_branches = []
       @mergeable_changes = @changes = table.transform_values { [level, _1] }
@@ -166,8 +165,8 @@ module KatakataIrb
     end
 
     def []=(name, value)
-      variable_level = level_of(name) || level
-      @changes[name] = [variable_level, value]
+      variable_level = level_of name
+      @changes[name] = [variable_level, value] if variable_level
     end
 
     def self_type
@@ -198,7 +197,7 @@ module KatakataIrb
     end
 
     def never(&block)
-      block.call Scope.new(self, { BREAK_RESULT => nil, NEXT_RESULT => nil, PATTERNMATCH_BREAK => nil, RETURN_RESULT => nil, RAISE_BREAK => nil }, passthrough: true)
+      block.call Scope.new(self, { BREAK_RESULT => nil, NEXT_RESULT => nil, PATTERNMATCH_BREAK => nil, RETURN_RESULT => nil, RAISE_BREAK => nil })
     end
 
     def run(*args, **option)
@@ -212,7 +211,7 @@ module KatakataIrb
       results = []
       branches = []
       blocks.each do |block|
-        scope = Scope.new self, passthrough: true
+        scope = Scope.new self
         result = block.call scope
         next if scope.terminated?
         results << result
