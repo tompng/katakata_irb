@@ -123,8 +123,7 @@ class KatakataIrb::TypeSimulator
       node.statements ? simulate_evaluate(node.statements, scope) : KatakataIrb::Types::NIL
       KatakataIrb::Types::STRING
     when YARP::ArrayNode
-      elem_type = evaluate_list_splat_items node.elements, scope
-      KatakataIrb::Types::InstanceType.new Array, Elem: elem_type
+      KatakataIrb::Types.array_of evaluate_list_splat_items(node.elements, scope)
     when YARP::HashNode, YARP::KeywordHashNode
       keys = []
       values = []
@@ -389,8 +388,7 @@ class KatakataIrb::TypeSimulator
         elsif arguments.size == 1 && !arguments.first.is_a?(YARP::SplatNode)
           simulate_evaluate arguments.first, scope
         else
-          elem_type = evaluate_list_splat_items arguments, scope
-          KatakataIrb::Types::InstanceType.new(Array, Elem: elem_type)
+          KatakataIrb::Types.array_of evaluate_list_splat_items(arguments, scope)
         end
       )
       scope.terminate_with internal_key, jump_value
@@ -513,7 +511,7 @@ class KatakataIrb::TypeSimulator
       beg_type = simulate_evaluate node.left, scope if node.left
       end_type = simulate_evaluate node.right, scope if node.right
       elem = (KatakataIrb::Types::UnionType[*[beg_type, end_type].compact]).nonnillable
-      KatakataIrb::Types::InstanceType.new Range, { Elem: elem }
+      KatakataIrb::Types::InstanceType.new Range, Elem: elem
     when YARP::DefinedNode
       scope.conditional { simulate_evaluate node.value, _1 }
       KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
@@ -578,7 +576,7 @@ class KatakataIrb::TypeSimulator
         assign_required_parameter n, v, scope
       end
     when YARP::SplatNode
-      splat_value = value ? KatakataIrb::Types::InstanceType.new(Array, Elem: value) : KatakataIrb::Types::ARRAY
+      splat_value = value ? KatakataIrb::Types.array_of(value) : KatakataIrb::Types::ARRAY
       assign_required_parameter node.expression, splat_value, scope
     end
   end
@@ -608,7 +606,7 @@ class KatakataIrb::TypeSimulator
       assign_required_parameter n, v, scope
     end
     if node.rest&.name
-      scope[node.rest.name.to_s] = KatakataIrb::Types::InstanceType.new(Array, Elem: KatakataIrb::Types::UnionType[*rest])
+      scope[node.rest.name.to_s] = KatakataIrb::Types.array_of(*rest)
     end
     node.keywords.each do |n|
       name = n.name.to_s.delete(':')
@@ -633,8 +631,7 @@ class KatakataIrb::TypeSimulator
       elsif args.size == 1
         scope['_1'] = args.first
       else
-        elem = KatakataIrb::Types::UnionType[*args]
-        scope['_1'] = KatakataIrb::Types::InstanceType.new(Array, Elem: elem)
+        scope['_1'] = KatakataIrb::Types.array_of(*args)
       end
     else
       args = sized_splat(args.first, :to_ary, max_num) if args.size == 1
@@ -697,7 +694,7 @@ class KatakataIrb::TypeSimulator
       value = capture_type unless capture_type.types.empty? || capture_type.types == [KatakataIrb::Types::OBJECT]
       evaluate_match_pattern value, pattern.target, scope
     when YARP::SplatNode
-      value = KatakataIrb::Types::InstanceType.new(Array, Elem: value)
+      value = KatakataIrb::Types.array_of value
       evaluate_match_pattern value, pattern.expression, scope if pattern.expression
       value
     else
@@ -721,7 +718,7 @@ class KatakataIrb::TypeSimulator
     when YARP::CallNode
       # ignore
     when YARP::SplatNode
-      evaluate_write node.expression, KatakataIrb::Types::InstanceType.new(Array, Elem: value), scope
+      evaluate_write node.expression, KatakataIrb::Types.array_of(value), scope
     when YARP::LocalVariableTargetNode, YARP::GlobalVariableTargetNode, YARP::InstanceVariableTargetNode, YARP::ClassVariableTargetNode
       scope[node.slice] = value
     end

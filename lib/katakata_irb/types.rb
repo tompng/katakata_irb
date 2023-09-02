@@ -323,6 +323,11 @@ module KatakataIrb::Types
 
   BOOLEAN = UnionType[TRUE, FALSE]
 
+  def self.array_of(*types)
+    type = types.size >= 2 ? UnionType[*types] : types.first || OBJECT
+    InstanceType.new Array, Elem: type
+  end
+
   def self.from_rbs_type(return_type, self_type, extra_vars = {})
     case return_type
     when RBS::Types::Bases::Self
