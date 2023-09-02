@@ -173,7 +173,7 @@ class KatakataIrb::TypeSimulator
     when YARP::NumberedReferenceReadNode, YARP::BackReferenceReadNode
       KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
     when YARP::LocalVariableReadNode
-      scope[node.constant_id.to_s] || KatakataIrb::Types::NIL
+      scope[node.name.to_s] || KatakataIrb::Types::NIL
     when YARP::ConstantReadNode, YARP::GlobalVariableReadNode, YARP::InstanceVariableReadNode, YARP::ClassVariableReadNode
       scope[node.slice] || KatakataIrb::Types::NIL
     when YARP::CallNode
@@ -181,7 +181,7 @@ class KatakataIrb::TypeSimulator
       if node.receiver.nil? && node.name.match?(/\A_[1-9]\z/) && node.opening_loc.nil?
         # Numbered parameter is CallNode. `_1` is numbered parameter but `_1()` is method call.
         # https://github.com/ruby/yarp/issues/1158
-        return scope[node.name] || KatakataIrb::Types::NIL
+        return scope[node.name.to_s] || KatakataIrb::Types::NIL
       elsif node.receiver.nil? && node.name == 'raise'
         scope.terminate_with KatakataIrb::Scope::RAISE_BREAK, KatakataIrb::Types::TRUE
         return KatakataIrb::Types::NIL
@@ -280,18 +280,18 @@ class KatakataIrb::TypeSimulator
         simulate_call left, node.operator, [right], nil, nil, name_match: false
       end
     when YARP::ClassVariableOperatorWriteNode, YARP::InstanceVariableOperatorWriteNode, YARP::LocalVariableOperatorWriteNode, YARP::GlobalVariableOperatorWriteNode
-      left = scope[node.name] || KatakataIrb::Types::OBJECT
+      left = scope[node.name.to_s] || KatakataIrb::Types::OBJECT
       right = simulate_evaluate node.value, scope
-      scope[node.name] = simulate_call left, node.operator, [right], nil, nil, name_match: false
+      scope[node.name.to_s] = simulate_call left, node.operator, [right], nil, nil, name_match: false
     when YARP::ClassVariableAndWriteNode, YARP::InstanceVariableAndWriteNode, YARP::LocalVariableAndWriteNode, YARP::GlobalVariableAndWriteNode
       right = scope.conditional { simulate_evaluate node.value, scope }
-      scope[node.name] = KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
+      scope[node.name.to_s] = KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
     when YARP::ClassVariableOrWriteNode, YARP::InstanceVariableOrWriteNode, YARP::LocalVariableOrWriteNode, YARP::GlobalVariableOrWriteNode
-      left = scope[node.name] || KatakataIrb::Types::OBJECT
+      left = scope[node.name.to_s] || KatakataIrb::Types::OBJECT
       right = scope.conditional { simulate_evaluate node.value, scope }
-      scope[node.name] = KatakataIrb::Types::UnionType[left, right]
+      scope[node.name.to_s] = KatakataIrb::Types::UnionType[left, right]
     when YARP::ConstantOperatorWriteNode
-      left = scope[node.name] || KatakataIrb::Types::OBJECT
+      left = scope[node.name.to_s] || KatakataIrb::Types::OBJECT
       right = simulate_evaluate node.value, scope
       # TODO: write
       simulate_call left, node.operator, [right], nil, nil, name_match: false
@@ -300,7 +300,7 @@ class KatakataIrb::TypeSimulator
       # TODO: write
       KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
     when YARP::ConstantOrWriteNode
-      left = scope[node.name] || KatakataIrb::Types::OBJECT
+      left = scope[node.name.to_s] || KatakataIrb::Types::OBJECT
       right = scope.conditional { simulate_evaluate node.value, scope }
       # TODO: write
       KatakataIrb::Types::UnionType[left, right]
@@ -430,7 +430,7 @@ class KatakataIrb::TypeSimulator
           error_type = KatakataIrb::Types::UnionType[*error_types]
           case node.reference
           when YARP::LocalVariableTargetNode
-            s[node.reference.constant_id.to_s] = error_type
+            s[node.reference.name.to_s] = error_type
           when YARP::InstanceVariableTargetNode, YARP::ClassVariableTargetNode, YARP::GlobalVariableTargetNode
             s[node.reference.slice] = error_type
           when YARP::CallNode
@@ -571,7 +571,7 @@ class KatakataIrb::TypeSimulator
   def assign_required_parameter(node, value, scope)
     case node
     when YARP::RequiredParameterNode
-      scope[node.constant_id.to_s] = value || KatakataIrb::Types::OBJECT
+      scope[node.name.to_s] = value || KatakataIrb::Types::OBJECT
     when YARP::RequiredDestructuredParameterNode
       values = value ? sized_splat(value, :to_ary, node.parameters.size) : []
       node.parameters.zip values do |n, v|
@@ -602,25 +602,25 @@ class KatakataIrb::TypeSimulator
     node.optionals.zip opts do |n, v|
       values = [v]
       values << simulate_evaluate(n.value, scope) if n.value
-      scope[n.name] = KatakataIrb::Types::UnionType[*values.compact]
+      scope[n.name.to_s] = KatakataIrb::Types::UnionType[*values.compact]
     end
     node.posts.zip posts do |n, v|
       assign_required_parameter n, v, scope
     end
     if node.rest&.name
-      scope[node.rest.name] = KatakataIrb::Types::InstanceType.new(Array, Elem: KatakataIrb::Types::UnionType[*rest])
+      scope[node.rest.name.to_s] = KatakataIrb::Types::InstanceType.new(Array, Elem: KatakataIrb::Types::UnionType[*rest])
     end
     node.keywords.each do |n|
-      name = n.name.delete(':')
+      name = n.name.to_s.delete(':')
       values = [kwargs.delete(name)]
       values << simulate_evaluate(n.value, scope) if n.value
       scope[name] = KatakataIrb::Types::UnionType[*values.compact]
     end
     if node.keyword_rest.is_a?(YARP::KeywordRestParameterNode) && node.keyword_rest.name
-      scope[node.keyword_rest.name] = KatakataIrb::Types::InstanceType.new(Hash, K: KatakataIrb::Types::SYMBOL, V: KatakataIrb::Types::UnionType[*kwargs.values])
+      scope[node.keyword_rest.name.to_s] = KatakataIrb::Types::InstanceType.new(Hash, K: KatakataIrb::Types::SYMBOL, V: KatakataIrb::Types::UnionType[*kwargs.values])
     end
     if node.block&.name
-      scope[node.block.name] = KatakataIrb::Types::PROC
+      scope[node.block.name.to_s] = KatakataIrb::Types::PROC
     end
     # TODO YARP::ParametersNode
   end
@@ -689,7 +689,7 @@ class KatakataIrb::TypeSimulator
     when YARP::PinnedVariableNode
       simulate_evaluate pattern.variable, scope
     when YARP::LocalVariableTargetNode
-      scope[pattern.constant_id.to_s] = value
+      scope[pattern.name.to_s] = value
     when YARP::AlternationPatternNode
       KatakataIrb::Types::UnionType[evaluate_match_pattern(value, pattern.left, scope), evaluate_match_pattern(value, pattern.right, scope)]
     when YARP::CapturePatternNode
