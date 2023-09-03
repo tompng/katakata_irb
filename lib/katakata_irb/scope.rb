@@ -204,7 +204,7 @@ module KatakataIrb
       constants = [*module_nesting, ''].flat_map do |nest|
         prefix = nest.is_a?(Module) ? "::#{nest}::" : "#{nest}::"
         prefix = "::#{prefix}" unless prefix.start_with? '::'
-        @table.keys.select { _1.start_with? prefix }.map { _1.delete_prefix prefix }
+        @table.keys.select { _1.start_with? prefix }.map { _1.delete_prefix(prefix).split('::').first }
       end.uniq
       constants |= @parent.table_constants if @parent.mutable?
       constants

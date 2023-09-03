@@ -74,7 +74,7 @@ module KatakataIrb::Completor
       candidates.map(&:to_s).select { !_1.match?(all_symbols_pattern) && _1.start_with?(name) }.uniq.sort.map do
         target + _1[name.size..]
       end
-    rescue => e
+    rescue SyntaxError, StandardError => e
       KatakataIrb.last_completion_error = e
       KatakataIrb.log_puts
       KatakataIrb.log_puts "#{e.inspect} stored to KatakataIrb.last_completion_error"
@@ -236,8 +236,8 @@ module KatakataIrb::Completor
     in { event: :on_ignored_by_ripper, tok: '.' }
       suffix = 'method'
       name = ''
-    in { dot: true }
-      suffix = 'method'
+    in { dot: true, tok: }
+      suffix = tok == '::' ? 'Const' : 'method'
       name = ''
     in { event: :on_symbeg }
       suffix = 'symbol'

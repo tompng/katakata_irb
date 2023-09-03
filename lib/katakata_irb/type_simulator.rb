@@ -463,6 +463,10 @@ class KatakataIrb::TypeSimulator
       scope.update sclass_scope
       result
     when YARP::ModuleNode, YARP::ClassNode
+      unless node.constant_path.is_a?(YARP::ConstantReadNode) || node.constant_path.is_a?(YARP::ConstantPathNode)
+        # Syntax error code, example: `module a.b; end`
+        return KatakataIrb::Types::NIL
+      end
       const_type, parent_module, name = evaluate_constant_node node.constant_path, scope
       if node.is_a? YARP::ModuleNode
         module_types = const_type.types.select { _1.is_a?(KatakataIrb::Types::SingletonType) && !_1.module_or_class.is_a?(Class) }
