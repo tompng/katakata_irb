@@ -3,30 +3,35 @@ require_relative 'types'
 
 module KatakataIrb
   class BaseScope
-    SELF = '%self'
     BREAK_RESULT = '%break'
     NEXT_RESULT = '%next'
     RETURN_RESULT = '%return'
     PATTERNMATCH_BREAK = '%match'
     RAISE_BREAK = '%raise'
 
+    attr_reader :module_nesting
+
     def initialize(binding, self_object, local_variables)
-      @binding, @self_object = binding, self_object
-      @cache = { SELF => KatakataIrb::Types.type_from_object(self_object) }
+      @binding = binding
+      @self_object = self_object
+      @cache = {}
+      @module_nesting = binding.eval 'Module.nesting'
       binding_local_variables = binding.local_variables
       uninitialized_locals = local_variables - binding_local_variables
       uninitialized_locals.each { @cache[_1] = KatakataIrb::Types::NIL }
       @local_variables = (local_variables | binding_local_variables).map(&:to_s).to_set
-      @global_variables = global_variables.map(&:to_s).to_set
+      @global_variables = Kernel.global_variables.map(&:to_s).to_set
     end
 
     def level() = 0
 
-    def level_of(_name)
-      0
-    end
+    def level_of(_name) = 0
 
     def mutable?() = false
+
+    def get_const(absolute_name)
+      BaseScope.type_of(fallback: nil) { @binding.eval absolute_name }
+    end
 
     def [](name)
       @cache[name] ||= (
@@ -47,12 +52,12 @@ module KatakataIrb
     end
 
     def self_type
-      self[SELF]
+      KatakataIrb::Types.type_from_object @self_object
     end
 
-    def local_variables
-      @local_variables.to_a
-    end
+    def local_variables() = @local_variables.to_a
+
+    def global_variables() = @global_variables.to_a
 
     def self.type_of(fallback: KatakataIrb::Types::OBJECT)
       begin
@@ -71,7 +76,7 @@ module KatakataIrb
         :gvar
       elsif name.start_with? '%'
         :internal
-      elsif name[0].downcase != name[0]
+      elsif name.start_with?('::') || name[0].downcase != name[0]
         :const
       else
         :lvar
@@ -80,16 +85,18 @@ module KatakataIrb
   end
 
   class Scope < BaseScope
-    attr_reader :parent, :mergeable_changes, :level
+    attr_reader :parent, :mergeable_changes, :level, :module_nesting
 
     def self.from_binding(binding, locals) = new(BaseScope.new(binding, binding.eval('self'), locals))
 
-    def initialize(parent, table = {}, trace_cvar: true, trace_ivar: true, trace_lvar: true)
+    def initialize(parent, table = {}, trace_cvar: true, trace_ivar: true, trace_lvar: true, self_type: nil, nesting: nil)
       @parent = parent
       @level = parent.level + 1
       @trace_cvar = trace_cvar
       @trace_ivar = trace_ivar
       @trace_lvar = trace_lvar
+      @module_nesting = nesting ? [nesting, *parent.module_nesting] : parent.module_nesting
+      @self_type = self_type
       @terminated = false
       @jump_branches = []
       @mergeable_changes = @table = table.transform_values { [level, _1] }
@@ -134,7 +141,23 @@ module KatakataIrb
       variable_level || parent.level_of(name)
     end
 
+    def get_const(absolute_name)
+      l, value = @table[absolute_name]
+      l ? value : @parent.get_const(absolute_name)
+    end
+
     def [](name)
+      if BaseScope.type_by_name(name) == :const
+        return get_const name if name.start_with? '::'
+
+        module_nesting.each do |nesting|
+          n = "#{nesting}::#{name}"
+          n = "::#{n}" unless n.start_with? '::'
+          v = get_const(n)
+          return v if v
+        end
+        return get_const("::#{name}") || KatakataIrb::Types::NIL
+      end
       level, value = @table[name]
       if level
         value
@@ -144,12 +167,29 @@ module KatakataIrb
     end
 
     def []=(name, value)
+      if BaseScope.type_by_name(name) == :const
+        if name.start_with? '::'
+          @table[name] = [0, value]
+        else
+          absolute_name = "#{module_nesting.first}::#{name}"
+          absolute_name = "::#{absolute_name}" unless absolute_name.start_with? '::'
+          @table[absolute_name] = [0, value]
+        end
+        return
+      end
       variable_level = level_of name
       @table[name] = [variable_level, value] if variable_level
     end
 
     def self_type
-      self[SELF]
+      @self_type || @parent.self_type
+    end
+
+    def global_variables
+      gvar_keys = @table.keys.select do |name|
+        BaseScope.type_by_name(name) == :gvar
+      end
+      gvar_keys | @parent.global_variables
     end
 
     def local_variables
@@ -158,6 +198,22 @@ module KatakataIrb
       end
       lvar_keys |= @parent.local_variables if @trace_lvar
       lvar_keys
+    end
+
+    def table_constants
+      constants = [*module_nesting, ''].flat_map do |nest|
+        prefix = nest.is_a?(Module) ? "::#{nest}::" : "#{nest}::"
+        prefix = "::#{prefix}" unless prefix.start_with? '::'
+        @table.keys.select { _1.start_with? prefix }.map { _1.delete_prefix prefix }
+      end.uniq
+      constants |= @parent.table_constants if @parent.mutable?
+      constants
+    end
+
+    def constants
+      [*module_nesting, Object].flat_map do |nest|
+        nest.is_a?(Module) ? nest.constants : (eval(nest).constants rescue [])
+      end.map(&:to_s) | table_constants
     end
 
     def merge_jumps

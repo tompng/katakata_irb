@@ -48,8 +48,12 @@ module KatakataIrb::Completor
         end
       in [:call_or_const, type, name, self_call]
         ((self_call ? type.all_methods: type.methods).map(&:to_s) - HIDDEN_METHODS) | type.constants
-      in [:const, type, name]
-        type.constants
+      in [:const, type, name, scope]
+        if type
+          type.constants
+        else
+          scope.constants.sort
+        end
       in [:ivar, name, *_scope]
         # TODO: scope
         ivars = binding.eval('self').instance_variables rescue []
@@ -58,8 +62,8 @@ module KatakataIrb::Completor
       in [:cvar, name, *_scope]
         # TODO: scope
         binding.eval('self').class_variables rescue []
-      in [:gvar, name]
-        global_variables
+      in [:gvar, name, scope]
+        scope.global_variables
       in [:symbol, name]
         Symbol.all_symbols.map { _1.inspect[1..] }
       in [:call, type, name, self_call]
@@ -104,10 +108,10 @@ module KatakataIrb::Completor
       case KatakataIrb::Completor.prev_analyze_result
       in [:call_or_const, type, _name, _self_call]
         call_or_const_doc.call type
-      in [:const, type, _name]
+      in [:const, type, _name, scope]
         # when prev_analyze_result is const, current analyze result might be call
-        call_or_const_doc.call type
-      in [:gvar, _name]
+        call_or_const_doc.call type if type
+      in [:gvar, _name, _scope]
         name
       in [:call, type, _name, _self_call]
         method_doc.call type
@@ -305,16 +309,15 @@ module KatakataIrb::Completor
       if parents.last.is_a? YARP::ConstantPathNode
         path_node = parents.last
         if path_node.parent # A::B
-          [:const, calculate_receiver.call(path_node.parent), name]
+          [:const, calculate_receiver.call(path_node.parent), name, nil]
         else # ::A
-          [:const, KatakataIrb::Types::SingletonType.new(Object), name]
+          [:const, KatakataIrb::Types::SingletonType.new(Object), name, nil]
         end
       else
-        # TODO: module nesting
-        [:const, KatakataIrb::Types::SingletonType.new(Object), name]
+        [:const, nil, name, calculate_scope.call]
       end
     when YARP::GlobalVariableReadNode, YARP::GlobalVariableTargetNode
-      [:gvar, name]
+      [:gvar, name, calculate_scope.call]
     when YARP::InstanceVariableReadNode, YARP::InstanceVariableTargetNode
       [:ivar, name, calculate_scope.call.self_type]
     when YARP::ClassVariableReadNode, YARP::ClassVariableTargetNode

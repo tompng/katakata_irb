@@ -51,7 +51,7 @@ class TestTypeAnalyze < Minitest::Test
       assert_equal [:gvar, '$a'], analyze('begin; rescue => $a')[0, 2]
       assert_equal [:ivar, '@a'], analyze('begin; rescue => @a')[0, 2]
       assert_equal [:cvar, '@@a'], analyze('begin; rescue => @@a')[0, 2]
-      assert (analyze('begin; rescue => A') in [:const, _, 'A'])
+      assert (analyze('begin; rescue => A') in [:const, _, 'A', _])
       # Do not complete assigning to non-variable in rescue
       # assert_nil analyze('begin; rescue => (a).b')
       # assert_nil analyze('begin; rescue => (a)::b')

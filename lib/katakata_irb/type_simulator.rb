@@ -71,7 +71,8 @@ class KatakataIrb::TypeSimulator
         params_table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
         method_scope = KatakataIrb::Scope.new(
           scope,
-          { **params_table, KatakataIrb::Scope::SELF => self_type, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil },
+          { **params_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil },
+          self_type: self_type,
           trace_lvar: false
         )
         if node.parameters
@@ -151,10 +152,8 @@ class KatakataIrb::TypeSimulator
     when YARP::ParenthesesNode
       node.body ? simulate_evaluate(node.body, scope) : KatakataIrb::Types::NIL
     when YARP::ConstantPathNode
-      name = node.child.slice
-      return KatakataIrb::BaseScope.type_of { Object.const_get name } if node.parent.nil?
-      receiver = simulate_evaluate node.parent, scope
-      receiver.is_a?(KatakataIrb::Types::SingletonType) ? KatakataIrb::BaseScope.type_of { receiver.module_or_class.const_get name } : KatakataIrb::Types::NIL
+      type, = evaluate_constant_node node, scope
+      type
     when YARP::SelfNode
       scope.self_type
     when YARP::TrueNode
@@ -212,8 +211,7 @@ class KatakataIrb::TypeSimulator
               locals += (1..max_numparams).map { "_#{_1}" } unless node.block.parameters
               params_table = locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
               table = { **params_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil }
-              table[KatakataIrb::Scope::SELF] = block_self_type if block_self_type
-              block_scope = KatakataIrb::Scope.new s, table
+              block_scope = KatakataIrb::Scope.new s, table, self_type: block_self_type
               # TODO kwargs
               if node.block.parameters&.parameters
                 assign_parameters node.block.parameters.parameters, block_scope, block_args, {}
@@ -330,8 +328,7 @@ class KatakataIrb::TypeSimulator
       scope.update block_scope
       KatakataIrb::Types::ProcType.new
     when YARP::ConstantWriteNode
-      # TODO write
-      simulate_evaluate node.value, scope
+      scope[node.name.to_s] = simulate_evaluate node.value, scope
     when YARP::LocalVariableWriteNode, YARP::GlobalVariableWriteNode, YARP::InstanceVariableWriteNode, YARP::ClassVariableWriteNode
       scope[node.name_loc.slice] = simulate_evaluate node.value, scope
     when YARP::MultiWriteNode
@@ -427,9 +424,9 @@ class KatakataIrb::TypeSimulator
           error_types << KatakataIrb::Types::InstanceType.new(StandardError) if error_types.empty?
           error_type = KatakataIrb::Types::UnionType[*error_types]
           case node.reference
-          when YARP::LocalVariableTargetNode
+          when YARP::LocalVariableTargetNode, YARP::InstanceVariableTargetNode, YARP::ClassVariableTargetNode
             s[node.reference.name.to_s] = error_type
-          when YARP::InstanceVariableTargetNode, YARP::ClassVariableTargetNode, YARP::GlobalVariableTargetNode
+          when YARP::GlobalVariableTargetNode, YARP::ConstantTargetNode
             s[node.reference.slice] = error_type
           when YARP::CallNode
             simulate_evaluate node.reference, scope
@@ -449,35 +446,58 @@ class KatakataIrb::TypeSimulator
       scope.update rescue_scope
       b = scope.conditional { simulate_evaluate node.rescue_expression, _1 }
       KatakataIrb::Types::UnionType[a, b]
-    when YARP::ModuleNode
-      module_types = simulate_evaluate(node.constant_path, scope).types.grep(KatakataIrb::Types::SingletonType)
-      module_types << KatakataIrb::Types::MODULE if module_types.empty?
-      table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
-      module_scope = KatakataIrb::Scope.new(scope, { **table, KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*module_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
-      result = node.body ? simulate_evaluate(node.body, module_scope) : KatakataIrb::Types::NIL
-      scope.update module_scope
-      result
     when YARP::SingletonClassNode
       klass_types = simulate_evaluate(node.expression, scope).types.filter_map do |type|
         KatakataIrb::Types::SingletonType.new type.klass if type.is_a? KatakataIrb::Types::InstanceType
       end
       klass_types = [KatakataIrb::Types::CLASS] if klass_types.empty?
       table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
-      sclass_scope = KatakataIrb::Scope.new(scope, { **table, KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*klass_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
+      sclass_scope = KatakataIrb::Scope.new(
+        scope,
+        { **table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil },
+        trace_ivar: false,
+        trace_lvar: false,
+        self_type: KatakataIrb::Types::UnionType[*klass_types]
+      )
       result = node.body ? simulate_evaluate(node.body, sclass_scope) : KatakataIrb::Types::NIL
       scope.update sclass_scope
       result
-    when YARP::ClassNode
-      klass_types = simulate_evaluate(node.constant_path, scope).types
-      klass_types += simulate_evaluate(node.superclass, scope).types if node.superclass
-      klass_types = klass_types.select do |type|
-        type.is_a?(KatakataIrb::Types::SingletonType) && type.module_or_class.is_a?(Class)
+    when YARP::ModuleNode, YARP::ClassNode
+      const_type, parent_module, name = evaluate_constant_node node.constant_path, scope
+      if node.is_a? YARP::ModuleNode
+        module_types = const_type.types.select { _1.is_a?(KatakataIrb::Types::SingletonType) && !_1.module_or_class.is_a?(Class) }
+        module_types << KatakataIrb::Types::MODULE if module_types.empty?
+      else
+        select_class_type = -> { _1.is_a?(KatakataIrb::Types::SingletonType) && _1.module_or_class.is_a?(Class) }
+        module_types = const_type.types.select(&select_class_type)
+        module_types += simulate_evaluate(node.superclass, scope).types.select(&select_class_type) if node.superclass
+        module_types << KatakataIrb::Types::CLASS if module_types.empty?
       end
-      klass_types << KatakataIrb::Types::CLASS if klass_types.empty?
+      return KatakataIrb::Types::NIL unless node.body
+
       table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
-      klass_scope = KatakataIrb::Scope.new(scope, { **table, KatakataIrb::Scope::SELF => KatakataIrb::Types::UnionType[*klass_types], KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }, trace_cvar: false, trace_ivar: false, trace_lvar: false)
-      result = node.body ? simulate_evaluate(node.body, klass_scope) : KatakataIrb::Types::NIL
-      scope.update klass_scope
+      if parent_module.is_a?(Module) || parent_module.nil?
+        value = parent_module.const_get name if parent_module&.const_defined? name
+        if value.is_a? Module
+          nesting = value
+        else
+          nesting = "#{parent_module || scope.module_nesting.first}::#{name}"
+          nesting = "::#{nesting}" unless nesting.start_with? '::'
+          nesting_value = node.is_a?(YARP::ModuleNode) ? KatakataIrb::Types::MODULE : KatakataIrb::Types::CLASS
+        end
+      end
+      module_scope = KatakataIrb::Scope.new(
+        scope,
+        { **table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil },
+        trace_cvar: false,
+        trace_ivar: false,
+        trace_lvar: false,
+        self_type: KatakataIrb::Types::UnionType[*module_types],
+        nesting: nesting
+      )
+      module_scope[nesting] = nesting_value if nesting_value
+      result = simulate_evaluate(node.body, module_scope)
+      scope.update module_scope
       result
     when YARP::ForNode
       node.statements
@@ -580,6 +600,32 @@ class KatakataIrb::TypeSimulator
       assign_required_parameter node.expression, splat_value, scope
     end
   end
+
+  def evaluate_constant_node(node, scope)
+    case node
+    when YARP::ConstantPathNode
+      name = node.child.slice
+      if node.parent
+        receiver = simulate_evaluate node.parent, scope
+        if receiver.is_a? KatakataIrb::Types::SingletonType
+          parent_module = receiver.module_or_class
+          type = KatakataIrb::BaseScope.type_of { parent_module.const_get name }
+        else
+          parent_module = :unknown
+          type = KatakataIrb::Types::NIL
+        end
+      else
+        parent_module = Object
+        type = KatakataIrb::BaseScope.type_of { Object.const_get name }
+      end
+    when YARP::ConstantReadNode
+      name = node.slice
+      type = scope[name]
+    end
+    # TODO: read type from scope and parent_module
+    [type, parent_module, name]
+  end
+
 
   def assign_parameters(node, scope, args, kwargs)
     args = args.dup
