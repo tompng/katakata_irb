@@ -47,21 +47,18 @@ module KatakataIrb::Completor
           path_completor.retrieve_files_to_require_relative_from_current_dir
         end
       in [:call_or_const, type, name, self_call]
-        ((self_call ? type.all_methods: type.methods).map(&:to_s) - HIDDEN_METHODS) | type.constants
+        ((self_call ? type.all_methods : type.methods).map(&:to_s) - HIDDEN_METHODS) | type.constants
       in [:const, type, name, scope]
         if type
           type.constants
         else
           scope.constants.sort
         end
-      in [:ivar, name, *_scope]
-        # TODO: scope
-        ivars = binding.eval('self').instance_variables rescue []
-        cvars = (binding.eval('self').class_variables rescue nil) if name == '@'
-        ivars | (cvars || [])
-      in [:cvar, name, *_scope]
-        # TODO: scope
-        binding.eval('self').class_variables rescue []
+      in [:ivar, name, scope]
+        ivars = scope.instance_variables.sort
+        name == '@' ? ivars + scope.class_variables.sort : ivars
+      in [:cvar, name, scope]
+        scope.class_variables
       in [:gvar, name, scope]
         scope.global_variables
       in [:symbol, name]
@@ -319,9 +316,9 @@ module KatakataIrb::Completor
     when YARP::GlobalVariableReadNode, YARP::GlobalVariableTargetNode
       [:gvar, name, calculate_scope.call]
     when YARP::InstanceVariableReadNode, YARP::InstanceVariableTargetNode
-      [:ivar, name, calculate_scope.call.self_type]
+      [:ivar, name, calculate_scope.call]
     when YARP::ClassVariableReadNode, YARP::ClassVariableTargetNode
-      [:cvar, name, calculate_scope.call.self_type]
+      [:cvar, name, calculate_scope.call]
     when YARP::DefNode, YARP::RequiredParameterNode
       # do nothing
     else

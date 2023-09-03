@@ -210,6 +210,27 @@ module KatakataIrb
       constants
     end
 
+    def table_instance_variables
+      ivars = @table.keys.select { BaseScope.type_by_name(_1) == :ivar }
+      ivars |= @parent.table_instance_variables if @parent.mutable? && @trace_ivar
+      ivars
+    end
+
+    def instance_variables
+      self_singleton_types = self_type.types.grep(KatakataIrb::Types::SingletonType)
+      self_singleton_types.flat_map { _1.module_or_class.instance_variables } | table_instance_variables
+    end
+
+    def class_variables
+      cvars = @table.keys.select { BaseScope.type_by_name(_1) == :cvar }
+      cvars |= @parent.class_variables if @parent.mutable? && @trace_cvar
+      unless @trace_cvar
+        m = module_nesting.first
+        cvars |= m.class_variables if m.is_a? Module
+      end
+      cvars
+    end
+
     def constants
       [*module_nesting, Object].flat_map do |nest|
         nest.is_a?(Module) ? nest.constants : (eval(nest).constants rescue [])
