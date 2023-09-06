@@ -315,6 +315,10 @@ class KatakataIrb::TypeSimulator
       right = scope.conditional { simulate_evaluate node.value, scope }
       # TODO: write
       KatakataIrb::Types::UnionType[left, right]
+    when YARP::ConstantPathWriteNode
+      # TODO: write
+      simulate_evaluate node.target, scope
+      simulate_evaluate node.value, scope
     when YARP::LambdaNode
       locals = node.locals
       locals += (1..max_numbered_params(node.body)).map { "_#{_1}" } unless node.parameters&.parameters
@@ -481,14 +485,27 @@ class KatakataIrb::TypeSimulator
 
       table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
       if parent_module.is_a?(Module) || parent_module.nil?
-        value = parent_module.const_get name if parent_module&.const_defined? name
+        value = parent_module.const_get name if parent_module&.const_defined?(name)
+        unless value
+          value_type = scope[name]
+          value = value_type.module_or_class if value_type.is_a? KatakataIrb::Types::SingletonType
+        end
+
         if value.is_a? Module
-          nesting = value
+          nesting = [value, []]
         else
-          nesting = "#{parent_module || scope.module_nesting.first}::#{name}"
-          nesting = "::#{nesting}" unless nesting.start_with? '::'
+          if parent_module
+            nesting = [parent_module, [name]]
+          else
+            parent_nesting, parent_path = scope.module_nesting.first
+            nesting = [parent_nesting, parent_path + [name]]
+          end
+          nesting_key = [nesting[0].__id__, nesting[1]].join('::')
           nesting_value = node.is_a?(YARP::ModuleNode) ? KatakataIrb::Types::MODULE : KatakataIrb::Types::CLASS
         end
+      else
+        # parent_module == :unknown
+        # TODO: dummy module
       end
       module_scope = KatakataIrb::Scope.new(
         scope,
@@ -499,7 +516,7 @@ class KatakataIrb::TypeSimulator
         self_type: KatakataIrb::Types::UnionType[*module_types],
         nesting: nesting
       )
-      module_scope[nesting] = nesting_value if nesting_value
+      module_scope[nesting_key] = nesting_value if nesting_value
       result = simulate_evaluate(node.body, module_scope)
       scope.update module_scope
       result

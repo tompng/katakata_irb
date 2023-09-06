@@ -15,12 +15,14 @@ module KatakataIrb
       @binding = binding
       @self_object = self_object
       @cache = {}
-      @module_nesting = binding.eval 'Module.nesting'
+      modules = [*binding.eval('Module.nesting'), Object]
+      @module_nesting = modules.map { [_1, []] }
       binding_local_variables = binding.local_variables
       uninitialized_locals = local_variables - binding_local_variables
       uninitialized_locals.each { @cache[_1] = KatakataIrb::Types::NIL }
       @local_variables = (local_variables | binding_local_variables).map(&:to_s).to_set
       @global_variables = Kernel.global_variables.map(&:to_s).to_set
+      @owned_constants_cache = {}
     end
 
     def level() = 0
@@ -29,8 +31,17 @@ module KatakataIrb
 
     def mutable?() = false
 
-    def get_const(absolute_name)
-      BaseScope.type_of(fallback: nil) { @binding.eval absolute_name }
+    def module_own_constant?(mod, name)
+      set = (@owned_constants_cache[mod] ||= Set.new(mod.constants.map(&:to_s)))
+      set.include? name
+    end
+
+    def get_const(_key, nesting, path)
+      result = path.reduce nesting do |mod, name|
+        return nil unless mod.is_a?(Module) && module_own_constant?(mod, name)
+        mod.const_get name
+      end
+      KatakataIrb::Types.type_from_object result
     end
 
     def [](name)
@@ -141,22 +152,20 @@ module KatakataIrb
       variable_level || parent.level_of(name)
     end
 
-    def get_const(absolute_name)
-      l, value = @table[absolute_name]
-      l ? value : @parent.get_const(absolute_name)
+    def get_const(key, nesting, path)
+      _l, value = @table[key]
+      value || @parent.get_const(key, nesting, path)
     end
 
     def [](name)
       if BaseScope.type_by_name(name) == :const
-        return get_const name if name.start_with? '::'
-
-        module_nesting.each do |nesting|
-          n = "#{nesting}::#{name}"
-          n = "::#{n}" unless n.start_with? '::'
-          v = get_const(n)
-          return v if v
+        return get_const("#{Object.__id__}#{name}", Object, name[2..].split('::')) || KatakataIrb::Types::NIL if name.start_with? '::'
+        module_nesting.each do |(nesting, path)|
+          key = [nesting.__id__, *path, name].join('::')
+          value = get_const key, nesting, [*path, name]
+          return value if value
         end
-        return get_const("::#{name}") || KatakataIrb::Types::NIL
+        KatakataIrb::Types::NIL
       end
       level, value = @table[name]
       if level
@@ -168,13 +177,15 @@ module KatakataIrb
 
     def []=(name, value)
       if BaseScope.type_by_name(name) == :const
-        if name.start_with? '::'
-          @table[name] = [0, value]
-        else
-          absolute_name = "#{module_nesting.first}::#{name}"
-          absolute_name = "::#{absolute_name}" unless absolute_name.start_with? '::'
-          @table[absolute_name] = [0, value]
-        end
+        key = (
+          if name.start_with?('::')
+            "#{Object.__id__}#{name}"
+          else
+            parent_module, parent_path = module_nesting.first
+            [parent_module.__id__, *parent_path, name].join('::')
+          end
+        )
+        @table[key] = [0, value]
         return
       end
       variable_level = level_of name
@@ -201,9 +212,8 @@ module KatakataIrb
     end
 
     def table_constants
-      constants = [*module_nesting, ''].flat_map do |nest|
-        prefix = nest.is_a?(Module) ? "::#{nest}::" : "#{nest}::"
-        prefix = "::#{prefix}" unless prefix.start_with? '::'
+      constants = module_nesting.flat_map do |mod, path|
+        prefix = [mod.__id__, *path].join('::') + '::'
         @table.keys.select { _1.start_with? prefix }.map { _1.delete_prefix(prefix).split('::').first }
       end.uniq
       constants |= @parent.table_constants if @parent.mutable?
@@ -232,8 +242,8 @@ module KatakataIrb
     end
 
     def constants
-      [*module_nesting, Object].flat_map do |nest|
-        nest.is_a?(Module) ? nest.constants : (eval(nest).constants rescue [])
+      module_nesting.flat_map do |nest,|
+        nest.constants
       end.map(&:to_s) | table_constants
     end
 
