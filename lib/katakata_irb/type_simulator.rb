@@ -630,14 +630,15 @@ class KatakataIrb::TypeSimulator
         receiver = simulate_evaluate node.parent, scope
         if receiver.is_a? KatakataIrb::Types::SingletonType
           parent_module = receiver.module_or_class
-          type = KatakataIrb::BaseScope.type_of { parent_module.const_get name }
-        else
-          parent_module = :unknown
-          type = KatakataIrb::Types::NIL
         end
       else
         parent_module = Object
-        type = KatakataIrb::BaseScope.type_of { Object.const_get name }
+      end
+      if parent_module
+        type = scope.get_const(parent_module, [name]) || KatakataIrb::Types::NIL
+      else
+        parent_module = :unknown
+        type = KatakataIrb::Types::NIL
       end
     when YARP::ConstantReadNode
       name = node.slice

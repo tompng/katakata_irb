@@ -36,7 +36,7 @@ module KatakataIrb
       set.include? name
     end
 
-    def get_const(_key, nesting, path)
+    def get_const(nesting, path, _key = nil)
       result = path.reduce nesting do |mod, name|
         return nil unless mod.is_a?(Module) && module_own_constant?(mod, name)
         mod.const_get name
@@ -87,7 +87,7 @@ module KatakataIrb
         :gvar
       elsif name.start_with? '%'
         :internal
-      elsif name.start_with?('::') || name[0].downcase != name[0]
+      elsif name[0].downcase != name[0]
         :const
       else
         :lvar
@@ -152,17 +152,16 @@ module KatakataIrb
       variable_level || parent.level_of(name)
     end
 
-    def get_const(key, nesting, path)
+    def get_const(nesting, path, key = nil)
+      key ||= [nesting.__id__, path].join('::')
       _l, value = @table[key]
-      value || @parent.get_const(key, nesting, path)
+      value || @parent.get_const(nesting, path, key)
     end
 
     def [](name)
       if BaseScope.type_by_name(name) == :const
-        return get_const("#{Object.__id__}#{name}", Object, name[2..].split('::')) || KatakataIrb::Types::NIL if name.start_with? '::'
         module_nesting.each do |(nesting, path)|
-          key = [nesting.__id__, *path, name].join('::')
-          value = get_const key, nesting, [*path, name]
+          value = get_const nesting, [*path, name]
           return value if value
         end
         KatakataIrb::Types::NIL
@@ -177,14 +176,8 @@ module KatakataIrb
 
     def []=(name, value)
       if BaseScope.type_by_name(name) == :const
-        key = (
-          if name.start_with?('::')
-            "#{Object.__id__}#{name}"
-          else
-            parent_module, parent_path = module_nesting.first
-            [parent_module.__id__, *parent_path, name].join('::')
-          end
-        )
+        parent_module, parent_path = module_nesting.first
+        key = [parent_module.__id__, *parent_path, name].join('::')
         @table[key] = [0, value]
         return
       end
