@@ -333,6 +333,8 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('VERSION.', include: NilClass)
     assert_call('VERSION.', include: String, binding: module_binding)
     assert_call('KatakataIrb::VERSION.', include: String, binding: module_binding)
+    assert_call('A = 1; module M; A += 0.5; A.', include: Float)
+    assert_call('KatakataIrb::A = 1; KatakataIrb::A += 0.5; KatakataIrb::A.', include: Float)
   end
 
   def test_command_call_arg

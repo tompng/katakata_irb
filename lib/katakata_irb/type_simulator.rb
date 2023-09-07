@@ -180,7 +180,7 @@ class KatakataIrb::TypeSimulator
         # Numbered parameter is CallNode. `_1` is numbered parameter but `_1()` is method call.
         # https://github.com/ruby/yarp/issues/1158
         return scope[node.name.to_s] || KatakataIrb::Types::NIL
-      elsif node.receiver.nil? && node.name == 'raise'
+      elsif node.receiver.nil? && node.name == 'raise' # TODO: use `type == bot`
         scope.terminate_with KatakataIrb::Scope::RAISE_BREAK, KatakataIrb::Types::TRUE
         return KatakataIrb::Types::NIL
       end
@@ -290,35 +290,37 @@ class KatakataIrb::TypeSimulator
     when YARP::ConstantOperatorWriteNode
       left = scope[node.name.to_s] || KatakataIrb::Types::OBJECT
       right = simulate_evaluate node.value, scope
-      # TODO: write
-      simulate_call left, node.operator, [right], nil, nil, name_match: false
+      scope[node.name.to_s] = simulate_call left, node.operator, [right], nil, nil, name_match: false
     when YARP::ConstantAndWriteNode
       right = scope.conditional { simulate_evaluate node.value, scope }
-      # TODO: write
-      KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
+      scope[node.name.to_s] = KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
     when YARP::ConstantOrWriteNode
       left = scope[node.name.to_s] || KatakataIrb::Types::OBJECT
       right = scope.conditional { simulate_evaluate node.value, scope }
-      # TODO: write
-      KatakataIrb::Types::UnionType[left, right]
+      scope[node.name.to_s] = KatakataIrb::Types::UnionType[left, right]
     when YARP::ConstantPathOperatorWriteNode
-      left = simulate_evaluate node.target, scope
+      left, receiver, _parent_module, name = evaluate_constant_node node.target, scope
       right = simulate_evaluate node.value, scope
-      # TODO: write
-      simulate_call left, node.operator, [right], nil, nil, name_match: false
+      value = simulate_call left, node.operator, [right], nil, nil, name_match: false
+      const_path_write receiver, name, value, scope
+      value
     when YARP::ConstantPathAndWriteNode
+      _left, receiver, _parent_module, name = evaluate_constant_node node.target, scope
       right = scope.conditional { simulate_evaluate node.value, scope }
-      # TODO: write
-      KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
+      value = KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
+      const_path_write receiver, name, value, scope
+      value
     when YARP::ConstantPathOrWriteNode
-      left = simulate_evaluate node.target, scope
+      left, receiver, _parent_module, name = evaluate_constant_node node.target, scope
       right = scope.conditional { simulate_evaluate node.value, scope }
-      # TODO: write
-      KatakataIrb::Types::UnionType[left, right]
+      value = KatakataIrb::Types::UnionType[left, right]
+      const_path_write receiver, name, value, scope
+      value
     when YARP::ConstantPathWriteNode
-      # TODO: write
-      simulate_evaluate node.target, scope
-      simulate_evaluate node.value, scope
+      receiver = simulate_evaluate node.target.parent, scope if node.target.parent
+      value = simulate_evaluate node.value, scope
+      const_path_write receiver, node.target.child.slice, value, scope
+      value
     when YARP::LambdaNode
       locals = node.locals
       locals += (1..max_numbered_params(node.body)).map { "_#{_1}" } unless node.parameters&.parameters
@@ -471,7 +473,7 @@ class KatakataIrb::TypeSimulator
         # Syntax error code, example: `module a.b; end`
         return KatakataIrb::Types::NIL
       end
-      const_type, parent_module, name = evaluate_constant_node node.constant_path, scope
+      const_type, _receiver, parent_module, name = evaluate_constant_node node.constant_path, scope
       if node.is_a? YARP::ModuleNode
         module_types = const_type.types.select { _1.is_a?(KatakataIrb::Types::SingletonType) && !_1.module_or_class.is_a?(Class) }
         module_types << KatakataIrb::Types::MODULE if module_types.empty?
@@ -607,6 +609,15 @@ class KatakataIrb::TypeSimulator
     [args_types, kwargs_types, block_sym, !!block_arg]
   end
 
+  def const_path_write(receiver, name, value, scope)
+    if receiver # receiver::A = value
+      singleton_type = receiver.types.find { _1.is_a? KatakataIrb::Types::SingletonType }
+      scope.set_const singleton_type.module_or_class, name, value if singleton_type
+    else # ::A = value
+      scope.set_const Object, name, value
+    end
+  end
+
   def assign_required_parameter(node, value, scope)
     case node
     when YARP::RequiredParameterNode
@@ -644,8 +655,7 @@ class KatakataIrb::TypeSimulator
       name = node.slice
       type = scope[name]
     end
-    # TODO: read type from scope and parent_module
-    [type, parent_module, name]
+    [type, receiver, parent_module, name]
   end
 
 

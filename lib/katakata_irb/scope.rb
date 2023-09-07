@@ -174,11 +174,15 @@ module KatakataIrb
       end
     end
 
+    def set_const(nesting, path, value)
+      key = [nesting.__id__, path].join('::')
+      @table[key] = [0, value]
+    end
+
     def []=(name, value)
       if BaseScope.type_by_name(name) == :const
         parent_module, parent_path = module_nesting.first
-        key = [parent_module.__id__, *parent_path, name].join('::')
-        @table[key] = [0, value]
+        set_const parent_module, [*parent_path, name], value
         return
       end
       variable_level = level_of name
