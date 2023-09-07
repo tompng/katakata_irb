@@ -316,6 +316,25 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('a = 1; b&.c(a = :a); a.', include: [Integer, Symbol])
   end
 
+  def test_constant_path
+    assert_call('class A; X=1; class B; X=""; X.', include: String, exclude: Integer)
+    assert_call('class A; X=1; class B; X=""; end; X.', include: Integer, exclude: String)
+    assert_call('module KatakataIrb; VERSION.', include: String)
+    assert_call('module KatakataIrb; KatakataIrb::VERSION.', include: String)
+    assert_call('module KatakataIrb; VERSION=1; VERSION.', include: Integer)
+    assert_call('module KatakataIrb; VERSION=1; KatakataIrb::VERSION.', include: Integer)
+    assert_call('module KatakataIrb; module A; VERSION.', include: String)
+    assert_call('module KatakataIrb; module A; VERSION=1; VERSION.', include: Integer)
+    assert_call('module KatakataIrb; module A; VERSION=1; KatakataIrb::VERSION.', include: String)
+    assert_call('module KatakataIrb; module A; VERSION=1; end; VERSION.', include: String)
+    assert_call('module KatakataIrb; KatakataIrb=1; KatakataIrb.', include: Integer)
+    assert_call('module KatakataIrb; KatakataIrb=1; ::KatakataIrb::VERSION.', include: String)
+    module_binding = eval 'module ::KatakataIrb; binding; end'
+    assert_call('VERSION.', include: NilClass)
+    assert_call('VERSION.', include: String, binding: module_binding)
+    assert_call('KatakataIrb::VERSION.', include: String, binding: module_binding)
+  end
+
   def test_command_call_arg
     assert_call('[1][0..].', include: [Array, NilClass], exclude: Integer)
     assert_call('[1][rand 1].', include: Integer, exclude: [Array, NilClass])
