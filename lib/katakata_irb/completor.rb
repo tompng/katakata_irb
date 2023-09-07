@@ -189,11 +189,7 @@ module KatakataIrb::Completor
     Reline.add_dialog_proc(:show_type, type_dialog_proc, Reline::DEFAULT_DIALOG_CONTEXT)
   end
 
-  def self.empty_binding()
-    Kernel.binding
-  end
-
-  def self.analyze(code, binding = empty_binding)
+  def self.analyze(code, binding = Object::TOPLEVEL_BINDING)
     lvars_code = binding.local_variables.map do |name|
       "#{name}="
     end.join + "nil;\n"
