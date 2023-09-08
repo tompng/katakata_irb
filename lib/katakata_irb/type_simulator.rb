@@ -348,8 +348,11 @@ class KatakataIrb::TypeSimulator
               simulate_evaluate n, scope
             end
           end
-        else
+        elsif node.value
           simulate_evaluate node.value, scope
+        else
+          # For syntax invalid code like `(*a).b`
+          KatakataIrb::Types::NIL
         end
       )
       evaluate_multi_write node, value, scope
