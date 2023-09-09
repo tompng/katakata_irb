@@ -235,7 +235,7 @@ class KatakataIrb::TypeSimulator
         end
         simulate_call receiver_type, node.name, args_types, kwargs_types, call_block_proc
       end
-      if node.operator == '&.'
+      if node.call_operator == '&.'
         result = scope.conditional { evaluate_method.call _1 }
         if receiver_type.nillable?
           KatakataIrb::Types::UnionType[result, KatakataIrb::Types::NIL]
@@ -253,9 +253,9 @@ class KatakataIrb::TypeSimulator
       else
         KatakataIrb::Types::UnionType[left, right]
       end
-    when YARP::CallOperatorWriteNode, YARP::CallOperatorAndWriteNode, YARP::CallOperatorOrWriteNode
-      receiver_type = simulate_evaluate node.target.receiver, scope
-      args_types, kwargs_types, block_sym, has_block = evaluate_call_node_arguments node.target, scope
+    when YARP::CallOperatorWriteNode, YARP::CallAndWriteNode, YARP::CallOrWriteNode
+      receiver_type = simulate_evaluate node.receiver, scope
+      args_types, kwargs_types, block_sym, has_block = evaluate_call_node_arguments node, scope
       if block_sym
         call_block_proc = ->(block_args, _self_type) do
           block_receiver, *rest = block_args
@@ -264,7 +264,7 @@ class KatakataIrb::TypeSimulator
       elsif has_block
         call_block_proc = ->(_block_args, _self_type) { KatakataIrb::Types::OBJECT }
       end
-      method = node.target.name[...-1] # remove trailing `=`
+      method = node.write_name.delete_suffix('=')
       left = simulate_call receiver_type, method, args_types, kwargs_types, call_block_proc
       if node.operator == '&&='
         right = scope.conditional { simulate_evaluate node.value, _1 }
@@ -794,7 +794,7 @@ class KatakataIrb::TypeSimulator
 
   def evaluate_write(node, value, scope)
     case node
-    when YARP::MultiWriteNode
+    when YARP::MultiTargetNode
       evaluate_multi_write node, value, scope
     when YARP::CallNode
       # ignore

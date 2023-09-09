@@ -292,7 +292,7 @@ module KatakataIrb::Completor
       return [:lvar_or_method, name, calculate_scope.call] if target_node.receiver.nil?
 
       self_call = target_node.receiver.is_a? YARP::SelfNode
-      op = target_node.operator
+      op = target_node.call_operator
       receiver_type = calculate_receiver.call target_node.receiver
       receiver_type = receiver_type.nonnillable if op == '&.'
       [op == '::' ? :call_or_const : :call, receiver_type, name, self_call]
