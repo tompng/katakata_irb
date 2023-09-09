@@ -561,8 +561,13 @@ class KatakataIrb::TypeSimulator
     when YARP::DefinedNode
       scope.conditional { simulate_evaluate node.value, _1 }
       KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
+    when YARP::MultiTargetNode
+      # Raw MultiTargetNode, incomplete code like `a,b`, `*a`
+      evaluate_multi_write_recevier node, scope
+      KatakataIrb::Types::NIL
     when YARP::MissingNode
       # do nothing
+      KatakataIrb::Types::NIL
     else
       KatakataIrb.log_puts
       KatakataIrb.log_puts :NOMATCH
@@ -820,13 +825,13 @@ class KatakataIrb::TypeSimulator
       zips = node.targets.zip(values)
     end
     zips.each do |target, value|
-      evaluate_write target, value, scope
+      evaluate_write target, value || KatakataIrb::Types::NIL, scope
     end
   end
 
   def evaluate_multi_write_recevier(node, scope)
     case node
-    when YARP::MultiWriteNode
+    when YARP::MultiWriteNode, YARP::MultiTargetNode
       node.targets.each { evaluate_multi_write_recevier _1, scope }
     when YARP::CallNode
       simulate_evaluate node.receiver, scope if node.receiver
