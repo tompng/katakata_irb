@@ -567,6 +567,10 @@ class KatakataIrb::TypeSimulator
     when YARP::DefinedNode
       scope.conditional { simulate_evaluate node.value, _1 }
       KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
+    when YARP::FlipFlopNode
+      scope.conditional { simulate_evaluate node.left, _1 } if node.left
+      scope.conditional { simulate_evaluate node.right, _1 } if node.right
+      KatakataIrb::Types::BOOLEAN
     when YARP::MultiTargetNode
       # Raw MultiTargetNode, incomplete code like `a,b`, `*a`
       evaluate_multi_write_recevier node, scope
