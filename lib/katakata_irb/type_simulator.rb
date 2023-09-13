@@ -37,13 +37,13 @@ class KatakataIrb::TypeSimulator
     @dig_targets = dig_targets
   end
 
-  def simulate_evaluate(node, scope, case_target: nil)
-    result = simulate_evaluate_inner(node, scope, case_target: case_target)
+  def simulate_evaluate(node, scope)
+    result = simulate_evaluate_inner(node, scope)
     @dig_targets.resolve result, scope if @dig_targets.target?(node)
     result
   end
 
-  def simulate_evaluate_inner(node, scope, case_target: nil)
+  def simulate_evaluate_inner(node, scope)
     case node
     when YARP::ProgramNode
       simulate_evaluate node.statements, scope
