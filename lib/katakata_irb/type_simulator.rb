@@ -132,7 +132,13 @@ class KatakataIrb::TypeSimulator
         case assoc
         when YARP::AssocNode
           keys << simulate_evaluate(assoc.key, scope)
-          values << simulate_evaluate(assoc.value, scope)
+          if assoc.value
+            values << simulate_evaluate(assoc.value, scope)
+          else
+            # TODO: might be method call like `{rand:}`. https://github.com/ruby/yarp/issues/1447
+            name = assoc.key.value.to_s
+            values << scope[name] || KatakataIrb::Types::NIL
+          end
         when YARP::AssocSplatNode
           hash = simulate_evaluate assoc.value, scope
           unless hash.is_a?(KatakataIrb::Types::InstanceType) && hash.klass == Hash
