@@ -572,7 +572,7 @@ class KatakataIrb::TypeSimulator
       scope.conditional { simulate_evaluate node.right, _1 } if node.right
       KatakataIrb::Types::BOOLEAN
     when YARP::MultiTargetNode
-      # Raw MultiTargetNode, incomplete code like `a,b`, `*a`
+      # Raw MultiTargetNode, incomplete code like `a,b`, `*a`. https://github.com/ruby/yarp/issues/1470
       evaluate_multi_write_recevier node, scope
       KatakataIrb::Types::NIL
     when YARP::MissingNode
