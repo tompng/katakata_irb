@@ -53,12 +53,15 @@ module KatakataIrb::Completor
       end
     end
     IRB::InputCompletor::CompletionProc.define_singleton_method :call do |*args|
+      verbose, $VERBOSE = $VERBOSE, nil
       completion_proc.call(*args)
     rescue => e
       KatakataIrb.last_completion_error = e
       KatakataIrb.log_puts
       KatakataIrb.log_puts "#{e.inspect} stored to KatakataIrb.last_completion_error"
       KatakataIrb.log_puts
+    ensure
+      $VERBOSE = verbose
     end
 
     IRB::InputCompletor.singleton_class.prepend Module.new{

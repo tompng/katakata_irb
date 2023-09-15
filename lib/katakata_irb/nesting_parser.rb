@@ -9,8 +9,11 @@ module KatakataIrb::NestingParser
   ]
 
   def self.tokenize(code)
+    verbose, $VERBOSE = $VERBOSE, nil
     tokens = Ripper::Lexer.new(code).scan.reject { ERROR_TOKENS.include? _1.event }
     KatakataIrb::NestingParser.interpolate_ripper_ignored_tokens code, tokens
+  ensure
+    $VERBOSE = verbose
   end
 
   def self.interpolate_ripper_ignored_tokens(code, tokens)
