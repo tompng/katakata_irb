@@ -575,7 +575,7 @@ class KatakataIrb::TypeSimulator
       # Raw MultiTargetNode, incomplete code like `a,b`, `*a`. https://github.com/ruby/yarp/issues/1470
       evaluate_multi_write_recevier node, scope
       KatakataIrb::Types::NIL
-    when YARP::MissingNode
+    when YARP::AliasNode, YARP::MissingNode
       # do nothing
       KatakataIrb::Types::NIL
     else
