@@ -563,6 +563,11 @@ class KatakataIrb::TypeSimulator
       KatakataIrb::Types::NIL
     when YARP::ImplicitNode
       simulate_evaluate node.value, scope
+    when YARP::MatchWriteNode
+      # /(?<a>)(?<b>)/ =~ string
+      simulate_evaluate node.call, scope
+      node.locals.each { scope[_1.to_s] = KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL] }
+      KatakataIrb::Types::BOOLEAN
     when YARP::AliasMethodNode, YARP::MissingNode
       # do nothing
       KatakataIrb::Types::NIL
