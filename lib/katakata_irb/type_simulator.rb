@@ -132,13 +132,7 @@ class KatakataIrb::TypeSimulator
         case assoc
         when YARP::AssocNode
           keys << simulate_evaluate(assoc.key, scope)
-          if assoc.value
-            values << simulate_evaluate(assoc.value, scope)
-          else
-            # TODO: might be method call like `{rand:}`. https://github.com/ruby/yarp/issues/1447
-            name = assoc.key.value.to_s
-            values << scope[name] || KatakataIrb::Types::NIL
-          end
+          values << simulate_evaluate(assoc.value, scope)
         when YARP::AssocSplatNode
           hash = simulate_evaluate assoc.value, scope
           unless hash.is_a?(KatakataIrb::Types::InstanceType) && hash.klass == Hash
@@ -567,7 +561,9 @@ class KatakataIrb::TypeSimulator
       # Raw MultiTargetNode, incomplete code like `a,b`, `*a`. https://github.com/ruby/yarp/issues/1470
       evaluate_multi_write_recevier node, scope
       KatakataIrb::Types::NIL
-    when YARP::AliasNode, YARP::MissingNode
+    when YARP::ImplicitNode
+      simulate_evaluate node.value, scope
+    when YARP::AliasMethodNode, YARP::MissingNode
       # do nothing
       KatakataIrb::Types::NIL
     else
