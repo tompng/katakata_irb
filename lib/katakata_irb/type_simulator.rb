@@ -182,11 +182,7 @@ class KatakataIrb::TypeSimulator
       scope[node.slice] || KatakataIrb::Types::NIL
     when YARP::CallNode
       # TODO: return type of []=, field= when operator_loc.nil?
-      if node.receiver.nil? && node.name.match?(/\A_[1-9]\z/) && node.opening_loc.nil?
-        # Numbered parameter is CallNode. `_1` is numbered parameter but `_1()` is method call.
-        # https://github.com/ruby/yarp/issues/1158
-        return scope[node.name.to_s] || KatakataIrb::Types::NIL
-      elsif node.receiver.nil? && node.name == 'raise' # TODO: use `type == bot`
+      if node.receiver.nil? && node.name == 'raise' # TODO: use `type == bot`
         scope.terminate_with KatakataIrb::Scope::RAISE_BREAK, KatakataIrb::Types::TRUE
         return KatakataIrb::Types::NIL
       end
@@ -212,17 +208,15 @@ class KatakataIrb::TypeSimulator
         elsif node.block
           call_block_proc = ->(block_args, block_self_type) do
             scope.conditional do |s|
-              locals = node.block.locals
-              max_numparams = max_numbered_params(node.block.body)
-              locals += (1..max_numparams).map { "_#{_1}" } unless node.block.parameters
-              params_table = locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
+              numbered_parameters = node.block.locals.grep(/\A_[1-9]/).map(&:to_s)
+              params_table = node.block.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
               table = { **params_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil }
               block_scope = KatakataIrb::Scope.new s, table, self_type: block_self_type
               # TODO kwargs
               if node.block.parameters&.parameters
                 assign_parameters node.block.parameters.parameters, block_scope, block_args, {}
-              elsif max_numparams != 0
-                assign_numbered_parameters max_numparams, block_scope, block_args, {}
+              elsif !numbered_parameters.empty?
+                assign_numbered_parameters numbered_parameters, block_scope, block_args, {}
               end
               result = node.block.body ? simulate_evaluate(node.block.body, block_scope) : KatakataIrb::Types::NIL
               block_scope.merge_jumps
@@ -328,9 +322,7 @@ class KatakataIrb::TypeSimulator
       const_path_write receiver, node.target.child.slice, value, scope
       value
     when YARP::LambdaNode
-      locals = node.locals
-      locals += (1..max_numbered_params(node.body)).map { "_#{_1}" } unless node.parameters&.parameters
-      local_table = locals.to_h { [_1.to_s, KatakataIrb::Types::OBJECT] }
+      local_table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::OBJECT] }
       block_scope = KatakataIrb::Scope.new scope, { **local_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }
       block_scope.conditional do |s|
         assign_parameters node.parameters.parameters, s, [], {} if node.parameters&.parameters
@@ -719,8 +711,9 @@ class KatakataIrb::TypeSimulator
     # TODO YARP::ParametersNode
   end
 
-  def assign_numbered_parameters(max_num, scope, args, _kwargs)
-    return if max_num == 0
+  def assign_numbered_parameters(numbered_parameters, scope, args, _kwargs)
+    return if numbered_parameters.empty?
+    max_num = numbered_parameters.map { _1[1].to_i }.max
     if max_num == 1
       if args.size == 0
         scope['_1'] = KatakataIrb::Types::NIL
@@ -731,8 +724,9 @@ class KatakataIrb::TypeSimulator
       end
     else
       args = sized_splat(args.first, :to_ary, max_num) if args.size == 1
-      max_num.times do |i|
-        scope["_#{i + 1}"] = args[i] || KatakataIrb::Types::NIL
+      numbered_parameters.each do |name|
+        index = name[1].to_i - 1
+        scope[name] = args[index] || KatakataIrb::Types::NIL
       end
     end
   end
@@ -926,23 +920,6 @@ class KatakataIrb::TypeSimulator
       end
     end
     KatakataIrb::Types::UnionType[*types, *breaks]
-  end
-
-  # Workaround for numbered params not in locals
-  def max_numbered_params(node)
-    case node
-    when YARP::BlockNode, YARP::DefNode, YARP::ClassNode, YARP::ModuleNode, YARP::SingletonClassNode, YARP::LambdaNode
-      0
-    when YARP::Node
-      max = node.child_nodes.map { max_numbered_params _1 }.max || 0
-      if node.is_a?(YARP::CallNode) && node.receiver.nil? && node.name.match?(/\A_[1-9]\z/)
-        [max, node.name[1].to_i].max
-      else
-        max
-      end
-    else
-      0
-    end
   end
 
   def evaluate_program(program, scope)
