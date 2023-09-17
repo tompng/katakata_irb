@@ -406,11 +406,18 @@ class KatakataIrb::TypeSimulator
     when YARP::BeginNode
       return_type = node.statements ? simulate_evaluate(node.statements, scope) : KatakataIrb::Types::NIL
       if node.rescue_clause
-        rescue_return_types = scope.run_branches(
-          ->{ simulate_evaluate node.rescue_clause, _1 },
-          ->{ node.else_clause ? simulate_evaluate(node.else_clause, _1) : KatakataIrb::Types::NIL }
-        )
-        return_type = KatakataIrb::Types::UnionType[return_type, *rescue_return_types]
+        if node.else_clause
+          return_types = scope.run_branches(
+            ->{ simulate_evaluate node.rescue_clause, _1 },
+            ->{ simulate_evaluate node.else_clause, _1 }
+          )
+        else
+          return_types = [
+            return_type,
+            scope.conditional { simulate_evaluate node.rescue_clause, _1 }
+          ]
+        end
+        return_type = KatakataIrb::Types::UnionType[*return_types]
       end
       if node.ensure_clause&.statements
         # ensure_clause is YARP::EnsureNode
@@ -418,9 +425,9 @@ class KatakataIrb::TypeSimulator
       end
       return_type
     when YARP::RescueNode
-      return_type = scope.conditional do |s|
+      run_rescue = lambda do |s|
         if node.reference
-          error_classes_type = evaluate_list_splat_items node.exceptions, scope
+          error_classes_type = evaluate_list_splat_items node.exceptions, s
           error_types = error_classes_type.types.filter_map do
             KatakataIrb::Types::InstanceType.new _1.module_or_class if _1.is_a?(KatakataIrb::Types::SingletonType)
           end
@@ -430,15 +437,19 @@ class KatakataIrb::TypeSimulator
           when YARP::LocalVariableTargetNode, YARP::InstanceVariableTargetNode, YARP::ClassVariableTargetNode, YARP::GlobalVariableTargetNode, YARP::ConstantTargetNode
             s[node.reference.name.to_s] = error_type
           when YARP::CallNode
-            simulate_evaluate node.reference, scope
+            simulate_evaluate node.reference, s
           end
         end
         node.statements ? simulate_evaluate(node.statements, s) : KatakataIrb::Types::NIL
       end
       if node.consequent # begin; rescue A; rescue B; end
-        KatakataIrb::Types::UnionType[return_type, scope.conditional { simulate_evaluate node.consequent, _1 }]
+        types = scope.run_branches(
+          run_rescue,
+          scope.conditional { simulate_evaluate node.consequent, _1 }
+        )
+        KatakataIrb::Types::UnionType[*types]
       else
-        return_type
+        run_rescue.call scope
       end
     when YARP::RescueModifierNode
       a = simulate_evaluate node.expression, scope
