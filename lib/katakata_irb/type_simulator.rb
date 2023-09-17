@@ -76,6 +76,7 @@ class KatakataIrb::TypeSimulator
           trace_lvar: false
         )
         if node.parameters
+          # node.parameters is YARP::ParametersNode
           assign_parameters node.parameters, method_scope, [], {}
         end
 
@@ -176,7 +177,7 @@ class KatakataIrb::TypeSimulator
     when YARP::LocalVariableReadNode
       scope[node.name.to_s] || KatakataIrb::Types::NIL
     when YARP::ConstantReadNode, YARP::GlobalVariableReadNode, YARP::InstanceVariableReadNode, YARP::ClassVariableReadNode
-      scope[node.slice] || KatakataIrb::Types::NIL
+      scope[node.name.to_s] || KatakataIrb::Types::NIL
     when YARP::CallNode
       # TODO: return type of []=, field= when operator_loc.nil?
       if node.receiver.nil? && node.name == 'raise' # TODO: use `type == bot`
@@ -318,7 +319,7 @@ class KatakataIrb::TypeSimulator
     when YARP::ConstantPathWriteNode
       receiver = simulate_evaluate node.target.parent, scope if node.target.parent
       value = simulate_evaluate node.value, scope
-      const_path_write receiver, node.target.child.slice, value, scope
+      const_path_write receiver, node.target.child.name.to_s, value, scope
       value
     when YARP::LambdaNode
       local_table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::OBJECT] }
@@ -333,7 +334,7 @@ class KatakataIrb::TypeSimulator
     when YARP::ConstantWriteNode
       scope[node.name.to_s] = simulate_evaluate node.value, scope
     when YARP::LocalVariableWriteNode, YARP::GlobalVariableWriteNode, YARP::InstanceVariableWriteNode, YARP::ClassVariableWriteNode
-      scope[node.name_loc.slice] = simulate_evaluate node.value, scope
+      scope[node.name.to_s] = simulate_evaluate node.value, scope
     when YARP::MultiWriteNode
       evaluate_multi_write_recevier node, scope
       value = (
@@ -433,10 +434,8 @@ class KatakataIrb::TypeSimulator
           error_types << KatakataIrb::Types::InstanceType.new(StandardError) if error_types.empty?
           error_type = KatakataIrb::Types::UnionType[*error_types]
           case node.reference
-          when YARP::LocalVariableTargetNode, YARP::InstanceVariableTargetNode, YARP::ClassVariableTargetNode
+          when YARP::LocalVariableTargetNode, YARP::InstanceVariableTargetNode, YARP::ClassVariableTargetNode, YARP::GlobalVariableTargetNode, YARP::ConstantTargetNode
             s[node.reference.name.to_s] = error_type
-          when YARP::GlobalVariableTargetNode, YARP::ConstantTargetNode
-            s[node.reference.slice] = error_type
           when YARP::CallNode
             simulate_evaluate node.reference, scope
           end
@@ -665,7 +664,7 @@ class KatakataIrb::TypeSimulator
   def evaluate_constant_node(node, scope)
     case node
     when YARP::ConstantPathNode
-      name = node.child.slice
+      name = node.child.name.to_s
       if node.parent
         receiver = simulate_evaluate node.parent, scope
         if receiver.is_a? KatakataIrb::Types::SingletonType
@@ -681,7 +680,7 @@ class KatakataIrb::TypeSimulator
         type = KatakataIrb::Types::NIL
       end
     when YARP::ConstantReadNode
-      name = node.slice
+      name = node.name.to_s
       type = scope[name]
     end
     [type, receiver, parent_module, name]
@@ -836,7 +835,7 @@ class KatakataIrb::TypeSimulator
     when YARP::SplatNode
       evaluate_write node.expression, KatakataIrb::Types.array_of(value), scope
     when YARP::LocalVariableTargetNode, YARP::GlobalVariableTargetNode, YARP::InstanceVariableTargetNode, YARP::ClassVariableTargetNode
-      scope[node.slice] = value
+      scope[node.name.to_s] = value
     when YARP::ConstantPathTargetNode
       # TODO: do not evaluate receiver twice (in evaluate_multi_write_recevier and here)
       receiver = simulate_evaluate node.parent, scope if node.parent
