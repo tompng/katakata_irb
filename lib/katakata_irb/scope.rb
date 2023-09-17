@@ -7,7 +7,6 @@ module KatakataIrb
     NEXT_RESULT = '%next'
     RETURN_RESULT = '%return'
     PATTERNMATCH_BREAK = '%match'
-    RAISE_BREAK = '%raise'
 
     attr_reader :module_nesting
 
@@ -260,7 +259,7 @@ module KatakataIrb
     end
 
     def never(&block)
-      block.call Scope.new(self, { BREAK_RESULT => nil, NEXT_RESULT => nil, PATTERNMATCH_BREAK => nil, RETURN_RESULT => nil, RAISE_BREAK => nil })
+      block.call Scope.new(self, { BREAK_RESULT => nil, NEXT_RESULT => nil, PATTERNMATCH_BREAK => nil, RETURN_RESULT => nil })
     end
 
     def run(*args, **option)

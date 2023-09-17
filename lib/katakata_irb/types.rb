@@ -412,6 +412,10 @@ module KatakataIrb::Types
     end
   end
 
+  def self.method_return_bottom?(method)
+    method.type.return_type.is_a? RBS::Types::Bases::Bottom
+  end
+
   def self.match_free_variables(vars, types, values)
     accumulator = {}
     types.zip values do |t, v|
