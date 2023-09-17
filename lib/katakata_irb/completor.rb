@@ -315,7 +315,7 @@ module KatakataIrb::Completor
       [:ivar, name, calculate_scope.call]
     when YARP::ClassVariableReadNode, YARP::ClassVariableTargetNode
       [:cvar, name, calculate_scope.call]
-    when YARP::DefNode, YARP::RequiredParameterNode
+    when YARP::DefNode, YARP::RequiredParameterNode, YARP::BlockLocalVariableNode
       # do nothing
     else
       KatakataIrb.log_puts

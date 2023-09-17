@@ -123,6 +123,9 @@ class KatakataIrb::TypeSimulator
     when YARP::EmbeddedStatementsNode
       node.statements ? simulate_evaluate(node.statements, scope) : KatakataIrb::Types::NIL
       KatakataIrb::Types::STRING
+    when YARP::EmbeddedVariableNode
+      simulate_evaluate node.variable, scope
+      KatakataIrb::Types::STRING
     when YARP::ArrayNode
       KatakataIrb::Types.array_of evaluate_list_splat_items(node.elements, scope)
     when YARP::HashNode, YARP::KeywordHashNode
@@ -200,6 +203,7 @@ class KatakataIrb::TypeSimulator
             end
           end
         elsif node.block
+          # node.block is YARP::BlockNode
           call_block_proc = ->(block_args, block_self_type) do
             scope.conditional do |s|
               numbered_parameters = node.block.locals.grep(/\A_[1-9]/).map(&:to_s)
@@ -208,6 +212,7 @@ class KatakataIrb::TypeSimulator
               block_scope = KatakataIrb::Scope.new s, table, self_type: block_self_type
               # TODO kwargs
               if node.block.parameters&.parameters
+                # node.block.parameters is YARP::BlockParametersNode
                 assign_parameters node.block.parameters.parameters, block_scope, block_args, {}
               elsif !numbered_parameters.empty?
                 assign_numbered_parameters numbered_parameters, block_scope, block_args, {}
@@ -413,7 +418,10 @@ class KatakataIrb::TypeSimulator
         )
         return_type = KatakataIrb::Types::UnionType[return_type, *rescue_return_types]
       end
-      simulate_evaluate node.ensure_clause.statements, scope if node.ensure_clause&.statements
+      if node.ensure_clause&.statements
+        # ensure_clause is YARP::EnsureNode
+        simulate_evaluate node.ensure_clause.statements, scope
+      end
       return_type
     when YARP::RescueNode
       return_type = scope.conditional do |s|
@@ -568,7 +576,16 @@ class KatakataIrb::TypeSimulator
       simulate_evaluate node.call, scope
       node.locals.each { scope[_1.to_s] = KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL] }
       KatakataIrb::Types::BOOLEAN
-    when YARP::AliasMethodNode, YARP::MissingNode
+    when YARP::MatchLastLineNode
+      KatakataIrb::Types::BOOLEAN
+    when YARP::InterpolatedMatchLastLineNode
+      node.parts.each { simulate_evaluate _1, scope }
+      KatakataIrb::Types::BOOLEAN
+    when YARP::InterpolatedMatchLastLineNode
+      KatakataIrb::Types::BOOLEAN
+    when YARP::PreExecutionNode, YARP::PostExecutionNode
+      node.statements ? simulate_evaluate(node.statements, scope) : KatakataIrb::Types::NIL
+    when YARP::AliasMethodNode, YARP::AliasGlobalVariableNode, YARP::UndefNode, YARP::MissingNode
       # do nothing
       KatakataIrb::Types::NIL
     else
@@ -580,6 +597,7 @@ class KatakataIrb::TypeSimulator
   end
 
   def evaluate_call_node_arguments(call_node, scope)
+    # call_node.arguments is YARP::ArgumentsNode
     arguments = call_node.arguments&.arguments&.dup || []
     block_arg = arguments.pop.expression if arguments.last.is_a? YARP::BlockArgumentNode
     kwargs = arguments.pop.elements if arguments.last.is_a?(YARP::KeywordHashNode)
@@ -675,6 +693,7 @@ class KatakataIrb::TypeSimulator
     kwargs = kwargs.dup
     reqs = args.shift node.requireds.size
     if node.rest
+      # node.rest.class is YARP::RestParameterNode
       posts = []
       opts = args.shift node.optionals.size
       rest = args
@@ -687,6 +706,7 @@ class KatakataIrb::TypeSimulator
       assign_required_parameter n, v, scope
     end
     node.optionals.zip opts do |n, v|
+      # n is YARP::OptionalParameterNode
       values = [v]
       values << simulate_evaluate(n.value, scope) if n.value
       scope[n.name.to_s] = KatakataIrb::Types::UnionType[*values.compact]
@@ -695,21 +715,24 @@ class KatakataIrb::TypeSimulator
       assign_required_parameter n, v, scope
     end
     if node.rest&.name
+      # node.rest is YARP::RestParameterNode
       scope[node.rest.name.to_s] = KatakataIrb::Types.array_of(*rest)
     end
     node.keywords.each do |n|
+      # n is YARP::KeywordParameterNode
       name = n.name.to_s.delete(':')
       values = [kwargs.delete(name)]
       values << simulate_evaluate(n.value, scope) if n.value
       scope[name] = KatakataIrb::Types::UnionType[*values.compact]
     end
+    # node.keyword_rest is YARP::KeywordRestParameterNode or YARP::ForwardingParameterNode or YARP::NoKeywordsParameterNode
     if node.keyword_rest.is_a?(YARP::KeywordRestParameterNode) && node.keyword_rest.name
       scope[node.keyword_rest.name.to_s] = KatakataIrb::Types::InstanceType.new(Hash, K: KatakataIrb::Types::SYMBOL, V: KatakataIrb::Types::UnionType[*kwargs.values])
     end
     if node.block&.name
+      # node.block is YARP::BlockParameterNode
       scope[node.block.name.to_s] = KatakataIrb::Types::PROC
     end
-    # TODO YARP::ParametersNode
   end
 
   def assign_numbered_parameters(numbered_parameters, scope, args, _kwargs)
@@ -776,6 +799,8 @@ class KatakataIrb::TypeSimulator
       KatakataIrb::Types::OBJECT
     when YARP::PinnedVariableNode
       simulate_evaluate pattern.variable, scope
+    when YARP::PinnedExpressionNode
+      simulate_evaluate pattern.expression, scope
     when YARP::LocalVariableTargetNode
       scope[pattern.name.to_s] = value
     when YARP::AlternationPatternNode
@@ -812,6 +837,11 @@ class KatakataIrb::TypeSimulator
       evaluate_write node.expression, KatakataIrb::Types.array_of(value), scope
     when YARP::LocalVariableTargetNode, YARP::GlobalVariableTargetNode, YARP::InstanceVariableTargetNode, YARP::ClassVariableTargetNode
       scope[node.slice] = value
+    when YARP::ConstantPathTargetNode
+      # TODO: do not evaluate receiver twice (in evaluate_multi_write_recevier and here)
+      receiver = simulate_evaluate node.parent, scope if node.parent
+      const_path_write receiver, node.child.name.to_s, value, scope
+      value
     end
   end
 
