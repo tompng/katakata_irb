@@ -547,15 +547,19 @@ class KatakataIrb::TypeSimulator
       branches = node.conditions.map do |condition|
         ->(s) { evaluate_case_match target, condition, s }
       end
-      branches << ->(s) { simulate_evaluate node.consequent, s } if node.consequent
+      if node.consequent
+        branches << ->(s) { simulate_evaluate node.consequent, s }
+      elsif node.conditions.any? { _1.is_a? YARP::WhenNode }
+        branches << ->(s) { KatakataIrb::Types::NIL }
+      end
       KatakataIrb::Types::UnionType[*scope.run_branches(*branches)]
     when YARP::MatchRequiredNode
       value_type = simulate_evaluate node.value, scope
       evaluate_match_pattern value_type, node.pattern, scope
-      KatakataIrb::Types::TRUE
+      KatakataIrb::Types::NIL # void value
     when YARP::MatchPredicateNode
       value_type = simulate_evaluate node.value, scope
-      evaluate_match_pattern value_type, node.pattern, scope
+      scope.conditional { evaluate_match_pattern value_type, node.pattern, _1 }
       KatakataIrb::Types::BOOLEAN
     when YARP::RangeNode
       beg_type = simulate_evaluate node.left, scope if node.left
@@ -693,6 +697,8 @@ class KatakataIrb::TypeSimulator
   def assign_parameters(node, scope, args, kwargs)
     args = args.dup
     kwargs = kwargs.dup
+    size = node.requireds.size + node.optionals.size + (node.rest ? 1 : 0) + node.posts.size
+    args = sized_splat(args.first, :to_ary, size) if size >= 2 && args.size == 1
     reqs = args.shift node.requireds.size
     if node.rest
       # node.rest.class is YARP::RestParameterNode

@@ -26,7 +26,7 @@ class TestTypeAnalyze < Minitest::Test
   end
 
   def assert_call(code, include: nil, exclude: nil, binding: nil)
-    raise ArgumetError if include.nil? && exclude.nil?
+    raise ArgumentError if include.nil? && exclude.nil?
     analyze(code, binding: binding) => [:call, type,]
     klasses = type.types.flat_map do
       _1.klass.singleton_class? ? [_1.klass.superclass, _1.klass] : _1.klass
@@ -65,6 +65,7 @@ class TestTypeAnalyze < Minitest::Test
       assert_equal [:ivar, '@a'], analyze('begin; rescue => @a')[0, 2]
       assert_equal [:cvar, '@@a'], analyze('begin; rescue => @@a')[0, 2]
       assert (analyze('begin; rescue => A') in [:const, _, 'A', _])
+      assert (analyze('begin; rescue => a.b') in [:call, _, 'b', _])
       # Do not complete assigning to non-variable in rescue
       # assert_nil analyze('begin; rescue => (a).b')
       # assert_nil analyze('begin; rescue => (a)::b')
@@ -289,6 +290,8 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('a,(b,(*c))=1; c.', include: Array)
     assert_call('(a=1).b, c = 1; a.', include: Integer)
     assert_call('a, ((b=1).c, d) = 1; b.', include: Integer)
+    assert_call('a, b[c=1] = 1; c.', include: Integer)
+    assert_call('a, b[*(c=1)] = 1; c.', include: Integer)
     # incomplete massign
     assert_analyze_type('a,b', :lvar_or_method, 'b')
     assert_call('(a=1).b, a.', include: Integer)
@@ -307,6 +310,7 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('def f(a,b=1,*c,d,x:0,y:,**z,&e); e.arity.', include: Integer)
     assert_call('def f(...); 1.', include: Integer)
     assert_call('def f(a,...); 1.', include: Integer)
+    assert_call('class Array; def f; self.', include: Array)
   end
 
   def test_defined
@@ -389,6 +393,7 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('VERSION.', include: String, binding: module_binding)
     assert_call('KatakataIrb::VERSION.', include: String, binding: module_binding)
     assert_call('A = 1; module M; A += 0.5; A.', include: Float)
+    assert_call('::A = 1; module M; A += 0.5; A.', include: Float)
     assert_call('KatakataIrb::A = 1; KatakataIrb::A += 0.5; KatakataIrb::A.', include: Float)
   end
 
@@ -546,13 +551,69 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('Array::A=1; Array::A&&=1.0; Array::A.', include: Float)
   end
 
-  def test_command_call_arg
+  def test_case_when
+    assert_call('case x; when A; 1; when B; 1.0; end.', include: [Integer, Float, NilClass])
+    assert_call('case x; when A; 1; when B; 1.0; else; 1r; end.', include: [Integer, Float, Rational], exclude: NilClass)
+    assert_call('case; when (a=1); a.', include: Integer)
+    assert_call('case x; when (a=1); a.', include: Integer)
+    assert_call('a=1; case (a=1.0); when A; a.', include: Float, exclude: Integer)
+    assert_call('a=1; case (a=1.0); when A; end; a.', include: Float, exclude: Integer)
+    assert_call('a=1; case x; when A; a=1.0; else; a=1r; end; a.', include: [Float, Rational], exclude: Integer)
+    assert_call('a=1; case x; when A; a=1.0; when B; a=1r; end; a.', include: [Float, Rational, Integer])
+  end
+
+  def test_case_in
+    assert_call('case x; in A; 1; in B; 1.0; end.', include: [Integer, Float], exclude: NilClass)
+    assert_call('case x; in A; 1; in B; 1.0; else; 1r; end.', include: [Integer, Float, Rational], exclude: NilClass)
+    assert_call('a=""; case 1; in A; a=1; in B; a=1.0; end; a.', include: [Integer, Float], exclude: String)
+    assert_call('a=""; case 1; in A; a=1; in B; a=1.0; else; a=1r; end; a.', include: [Integer, Float, Rational], exclude: String)
+    assert_call('case 1; in x; x.', include: Integer)
+    assert_call('case x; in A if (a=1); a.', include: Integer)
+    assert_call('case x; in ^(a=1); a.', include: Integer)
+    assert_call('case x; in [1, String => a, 2]; a.', include: String)
+    assert_call('case x; in [*a, 1]; a.', include: Array)
+    assert_call('case x; in [1, *a]; a.', include: Array)
+    assert_call('case x; in [*a, 1, *b]; a.', include: Array)
+    assert_call('case x; in [*a, 1, *b]; b.', include: Array)
+    assert_call('case x; in {a: {b: **c}}; c.', include: Hash)
+    assert_call('case x; in (String | { x: Integer, y: ^$a }) => a; a.', include: [String, Hash])
+  end
+
+  def test_pattern_match
+    assert_call('1 in a; a.', include: Integer)
+    assert_call('a=1; x in String=>a; a.', include: [Integer, String])
+    assert_call('a=1; x=>String=>a; a.', include: String, exclude: Integer)
+  end
+
+  def test_bottom_type_termination
+    assert_call('a=1; tap { raise; a=1.0; a.', include: Float)
+    assert_call('a=1; tap { loop{}; a=1.0; a.', include: Float)
+    assert_call('a=1; tap { raise; a=1.0 } a.', include: Integer, exclude: Float)
+    assert_call('a=1; tap { loop{}; a=1.0 } a.', include: Integer, exclude: Float)
+  end
+
+  def test_call_parameter
+    assert_call('f((x=1),*b,c:1,**d,&e); x.', include: Integer)
+    assert_call('f(a,*(x=1),c:1,**d,&e); x.', include: Integer)
+    assert_call('f(a,*b,(x=1):1,**d,&e); x.', include: Integer)
+    assert_call('f(a,*b,c:(x=1),**d,&e); x.', include: Integer)
+    assert_call('f(a,*b,c:1,**(x=1),&e); x.', include: Integer)
+    assert_call('f(a,*b,c:1,**d,&(x=1)); x.', include: Integer)
+  end
+
+  def test_block_args
+    assert_call('[1,2,3].tap{|a| a.', include: Array)
+    assert_call('[1,2,3].tap{|a,b| a.', include: Integer)
+    assert_call('[1,2,3].tap{|(a,b)| a.', include: Integer)
+    assert_call('[1,2,3].tap{|a,*b| b.', include: Array)
+    assert_call('[1,2,3].tap{|a=1.0| a.', include: [Array, Float])
+    assert_call('[1,2,3].tap{|a,**b| b.', include: Hash)
+  end
+
+  def test_array_aref
     assert_call('[1][0..].', include: [Array, NilClass], exclude: Integer)
-    assert_call('[1][rand 1].', include: Integer, exclude: [Array, NilClass])
-    assert_call('[1].[](rand 1).', include: Integer, exclude: [Array, NilClass])
-    assert_call('[1].[](rand 1){}.', include: Integer, exclude: [Array, NilClass])
-    assert_call('[1][1.+ 2].', include: Integer, exclude: [Array, NilClass])
-    assert_call('[1].[](1.+ 2).', include: Integer, exclude: [Array, NilClass])
-    assert_call('[1].[](1.+ 2){}.', include: Integer, exclude: [Array, NilClass])
+    assert_call('[1][0].', include: Integer, exclude: [Array, NilClass])
+    assert_call('[1].[](0).', include: Integer, exclude: [Array, NilClass])
+    assert_call('[1].[](0){}.', include: Integer, exclude: [Array, NilClass])
   end
 end
