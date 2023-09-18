@@ -332,7 +332,8 @@ class KatakataIrb::TypeSimulator
     when YARP::LocalVariableWriteNode, YARP::GlobalVariableWriteNode, YARP::InstanceVariableWriteNode, YARP::ClassVariableWriteNode
       scope[node.name.to_s] = simulate_evaluate node.value, scope
     when YARP::MultiWriteNode
-      evaluate_multi_write_recevier node, scope
+      evaluated_receivers = {}
+      evaluate_multi_write_receiver node, scope, evaluated_receivers
       value = (
         if node.value.is_a? YARP::ArrayNode
           if node.value.elements.any?(YARP::SplatNode)
@@ -349,7 +350,7 @@ class KatakataIrb::TypeSimulator
           KatakataIrb::Types::NIL
         end
       )
-      evaluate_multi_write node, value, scope
+      evaluate_multi_write node, value, scope, evaluated_receivers
     when YARP::IfNode, YARP::UnlessNode
       simulate_evaluate node.predicate, scope
       KatakataIrb::Types::UnionType[*scope.run_branches(
@@ -530,7 +531,7 @@ class KatakataIrb::TypeSimulator
       collection = simulate_evaluate node.collection, scope
       inner_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::BREAK_RESULT => nil }
       inner_scope.conditional do |s|
-        evaluate_multi_write node.index, collection, s
+        evaluate_write node.index, collection, s, nil
         simulate_evaluate node.statements, s if node.statements
       end
       inner_scope.merge_jumps
@@ -567,7 +568,7 @@ class KatakataIrb::TypeSimulator
       KatakataIrb::Types::BOOLEAN
     when YARP::MultiTargetNode
       # Raw MultiTargetNode, incomplete code like `a,b`, `*a`. https://github.com/ruby/yarp/issues/1470
-      evaluate_multi_write_recevier node, scope
+      evaluate_multi_write_receiver node, scope, nil
       KatakataIrb::Types::NIL
     when YARP::ImplicitNode
       simulate_evaluate node.value, scope
@@ -827,25 +828,24 @@ class KatakataIrb::TypeSimulator
     KatakataIrb::Types::UnionType[*instance_types]
   end
 
-  def evaluate_write(node, value, scope)
+  def evaluate_write(node, value, scope, evaluated_receivers)
     case node
     when YARP::MultiTargetNode
-      evaluate_multi_write node, value, scope
+      evaluate_multi_write node, value, scope, evaluated_receivers
     when YARP::CallNode
-      # ignore
+      evaluated_receivers&.[](node.receiver) || simulate_evaluate(node.receiver, scope) if node.receiver
     when YARP::SplatNode
-      evaluate_write node.expression, KatakataIrb::Types.array_of(value), scope
+      evaluate_write node.expression, KatakataIrb::Types.array_of(value), scope, evaluated_receivers
     when YARP::LocalVariableTargetNode, YARP::GlobalVariableTargetNode, YARP::InstanceVariableTargetNode, YARP::ClassVariableTargetNode
       scope[node.name.to_s] = value
     when YARP::ConstantPathTargetNode
-      # TODO: do not evaluate receiver twice (in evaluate_multi_write_recevier and here)
-      receiver = simulate_evaluate node.parent, scope if node.parent
+      receiver = evaluated_receivers&.[](node.parent) || simulate_evaluate(node.parent, scope) if node.parent
       const_path_write receiver, node.child.name.to_s, value, scope
       value
     end
   end
 
-  def evaluate_multi_write(node, values, scope)
+  def evaluate_multi_write(node, values, scope, evaluated_receivers)
     values = sized_splat values, :to_ary, node.targets.size unless values.is_a? Array
     splat_index = node.targets.find_index { _1.is_a? YARP::SplatNode }
     if splat_index
@@ -860,16 +860,19 @@ class KatakataIrb::TypeSimulator
       zips = node.targets.zip(values)
     end
     zips.each do |target, value|
-      evaluate_write target, value || KatakataIrb::Types::NIL, scope
+      evaluate_write target, value || KatakataIrb::Types::NIL, scope, evaluated_receivers
     end
   end
 
-  def evaluate_multi_write_recevier(node, scope)
+  def evaluate_multi_write_receiver(node, scope, evaluated_receivers)
     case node
     when YARP::MultiWriteNode, YARP::MultiTargetNode
-      node.targets.each { evaluate_multi_write_recevier _1, scope }
+      node.targets.each { evaluate_multi_write_receiver _1, scope, evaluated_receivers }
     when YARP::CallNode
-      simulate_evaluate node.receiver, scope if node.receiver
+      if node.receiver
+        receiver = simulate_evaluate(node.receiver, scope)
+        evaluated_receivers[node.receiver] = receiver if evaluated_receivers
+      end
       if node.arguments
         node.arguments.arguments&.each do |arg|
           if arg.is_a? YARP::SplatNode
@@ -880,7 +883,7 @@ class KatakataIrb::TypeSimulator
         end
       end
     when YARP::SplatNode
-      evaluate_multi_write_recevier node.expression, scope if node.expression
+      evaluate_multi_write_receiver node.expression, scope, evaluated_receivers if node.expression
     end
   end
 
