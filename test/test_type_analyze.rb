@@ -296,6 +296,8 @@ class TestTypeAnalyze < Minitest::Test
 
   def test_def
     assert_call('def f; end.', include: Symbol)
+    assert_call('s=""; def s.f; self.', include: String)
+    assert_call('def (a="").f; end; a.', include: String)
     assert_call('def f(a=1); a.', include: Integer)
     assert_call('def f(**nil); 1.', include: Integer)
     assert_call('def f(a,*b); *b.', include: Array)
@@ -435,6 +437,11 @@ class TestTypeAnalyze < Minitest::Test
     # BEGIN{} END{}
     assert_call('BEGIN{1.', include: Integer)
     assert_call('END{1.', include: Integer)
+    # MatchWrite
+    assert_call('a=1; /(?<a>)/=~b; a.', include: [String, NilClass], exclude: Integer)
+    # OperatorWrite with block `a[&b]+=c`
+    assert_call('a=[1]; (a[0,&:to_a]+=1.0).', include: Float)
+    assert_call('a=[1]; (a[0,&b]+=1.0).', include: Float)
   end
 
   def test_hash
@@ -459,6 +466,34 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('[:a].each_with_index{_1.', include: Array)
     assert_call('[:a].each_with_index{_2; _1.', include: Symbol)
     assert_call('[:a].each_with_index{_2.', include: Integer)
+  end
+
+  def test_if_unless
+    assert_call('if cond; 1; end.', include: Integer)
+    assert_call('unless true; 1; end.', include: Integer)
+    assert_call('a=1; (a=1.0) if cond; a.', include: [Integer, Float])
+    assert_call('a=1; (a=1.0) unless cond; a.', include: [Integer, Float])
+    assert_call('a=1; 123 if (a=1.0).foo; a.', include: Float, exclude: Integer)
+    assert_call('if cond; a=1; end; a.', include: [Integer, NilClass])
+    assert_call('a=1; if cond; a=1.0; elsif cond; a=1r; else; a=1i; end; a.', include: [Float, Rational, Complex], exclude: Integer)
+    assert_call('a=1; if cond; a=1.0; else; a.', include: Integer, exclude: Float)
+    assert_call('a=1; if (a=1.0).foo; a.', include: Float, exclude: Integer)
+    assert_call('a=1; if (a=1.0).foo; end; a.', include: Float, exclude: Integer)
+    assert_call('a=1; if (a=1.0).foo; else; a.', include: Float, exclude: Integer)
+    assert_call('a=1; if (a=1.0).foo; elsif a.', include: Float, exclude: Integer)
+    assert_call('a=1; if (a=1.0).foo; elsif (a=1i); else; a.', include: Complex, exclude: [Integer, Float])
+  end
+
+  def test_while_until
+    assert_call('while cond; 123; end.', include: NilClass)
+    assert_call('until cond; 123; end.', include: NilClass)
+    assert_call('a=1; a=1.0 while cond; a.', include: [Integer, Float])
+    assert_call('a=1; a=1.0 until cond; a.', include: [Integer, Float])
+    assert_call('a=1; 1 while (a=1.0).foo; a.', include: Float, exclude: Integer)
+    assert_call('while cond; break 1; end.', include: Integer)
+    assert_call('while cond; a=1; end; a.', include: Integer)
+    assert_call('a=1; while cond; a=1.0; end; a.', include: [Integer, Float])
+    assert_call('a=1; while (a=1.0).foo; end; a.', include: Float, exclude: Integer)
   end
 
   def test_for
