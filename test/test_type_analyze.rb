@@ -294,6 +294,19 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('(a=1).b, a.', include: Integer)
   end
 
+  def test_def
+    assert_call('def f; end.', include: Symbol)
+    assert_call('def f(a=1); a.', include: Integer)
+    assert_call('def f(**nil); 1.', include: Integer)
+    assert_call('def f(a,*b); *b.', include: Array)
+    assert_call('def f(a,x:1); x.', include: Integer)
+    assert_call('def f(a,x:,**); 1.', include: Integer)
+    assert_call('def f(a,x:,**y); y.', include: Hash)
+    assert_call('def f(a,b=1,*c,d,x:0,y:,**z,&e); e.arity.', include: Integer)
+    assert_call('def f(...); 1.', include: Integer)
+    assert_call('def f(a,...); 1.', include: Integer)
+  end
+
   def test_defined
     assert_call('defined?(a.b+c).', include: [String, NilClass])
     assert_call('defined?(a = 1); tap { a = 1.0 }; a.', include: [Integer, Float, NilClass])
@@ -336,6 +349,26 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('a = 1; b&.c(a = :a); a.', include: [Integer, Symbol])
   end
 
+  def test_class_module
+    assert_call('class Array; 1; end.', include: Integer)
+    assert_call('class ::Array; 1; end.', include: Integer)
+    assert_call('class Array::A; 1; end.', include: Integer)
+    assert_call('class Array; self.new.', include: Array)
+    assert_call('class ::Array; self.new.', include: Array)
+    assert_call('class Array::A; self.', include: Class)
+    assert_call('class (a=1)::A; end; a.', include: Integer)
+    assert_call('module M; 1; end.', include: Integer)
+    assert_call('module ::M; 1; end.', include: Integer)
+    assert_call('module Array::M; 1; end.', include: Integer)
+    assert_call('module M; self.', include: Module)
+    assert_call('module Array::M; self.', include: Module)
+    assert_call('module ::M; self.', include: Module)
+    assert_call('module (a=1)::M; end; a.', include: Integer)
+    assert_call('class << Array; 1; end.', include: Integer)
+    assert_call('class << a; 1; end.', include: Integer)
+    assert_call('a = ""; class << a; self.superclass.', include: Class)
+  end
+
   def test_constant_path
     assert_call('class A; X=1; class B; X=""; X.', include: String, exclude: Integer)
     assert_call('class A; X=1; class B; X=""; end; X.', include: Integer, exclude: String)
@@ -372,12 +405,75 @@ class TestTypeAnalyze < Minitest::Test
     assert_call(':"#{a=1}".', include: Symbol)
     assert_call(':"#{a=1}"; a.', include: Integer)
     assert_call('"".', include: String)
+    assert_call('"#$a".', include: String)
     assert_call('("a" "b").', include: String)
     assert_call('"#{a=1}".', include: String)
     assert_call('"#{a=1}"; a.', include: Integer)
     assert_call('``.', include: String)
     assert_call('`#{a=1}`.', include: String)
     assert_call('`#{a=1}`; a.', include: Integer)
+  end
+
+  def test_redo_retry_yield_super
+    assert_call('a=nil; tap do a=1; redo; a=1i; end; a.', include: Integer, exclude: Complex)
+    assert_call('a=nil; tap do a=1; retry; a=1i; end; a.', include: Integer, exclude: Complex)
+    assert_call('a = 0; a = yield; a.', include: Object, exclude: Integer)
+    assert_call('yield 1,(a=1); a.', include: Integer)
+    assert_call('a = 0; a = super; a.', include: Object, exclude: Integer)
+    assert_call('a = 0; a = super(1); a.', include: Object, exclude: Integer)
+    assert_call('super 1,(a=1); a.', include: Integer)
+  end
+
+  def test_rarely_used_syntax
+    # FlipFlop
+    assert_call('if (a=1).even?..(a=1.0).even; a.', include: [Integer, Float])
+    # MatchLastLine
+    assert_call('if /regexp/; 1.', include: Integer)
+    assert_call('if /reg#{a=1}exp/; a.', include: Integer)
+    # BlockLocalVariable
+    assert_call('tap do |i;a| a=1; a.', include: Integer)
+    # BEGIN{} END{}
+    assert_call('BEGIN{1.', include: Integer)
+    assert_call('END{1.', include: Integer)
+  end
+
+  def test_hash
+    assert_call('{ rand: }.values.sample.', include: Float)
+    assert_call('rand=""; { rand: }.values.sample.', include: String, exclude: Float)
+    assert_call('{ 1 => 1.0 }.keys.sample.', include: Integer, exclude: Float)
+    assert_call('{ 1 => 1.0 }.values.sample.', include: Float, exclude: Integer)
+    assert_call('a={1=>1.0}; {"a"=>1i,**a}.keys.sample.', include: [Integer, String])
+    assert_call('a={1=>1.0}; {"a"=>1i,**a}.values.sample.', include: [Float, Complex])
+  end
+
+  def test_array
+    assert_call('[1,2,3].sample.', include: Integer)
+    assert_call('a = 1.0; [1,2,a].sample.', include: [Integer, Float])
+    assert_call('a = [1.0]; [1,2,*a].sample.', include: [Integer, Float])
+  end
+
+  def test_numbered_parameter
+    assert_call('loop{_1.', include: NilClass)
+    assert_call('1.tap{_1.', include: Integer)
+    assert_call('1.tap{_3.', include: NilClass, exclude: Integer)
+    assert_call('[:a].each_with_index{_1.', include: Array)
+    assert_call('[:a].each_with_index{_2; _1.', include: Symbol)
+    assert_call('[:a].each_with_index{_2.', include: Integer)
+  end
+
+  def test_for
+    assert_call('for i in [1,2,3]; i.', include: Integer)
+    assert_call('for i,j in [1,2,3]; i.', include: Integer)
+    assert_call('for *i in [1,2,3]; i.sample.', include: Integer)
+    assert_call('for (a=1).b in [1,2,3]; a.', include: Integer)
+    assert_call('for Array::B in [1,2,3]; Array::B.', include: Integer)
+    assert_call('for A in [1,2,3]; A.', include: Integer)
+    assert_call('for $a in [1,2,3]; $a.', include: Integer)
+    assert_call('for @a in [1,2,3]; @a.', include: Integer)
+    assert_call('for i in [1,2,3]; end.', include: Array)
+    assert_call('for i in [1,2,3]; break 1.0; end.', include: [Array, Float])
+    assert_call('i = 1.0; for i in [1,2,3]; end; i.', include: [Integer, Float])
+    assert_call('a = 1.0; for i in [1,2,3]; a = 1i; end; a.', include: [Float, Complex])
   end
 
   def test_special_var
