@@ -45,6 +45,19 @@ class TestTypeAnalyze < Minitest::Test
     assert_analyze_type('puts(@@x', :cvar, '@@x')
   end
 
+  def test_rescue
+    assert_call '(1 rescue 1.0).', include: [Integer, Float]
+    assert_call 'a=""; (a=1) rescue (a=1.0); a.', include: [Integer, Float], exclude: String
+    assert_call 'begin; 1; rescue; 1.0; end.', include: [Integer, Float]
+    assert_call 'begin; 1; rescue A; 1.0; rescue B; 1i; end.', include: [Integer, Float, Complex]
+    assert_call 'begin; 1i; rescue; 1.0; else; 1; end.', include: [Integer, Float], exclude: Complex
+    assert_call 'begin; 1; rescue; 1.0; ensure; 1i; end.', include: [Integer, Float], exclude: Complex
+    assert_call 'begin; 1i; rescue; 1.0; else; 1; ensure; 1i; end.', include: [Integer, Float], exclude: Complex
+    assert_call 'a=""; begin; a=1; rescue; a=1.0; end; a.', include: [Integer, Float], exclude: [String]
+    assert_call 'a=""; begin; a=1; rescue; a=1.0; else; a=1r; end; a.', include: [Float, Rational], exclude: [String, Integer]
+    assert_call 'a=""; begin; a=1; rescue; a=1.0; else; a=1r; ensure; a = 1i; end; a.', include: Complex, exclude: [Float, Rational, String, Integer]
+  end
+
   def test_rescue_assign_no_log
     assert_no_log do
       assert_equal [:lvar_or_method, 'a'], analyze('begin; rescue => a')[0, 2]
@@ -342,6 +355,64 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('KatakataIrb::VERSION.', include: String, binding: module_binding)
     assert_call('A = 1; module M; A += 0.5; A.', include: Float)
     assert_call('KatakataIrb::A = 1; KatakataIrb::A += 0.5; KatakataIrb::A.', include: Float)
+  end
+
+  def test_literal
+    assert_call('1.', include: Integer)
+    assert_call('1.0.', include: Float)
+    assert_call('1r.', include: Rational)
+    assert_call('1i.', include: Complex)
+    assert_call('true.', include: TrueClass)
+    assert_call('false.', include: FalseClass)
+    assert_call('nil.', include: NilClass)
+    assert_call('//.', include: Regexp)
+    assert_call('/#{a=1}/.', include: Regexp)
+    assert_call('/#{a=1}/; a.', include: Integer)
+    assert_call(':a.', include: Symbol)
+    assert_call(':"#{a=1}".', include: Symbol)
+    assert_call(':"#{a=1}"; a.', include: Integer)
+    assert_call('"".', include: String)
+    assert_call('("a" "b").', include: String)
+    assert_call('"#{a=1}".', include: String)
+    assert_call('"#{a=1}"; a.', include: Integer)
+    assert_call('``.', include: String)
+    assert_call('`#{a=1}`.', include: String)
+    assert_call('`#{a=1}`; a.', include: Integer)
+  end
+
+  def test_special_var
+    assert_call('__FILE__.', include: String)
+    assert_call('__LINE__.', include: Integer)
+    assert_call('__ENCODING__.', include: Encoding)
+    assert_call('$1.', include: String)
+    assert_call('$&.', include: String)
+  end
+
+  def test_and_or
+    assert_call('(1&&1.0).', include: Float, exclude: Integer)
+    assert_call('(nil&&1.0).', include: NilClass)
+    assert_call('(nil||1).', include: Integer)
+    assert_call('(1||1.0).', include: Float)
+  end
+
+  def test_opwrite
+    assert_call('a=[]; a*=1; a.', include: Array)
+    assert_call('a=[]; a*=""; a.', include: String)
+    assert_call('a=[1,false].sample; a||=1.0; a.', include: [Integer, Float])
+    assert_call('a=1; a&&=1.0; a.', include: Float, exclude: Integer)
+    assert_call('(a=1).b*=1; a.', include: Integer)
+    assert_call('(a=1).b||=1; a.', include: Integer)
+    assert_call('(a=1).b&&=1; a.', include: Integer)
+    assert_call('[][a=1]&&=1; a.', include: Integer)
+    assert_call('[][a=1]||=1; a.', include: Integer)
+    assert_call('[][a=1]+=1; a.', include: Integer)
+    assert_call('([1][0]+=1.0).', include: Float)
+    assert_call('([1.0][0]+=1).', include: Float)
+    assert_call('A=nil; A||=1; A.', include: Integer)
+    assert_call('A=1; A&&=1.0; A.', include: Float)
+    assert_call('A=1; A+=1.0; A.', include: Float)
+    assert_call('Array::A||=1; Array::A.', include: Integer)
+    assert_call('Array::A=1; Array::A&&=1.0; Array::A.', include: Float)
   end
 
   def test_command_call_arg

@@ -120,7 +120,7 @@ class KatakataIrb::TypeSimulator
       KatakataIrb::Types::SYMBOL
     when YARP::InterpolatedRegularExpressionNode
       node.parts.each { simulate_evaluate _1, scope }
-      KatakataIrb::Types::STRING
+      KatakataIrb::Types::REGEXP
     when YARP::EmbeddedStatementsNode
       node.statements ? simulate_evaluate(node.statements, scope) : KatakataIrb::Types::NIL
       KatakataIrb::Types::STRING
@@ -244,7 +244,7 @@ class KatakataIrb::TypeSimulator
     when YARP::AndNode, YARP::OrNode
       left = simulate_evaluate node.left, scope
       right = scope.conditional { simulate_evaluate node.right, _1 }
-      if node.operator == '&&='
+      if node.operator == '&&'
         KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
       else
         KatakataIrb::Types::UnionType[left, right]
@@ -269,7 +269,7 @@ class KatakataIrb::TypeSimulator
         right = scope.conditional { simulate_evaluate node.value, _1 }
         KatakataIrb::Types::UnionType[left, right]
       else
-        right = simulate_evaluate node.value, _1
+        right = simulate_evaluate node.value, scope
         simulate_call left, node.operator, [right], nil, nil, scope, name_match: false
       end
     when YARP::ClassVariableOperatorWriteNode, YARP::InstanceVariableOperatorWriteNode, YARP::LocalVariableOperatorWriteNode, YARP::GlobalVariableOperatorWriteNode
@@ -446,7 +446,7 @@ class KatakataIrb::TypeSimulator
       if node.consequent # begin; rescue A; rescue B; end
         types = scope.run_branches(
           run_rescue,
-          scope.conditional { simulate_evaluate node.consequent, _1 }
+          -> { simulate_evaluate node.consequent, _1 }
         )
         KatakataIrb::Types::UnionType[*types]
       else
