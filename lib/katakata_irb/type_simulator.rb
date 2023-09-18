@@ -327,9 +327,7 @@ class KatakataIrb::TypeSimulator
       block_scope.merge_jumps
       scope.update block_scope
       KatakataIrb::Types::ProcType.new
-    when YARP::ConstantWriteNode
-      scope[node.name.to_s] = simulate_evaluate node.value, scope
-    when YARP::LocalVariableWriteNode, YARP::GlobalVariableWriteNode, YARP::InstanceVariableWriteNode, YARP::ClassVariableWriteNode
+    when YARP::LocalVariableWriteNode, YARP::GlobalVariableWriteNode, YARP::InstanceVariableWriteNode, YARP::ClassVariableWriteNode, YARP::ConstantWriteNode
       scope[node.name.to_s] = simulate_evaluate node.value, scope
     when YARP::MultiWriteNode
       evaluated_receivers = {}
@@ -530,8 +528,13 @@ class KatakataIrb::TypeSimulator
       node.statements
       collection = simulate_evaluate node.collection, scope
       inner_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::BREAK_RESULT => nil }
+      ary_type = simulate_call collection, :to_ary, [], nil, nil, nil, name_match: false
+      element_types = ary_type.types.filter_map do |ary|
+        ary.params[:Elem] if ary.is_a?(KatakataIrb::Types::InstanceType) && ary.klass == Array
+      end
+      element_type = KatakataIrb::Types::UnionType[*element_types]
       inner_scope.conditional do |s|
-        evaluate_write node.index, collection, s, nil
+        evaluate_write node.index, element_type, s, nil
         simulate_evaluate node.statements, s if node.statements
       end
       inner_scope.merge_jumps
@@ -581,8 +584,6 @@ class KatakataIrb::TypeSimulator
       KatakataIrb::Types::BOOLEAN
     when YARP::InterpolatedMatchLastLineNode
       node.parts.each { simulate_evaluate _1, scope }
-      KatakataIrb::Types::BOOLEAN
-    when YARP::InterpolatedMatchLastLineNode
       KatakataIrb::Types::BOOLEAN
     when YARP::PreExecutionNode, YARP::PostExecutionNode
       node.statements ? simulate_evaluate(node.statements, scope) : KatakataIrb::Types::NIL
@@ -836,7 +837,7 @@ class KatakataIrb::TypeSimulator
       evaluated_receivers&.[](node.receiver) || simulate_evaluate(node.receiver, scope) if node.receiver
     when YARP::SplatNode
       evaluate_write node.expression, KatakataIrb::Types.array_of(value), scope, evaluated_receivers
-    when YARP::LocalVariableTargetNode, YARP::GlobalVariableTargetNode, YARP::InstanceVariableTargetNode, YARP::ClassVariableTargetNode
+    when YARP::LocalVariableTargetNode, YARP::GlobalVariableTargetNode, YARP::InstanceVariableTargetNode, YARP::ClassVariableTargetNode, YARP::ConstantTargetNode
       scope[node.name.to_s] = value
     when YARP::ConstantPathTargetNode
       receiver = evaluated_receivers&.[](node.parent) || simulate_evaluate(node.parent, scope) if node.parent
