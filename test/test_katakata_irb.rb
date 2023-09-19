@@ -55,7 +55,8 @@ class TestKatakataIrb < Minitest::Test
       File.read File.join(File.dirname(__FILE__), '../lib/katakata_irb', file)
     end
     implemented_node_class_names = codes.join.scan(/YARP::[A-Za-z]+Node/).uniq.sort
-    all_node_class_names = YARP.constants.grep(/Node$/).map { "YARP::#{_1}" }.sort - ['YARP::Node']
+    ignore_class_names = ['YARP::BlockLocalVariableNode']
+    all_node_class_names = YARP.constants.grep(/Node$/).map { "YARP::#{_1}" }.sort - ['YARP::Node'] - ignore_class_names
     assert_empty implemented_node_class_names - all_node_class_names
     assert_empty all_node_class_names - implemented_node_class_names
   end

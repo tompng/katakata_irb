@@ -1,4 +1,3 @@
-require_relative 'nesting_parser'
 require_relative 'type_simulator'
 require 'rbs'
 require 'rbs/cli'
@@ -6,20 +5,6 @@ require 'irb'
 require 'yarp'
 
 module KatakataIrb::Completor
-  module LexerElemMatcher
-    refine Ripper::Lexer::Elem do
-      def deconstruct_keys(_keys)
-        {
-          tok: tok,
-          event: event,
-          label: state.allbits?(Ripper::EXPR_LABEL),
-          beg: state.allbits?(Ripper::EXPR_BEG),
-          dot: state.allbits?(Ripper::EXPR_DOT)
-        }
-      end
-    end
-  end
-  using LexerElemMatcher
   HIDDEN_METHODS = %w[Namespace TypeName] # defined by rbs, should be hidden
   singleton_class.attr_accessor :prev_analyze_result
 
@@ -194,79 +179,9 @@ module KatakataIrb::Completor
       "#{name}="
     end.join + "nil;\n"
     code = lvars_code + code
-    tokens = KatakataIrb::NestingParser.tokenize code
-    last_opens = KatakataIrb::NestingParser.open_tokens(tokens)
-    closings = last_opens.map do |t|
-      case t.tok
-      when /\A%.?[<>]\z/
-        $/ + '>'
-      when '{', '#{', /\A%.?[{}]\z/
-        $/ + '}'
-      when '(', /\A%.?[()]\z/
-        # do not insert \n before closing paren. workaround to avoid syntax error of "a in ^(b\n)"
-        ')'
-      when '[', /\A%.?[\[\]]\z/
-        $/ + ']'
-      when /\A%.?(.)\z/
-        $1
-      when '"', "'", '/', '`'
-        t.tok
-      when /\A<<[~-]?(?:"(?<s>.+)"|'(?<s>.+)'|(?<s>.+))/
-        $/ + ($1 || $2 || $3) + $/
-      when ':"', ":'", ':'
-        t.tok[1]
-      when '?'
-        # ternary operator
-        ' : value'
-      when '|'
-        # block args
-        '|'
-      else
-        $/ + 'end'
-      end
-    end
-    # remove error tokens
-    tokens.pop while tokens&.last&.tok&.empty?
-
-    case tokens.last
-    in { event: :on_ignored_by_ripper, tok: '.' }
-      suffix = 'method'
-      name = ''
-    in { dot: true, tok: }
-      suffix = tok == '::' ? 'Const' : 'method'
-      name = ''
-    in { event: :on_symbeg }
-      suffix = 'symbol'
-      name = ''
-    in { event: :on_ident | :on_kw, tok: }
-      return unless code.delete_suffix! tok
-      suffix = 'method'
-      name = tok
-    in { event: :on_const, tok: }
-      return unless code.delete_suffix! tok
-      suffix = 'Const'
-      name = tok
-    in { event: :on_tstring_content, tok: }
-      return unless code.delete_suffix! tok
-      suffix = 'string'
-      name = tok.rstrip
-    in { event: :on_gvar, tok: }
-      return unless code.delete_suffix! tok
-      suffix = '$gvar'
-      name = tok
-    in { event: :on_ivar, tok: }
-      return unless code.delete_suffix! tok
-      suffix = '@ivar'
-      name = tok
-    in { event: :on_cvar, tok: }
-      return unless code.delete_suffix! tok
-      suffix = '@@cvar'
-      name = tok
-    else
-      return
-    end
-    ast = YARP.parse(code + suffix + closings.reverse.join).value
-    *parents, target_node = find_target ast, code.bytesize
+    ast = YARP.parse(code).value
+    name = code[/(@@|@|\$)?\w*\z/]
+    *parents, target_node = find_target ast, code.bytesize - name.bytesize
     return unless target_node
 
     calculate_scope = -> { KatakataIrb::TypeSimulator.calculate_binding_scope binding, parents, target_node }
@@ -315,13 +230,6 @@ module KatakataIrb::Completor
       [:ivar, name, calculate_scope.call]
     when YARP::ClassVariableReadNode, YARP::ClassVariableTargetNode
       [:cvar, name, calculate_scope.call]
-    when YARP::DefNode, YARP::RequiredParameterNode, YARP::BlockLocalVariableNode
-      # do nothing
-    else
-      KatakataIrb.log_puts
-      KatakataIrb.log_puts [:UNIMPLEMENTED_EXPRESSION, target_node].inspect
-      KatakataIrb.log_puts
-      nil
     end
   end
 
