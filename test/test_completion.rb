@@ -13,9 +13,12 @@ class TestCompletor < Minitest::Test
   end
 
   def test_require
+    assert_completion("require '", include: 'set')
     assert_completion("require 's", include: 'set')
-    # assert_completion('require "s', include: 'set')
     assert_completion("require_relative 'tes", include: 'test/test_completion')
+    # Incomplete double quote string is InterpolatedStringNode
+    assert_completion('require "', include: 'set')
+    assert_completion('require "s', include: 'set')
   end
 
   def test_method_block_sym

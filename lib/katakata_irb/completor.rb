@@ -189,7 +189,7 @@ module KatakataIrb::Completor
     calculate_scope = -> { KatakataIrb::TypeSimulator.calculate_target_type_scope(binding, parents, target_node).last }
     calculate_type_scope = ->(node) { KatakataIrb::TypeSimulator.calculate_target_type_scope binding, [*parents, target_node], node }
 
-    if target_node.is_a?(YARP::StringNode)
+    if target_node in YARP::StringNode | YARP::InterpolatedStringNode
       args_node = parents[-1]
       call_node = parents[-2]
       return unless args_node.is_a?(YARP::ArgumentsNode) && args_node.arguments.size == 1
@@ -246,6 +246,8 @@ module KatakataIrb::Completor
         node.value_loc
       when YARP::StringNode
         node.content_loc
+      when YARP::InterpolatedStringNode
+        node.closing_loc if node.parts.empty?
       end
     )
     return [node] if location&.start_offset == position
