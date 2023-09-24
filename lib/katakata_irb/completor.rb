@@ -8,6 +8,44 @@ module KatakataIrb::Completor
   HIDDEN_METHODS = %w[Namespace TypeName] # defined by rbs, should be hidden
   singleton_class.attr_accessor :prev_analyze_result
 
+  def self.candidates_from_result(result)
+    candidates = case result
+    in [:require | :require_relative => method, name]
+      if method == :require
+        IRB::InputCompletor.retrieve_files_to_require_from_load_path
+      else
+        IRB::InputCompletor.retrieve_files_to_require_relative_from_current_dir
+      end
+    in [:call_or_const, type, name, self_call]
+      ((self_call ? type.all_methods : type.methods).map(&:to_s) - HIDDEN_METHODS) | type.constants
+    in [:const, type, name, scope]
+      if type
+        scope_constants = type.types.flat_map do |t|
+          scope.table_module_constants(t.module_or_class) if t.is_a?(KatakataIrb::Types::SingletonType)
+        end
+        (scope_constants.compact | type.constants.map(&:to_s)).sort
+      else
+        scope.constants.sort
+      end
+    in [:ivar, name, scope]
+      ivars = scope.instance_variables.sort
+      name == '@' ? ivars + scope.class_variables.sort : ivars
+    in [:cvar, name, scope]
+      scope.class_variables
+    in [:gvar, name, scope]
+      scope.global_variables
+    in [:symbol, name]
+      Symbol.all_symbols.map { _1.inspect[1..] }
+    in [:call, type, name, self_call]
+      (self_call ? type.all_methods : type.methods).map(&:to_s) - HIDDEN_METHODS
+    in [:lvar_or_method, name, scope]
+      scope.self_type.all_methods.map(&:to_s) | scope.local_variables
+    else
+      []
+    end
+    [name || '', candidates]
+  end
+
   def self.setup
     KatakataIrb::Types.preload_in_thread
     completion_proc = ->(target, preposing = nil, postposing = nil) do
@@ -17,47 +55,8 @@ module KatakataIrb::Completor
       binding = irb_context.workspace.binding
       result = analyze code, binding
       KatakataIrb::Completor.prev_analyze_result = result
-      candidates = case result
-      in [:require | :require_relative => method, name]
-        if IRB.const_defined? :InputCompletor # IRB::VERSION <= 1.8.1
-          path_completor = IRB::InputCompletor
-        elsif IRB.const_defined? :RegexpCompletor # IRB::VERSION >= 1.8.2
-          path_completor = IRB::RegexpCompletor.new
-        end
-        if !path_completor
-          []
-        elsif method == :require
-          path_completor.retrieve_files_to_require_from_load_path
-        else
-          path_completor.retrieve_files_to_require_relative_from_current_dir
-        end
-      in [:call_or_const, type, name, self_call]
-        ((self_call ? type.all_methods : type.methods).map(&:to_s) - HIDDEN_METHODS) | type.constants
-      in [:const, type, name, scope]
-        if type
-          scope_constants = type.types.flat_map do |t|
-            scope.table_module_constants(t.module_or_class) if t.is_a?(KatakataIrb::Types::SingletonType)
-          end
-          (scope_constants.compact | type.constants.map(&:to_s)).sort
-        else
-          scope.constants.sort
-        end
-      in [:ivar, name, scope]
-        ivars = scope.instance_variables.sort
-        name == '@' ? ivars + scope.class_variables.sort : ivars
-      in [:cvar, name, scope]
-        scope.class_variables
-      in [:gvar, name, scope]
-        scope.global_variables
-      in [:symbol, name]
-        Symbol.all_symbols.map { _1.inspect[1..] }
-      in [:call, type, name, self_call]
-        (self_call ? type.all_methods : type.methods).map(&:to_s) - HIDDEN_METHODS
-      in [:lvar_or_method, name, scope]
-        scope.self_type.all_methods.map(&:to_s) | scope.local_variables
-      else
-        []
-      end
+      name, candidates = candidates_from_result(result).dup
+
       all_symbols_pattern = /\A[ -\/:-@\[-`\{-~]*\z/
       candidates.map(&:to_s).select { !_1.match?(all_symbols_pattern) && _1.start_with?(name) }.uniq.sort.map do
         target + _1[name.size..]
