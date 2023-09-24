@@ -35,7 +35,10 @@ module KatakataIrb::Completor
         ((self_call ? type.all_methods : type.methods).map(&:to_s) - HIDDEN_METHODS) | type.constants
       in [:const, type, name, scope]
         if type
-          type.constants
+          scope_constants = type.types.flat_map do |t|
+            scope.table_module_constants(t.module_or_class) if t.is_a?(KatakataIrb::Types::SingletonType)
+          end
+          (scope_constants.compact | type.constants.map(&:to_s)).sort
         else
           scope.constants.sort
         end
@@ -184,8 +187,8 @@ module KatakataIrb::Completor
     *parents, target_node = find_target ast, code.bytesize - name.bytesize
     return unless target_node
 
-    calculate_scope = -> { KatakataIrb::TypeSimulator.calculate_binding_scope binding, parents, target_node }
-    calculate_receiver = ->(receiver) { KatakataIrb::TypeSimulator.calculate_receiver binding, parents, receiver }
+    calculate_scope = -> { KatakataIrb::TypeSimulator.calculate_target_type_scope(binding, parents, target_node).last }
+    calculate_type_scope = ->(node) { KatakataIrb::TypeSimulator.calculate_target_type_scope binding, [*parents, target_node], node }
 
     if target_node.is_a?(YARP::StringNode)
       args_node = parents[-1]
@@ -198,7 +201,7 @@ module KatakataIrb::Completor
     case target_node
     when YARP::SymbolNode
       if parents.last.is_a? YARP::BlockArgumentNode # method(&:target)
-        receiver_type = KatakataIrb::TypeSimulator.calculate_block_symbol_receiver binding, parents, target_node
+        receiver_type, _scope = calculate_type_scope.call target_node
         [:call, receiver_type, name, false]
       else
         [:symbol, name] unless name.empty?
@@ -208,7 +211,7 @@ module KatakataIrb::Completor
 
       self_call = target_node.receiver.is_a? YARP::SelfNode
       op = target_node.call_operator
-      receiver_type = calculate_receiver.call target_node.receiver
+      receiver_type, _scope = calculate_type_scope.call target_node.receiver
       receiver_type = receiver_type.nonnillable if op == '&.'
       [op == '::' ? :call_or_const : :call, receiver_type, name, self_call]
     when YARP::LocalVariableReadNode, YARP::LocalVariableTargetNode
@@ -217,9 +220,11 @@ module KatakataIrb::Completor
       if parents.last.is_a? YARP::ConstantPathNode
         path_node = parents.last
         if path_node.parent # A::B
-          [:const, calculate_receiver.call(path_node.parent), name, nil]
+          receiver, scope = calculate_type_scope.call(path_node.parent)
+          [:const, receiver, name, scope]
         else # ::A
-          [:const, KatakataIrb::Types::SingletonType.new(Object), name, nil]
+          scope = calculate_scope.call
+          [:const, KatakataIrb::Types::SingletonType.new(Object), name, scope]
         end
       else
         [:const, nil, name, calculate_scope.call]

@@ -976,26 +976,13 @@ class KatakataIrb::TypeSimulator
     end
   end
 
-  def self.calculate_binding_scope(binding, parents, target)
-    dig_targets = DigTarget.new(parents, target) do |_types, scope|
-      return scope
+  def self.calculate_target_type_scope(binding, parents, target)
+    dig_targets = DigTarget.new(parents, target) do |type, scope|
+      return type, scope
     end
     program = parents.first
     scope = KatakataIrb::Scope.from_binding(binding, program.locals)
     new(dig_targets).evaluate_program program, scope
-    scope
-  end
-
-  def self.calculate_receiver(binding, parents, receiver)
-    dig_targets = DigTarget.new([*parents, receiver], receiver) do |type, _scope|
-      return type
-    end
-    program = parents.first
-    new(dig_targets).evaluate_program program, KatakataIrb::Scope.from_binding(binding, program.locals)
-    KatakataIrb::Types::NIL
-  end
-
-  def self.calculate_block_symbol_receiver(binding, parents, symbol_node)
-    calculate_receiver binding, parents, symbol_node
+    [KatakataIrb::Types::NIL, scope]
   end
 end

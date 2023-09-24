@@ -216,6 +216,13 @@ module KatakataIrb
       constants
     end
 
+    def table_module_constants(mod)
+      prefix = "#{mod.__id__}::"
+      constants = @table.keys.select { _1.start_with? prefix }.map { _1.delete_prefix(prefix).split('::').first }
+      constants |= @parent.table_constants if @parent.mutable?
+      constants
+    end
+
     def table_instance_variables
       ivars = @table.keys.select { BaseScope.type_by_name(_1) == :ivar }
       ivars |= @parent.table_instance_variables if @parent.mutable? && @trace_ivar
