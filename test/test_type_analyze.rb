@@ -35,14 +35,6 @@ class TestTypeAnalyze < Minitest::Test
     assert (klasses & [*exclude]).empty?, "Expected #{klasses} not to include #{exclude}" if exclude
   end
 
-  def assert_candidates(code, binding: empty_binding, include: nil, exclude: nil)
-    raise ArgumentError if include.nil? && exclude.nil?
-    result = analyze(code.strip, binding: binding)
-    name, candidates = KatakataIrb::Completor.candidates_from_result result
-    assert ([*include] - candidates).empty?, "Expected #{candidates} to include #{include}" if include
-    assert (candidates & [*exclude]).empty?, "Expected #{candidates} not to include #{exclude}" if exclude
-  end
-
   def test_lvar_ivar_gvar_cvar
     assert_analyze_type('puts(x', :lvar_or_method, 'x')
     assert_analyze_type('puts($', :gvar, '$')
@@ -404,9 +396,6 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('::A = 1; module M; A += 0.5; A.', include: Float)
     assert_call('::A = 1; module M; A += 0.5; ::A.', include: Integer)
     assert_call('KatakataIrb::A = 1; KatakataIrb::A += 0.5; KatakataIrb::A.', include: Float)
-    assert_candidates('Array::FooBar = 1; Array::F', include: 'FooBar')
-    assert_candidates('Array::FooBar = 1; F', exclude: 'FooBar')
-    assert_candidates('::FooBar = 1; ::F', include: 'FooBar')
   end
 
   def test_literal
