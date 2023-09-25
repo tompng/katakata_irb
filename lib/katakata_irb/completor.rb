@@ -177,6 +177,9 @@ module KatakataIrb::Completor
   end
 
   def self.analyze(code, binding = Object::TOPLEVEL_BINDING)
+    # Workaround for https://github.com/ruby/yarp/issues/1592
+    return if code.match?(/%[qQ]\z/)
+
     lvars_code = binding.local_variables.map do |name|
       "#{name}="
     end.join + "nil;\n"
