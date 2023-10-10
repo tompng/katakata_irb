@@ -182,10 +182,10 @@ class KatakataIrb::TypeSimulator
       # TODO: return type of []=, field= when operator_loc.nil?
       receiver_type = node.receiver ? evaluate(node.receiver, scope) : scope.self_type
       evaluate_method = lambda do |scope|
-        args_types, kwargs_types, block_sym, has_block = evaluate_call_node_arguments node, scope
+        args_types, kwargs_types, block_sym_node, has_block = evaluate_call_node_arguments node, scope
 
-        if block_sym
-          block_sym_node = node.arguments.arguments.last.expression
+        if block_sym_node
+          block_sym = block_sym_node.value
           if @dig_targets.target? block_sym_node
             # method(args, &:completion_target)
             call_block_proc = ->(block_args, _self_type) do
@@ -199,8 +199,7 @@ class KatakataIrb::TypeSimulator
               block_receiver ? simulate_call(block_receiver || KatakataIrb::Types::OBJECT, block_sym, rest, nil, nil, scope) : KatakataIrb::Types::OBJECT
             end
           end
-        elsif node.block
-          # node.block is Prism::BlockNode
+        elsif node.block.is_a? Prism::BlockNode
           call_block_proc = ->(block_args, block_self_type) do
             scope.conditional do |s|
               numbered_parameters = node.block.locals.grep(/\A_[1-9]/).map(&:to_s)
@@ -251,8 +250,9 @@ class KatakataIrb::TypeSimulator
       end
     when Prism::CallOperatorWriteNode, Prism::CallAndWriteNode, Prism::CallOrWriteNode
       receiver_type = evaluate node.receiver, scope
-      args_types, kwargs_types, block_sym, has_block = evaluate_call_node_arguments node, scope
-      if block_sym
+      args_types, kwargs_types, block_sym_node, has_block = evaluate_call_node_arguments node, scope
+      if block_sym_node
+        block_sym = block_sym_node.value
         call_block_proc = ->(block_args, _self_type) do
           block_receiver, *rest = block_args
           block_receiver ? simulate_call(block_receiver || KatakataIrb::Types::OBJECT, block_sym, rest, nil, nil, scope) : KatakataIrb::Types::OBJECT
@@ -605,7 +605,7 @@ class KatakataIrb::TypeSimulator
   def evaluate_call_node_arguments(call_node, scope)
     # call_node.arguments is Prism::ArgumentsNode
     arguments = call_node.arguments&.arguments&.dup || []
-    block_arg = arguments.pop.expression if arguments.last.is_a? Prism::BlockArgumentNode
+    block_arg = call_node.block.expression if call_node.respond_to?(:block) && call_node.block.is_a?(Prism::BlockArgumentNode)
     kwargs = arguments.pop.elements if arguments.last.is_a?(Prism::KeywordHashNode)
     args_types = arguments.map do |arg|
       case arg
@@ -637,11 +637,11 @@ class KatakataIrb::TypeSimulator
       end.compact.to_h
     end
     if block_arg.is_a? Prism::SymbolNode
-      block_sym = block_arg.value
+      block_sym_node = block_arg
     elsif block_arg
       evaluate block_arg, scope
     end
-    [args_types, kwargs_types, block_sym, !!block_arg]
+    [args_types, kwargs_types, block_sym_node, !!block_arg]
   end
 
   def const_path_write(receiver, name, value, scope)
