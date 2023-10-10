@@ -260,7 +260,7 @@ class KatakataIrb::TypeSimulator
       elsif has_block
         call_block_proc = ->(_block_args, _self_type) { KatakataIrb::Types::OBJECT }
       end
-      method = node.write_name.delete_suffix('=')
+      method = node.write_name.to_s.delete_suffix('=')
       left = simulate_call receiver_type, method, args_types, kwargs_types, call_block_proc, scope
       if node.operator == '&&='
         right = scope.conditional { evaluate node.value, _1 }
