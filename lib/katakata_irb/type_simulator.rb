@@ -2,7 +2,7 @@ require 'ripper'
 require 'set'
 require_relative 'types'
 require_relative 'scope'
-require 'yarp'
+require 'prism'
 
 class KatakataIrb::TypeSimulator
   class DigTarget
@@ -45,15 +45,15 @@ class KatakataIrb::TypeSimulator
 
   def evaluate_inner(node, scope)
     case node
-    when YARP::ProgramNode
+    when Prism::ProgramNode
       evaluate node.statements, scope
-    when YARP::StatementsNode
+    when Prism::StatementsNode
       if node.body.empty?
         KatakataIrb::NIL
       else
         node.body.map { evaluate _1, scope }.last
       end
-    when YARP::DefNode
+    when Prism::DefNode
       if node.receiver
         self_type = evaluate node.receiver, scope
       else
@@ -76,7 +76,7 @@ class KatakataIrb::TypeSimulator
           trace_lvar: false
         )
         if node.parameters
-          # node.parameters is YARP::ParametersNode
+          # node.parameters is Prism::ParametersNode
           assign_parameters node.parameters, method_scope, [], {}
         end
 
@@ -89,55 +89,55 @@ class KatakataIrb::TypeSimulator
         scope.update method_scope
       end
       KatakataIrb::Types::SYMBOL
-    when YARP::IntegerNode
+    when Prism::IntegerNode
       KatakataIrb::Types::INTEGER
-    when YARP::FloatNode
+    when Prism::FloatNode
       KatakataIrb::Types::FLOAT
-    when YARP::RationalNode
+    when Prism::RationalNode
       KatakataIrb::Types::RATIONAL
-    when YARP::ImaginaryNode
+    when Prism::ImaginaryNode
       KatakataIrb::Types::COMPLEX
-    when YARP::StringNode
+    when Prism::StringNode
       KatakataIrb::Types::STRING
-    when YARP::XStringNode
+    when Prism::XStringNode
       KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
-    when YARP::SymbolNode
+    when Prism::SymbolNode
       KatakataIrb::Types::SYMBOL
-    when YARP::RegularExpressionNode
+    when Prism::RegularExpressionNode
       KatakataIrb::Types::REGEXP
-    when YARP::StringConcatNode
+    when Prism::StringConcatNode
       evaluate node.left, scope
       evaluate node.right, scope
       KatakataIrb::Types::STRING
-    when YARP::InterpolatedStringNode
+    when Prism::InterpolatedStringNode
       node.parts.each { evaluate _1, scope }
       KatakataIrb::Types::STRING
-    when YARP::InterpolatedXStringNode
+    when Prism::InterpolatedXStringNode
       node.parts.each { evaluate _1, scope }
       KatakataIrb::Types::STRING
-    when YARP::InterpolatedSymbolNode
+    when Prism::InterpolatedSymbolNode
       node.parts.each { evaluate _1, scope }
       KatakataIrb::Types::SYMBOL
-    when YARP::InterpolatedRegularExpressionNode
+    when Prism::InterpolatedRegularExpressionNode
       node.parts.each { evaluate _1, scope }
       KatakataIrb::Types::REGEXP
-    when YARP::EmbeddedStatementsNode
+    when Prism::EmbeddedStatementsNode
       node.statements ? evaluate(node.statements, scope) : KatakataIrb::Types::NIL
       KatakataIrb::Types::STRING
-    when YARP::EmbeddedVariableNode
+    when Prism::EmbeddedVariableNode
       evaluate node.variable, scope
       KatakataIrb::Types::STRING
-    when YARP::ArrayNode
+    when Prism::ArrayNode
       KatakataIrb::Types.array_of evaluate_list_splat_items(node.elements, scope)
-    when YARP::HashNode, YARP::KeywordHashNode
+    when Prism::HashNode, Prism::KeywordHashNode
       keys = []
       values = []
       node.elements.each do |assoc|
         case assoc
-        when YARP::AssocNode
+        when Prism::AssocNode
           keys << evaluate(assoc.key, scope)
           values << evaluate(assoc.value, scope)
-        when YARP::AssocSplatNode
+        when Prism::AssocSplatNode
           hash = evaluate assoc.value, scope
           unless hash.is_a?(KatakataIrb::Types::InstanceType) && hash.klass == Hash
             hash = simulate_call hash, :to_hash, [], nil, nil, scope
@@ -153,32 +153,32 @@ class KatakataIrb::TypeSimulator
       else
         KatakataIrb::Types::InstanceType.new Hash, K: KatakataIrb::Types::UnionType[*keys], V: KatakataIrb::Types::UnionType[*values]
       end
-    when YARP::ParenthesesNode
+    when Prism::ParenthesesNode
       node.body ? evaluate(node.body, scope) : KatakataIrb::Types::NIL
-    when YARP::ConstantPathNode
+    when Prism::ConstantPathNode
       type, = evaluate_constant_node node, scope
       type
-    when YARP::SelfNode
+    when Prism::SelfNode
       scope.self_type
-    when YARP::TrueNode
+    when Prism::TrueNode
       KatakataIrb::Types::TRUE
-    when YARP::FalseNode
+    when Prism::FalseNode
       KatakataIrb::Types::FALSE
-    when YARP::NilNode
+    when Prism::NilNode
       KatakataIrb::Types::NIL
-    when YARP::SourceFileNode
+    when Prism::SourceFileNode
         KatakataIrb::Types::STRING
-    when YARP::SourceLineNode
+    when Prism::SourceLineNode
         KatakataIrb::Types::INTEGER
-    when YARP::SourceEncodingNode
+    when Prism::SourceEncodingNode
       KatakataIrb::Types::InstanceType.new Encoding
-    when YARP::NumberedReferenceReadNode, YARP::BackReferenceReadNode
+    when Prism::NumberedReferenceReadNode, Prism::BackReferenceReadNode
       KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
-    when YARP::LocalVariableReadNode
+    when Prism::LocalVariableReadNode
       scope[node.name.to_s] || KatakataIrb::Types::NIL
-    when YARP::ConstantReadNode, YARP::GlobalVariableReadNode, YARP::InstanceVariableReadNode, YARP::ClassVariableReadNode
+    when Prism::ConstantReadNode, Prism::GlobalVariableReadNode, Prism::InstanceVariableReadNode, Prism::ClassVariableReadNode
       scope[node.name.to_s] || KatakataIrb::Types::NIL
-    when YARP::CallNode
+    when Prism::CallNode
       # TODO: return type of []=, field= when operator_loc.nil?
       receiver_type = node.receiver ? evaluate(node.receiver, scope) : scope.self_type
       evaluate_method = lambda do |scope|
@@ -200,7 +200,7 @@ class KatakataIrb::TypeSimulator
             end
           end
         elsif node.block
-          # node.block is YARP::BlockNode
+          # node.block is Prism::BlockNode
           call_block_proc = ->(block_args, block_self_type) do
             scope.conditional do |s|
               numbered_parameters = node.block.locals.grep(/\A_[1-9]/).map(&:to_s)
@@ -209,7 +209,7 @@ class KatakataIrb::TypeSimulator
               block_scope = KatakataIrb::Scope.new s, table, self_type: block_self_type
               # TODO kwargs
               if node.block.parameters&.parameters
-                # node.block.parameters is YARP::BlockParametersNode
+                # node.block.parameters is Prism::BlockParametersNode
                 assign_parameters node.block.parameters.parameters, block_scope, block_args, {}
               elsif !numbered_parameters.empty?
                 assign_numbered_parameters numbered_parameters, block_scope, block_args, {}
@@ -241,7 +241,7 @@ class KatakataIrb::TypeSimulator
       else
         evaluate_method.call scope
       end
-    when YARP::AndNode, YARP::OrNode
+    when Prism::AndNode, Prism::OrNode
       left = evaluate node.left, scope
       right = scope.conditional { evaluate node.right, _1 }
       if node.operator == '&&'
@@ -249,7 +249,7 @@ class KatakataIrb::TypeSimulator
       else
         KatakataIrb::Types::UnionType[left, right]
       end
-    when YARP::CallOperatorWriteNode, YARP::CallAndWriteNode, YARP::CallOrWriteNode
+    when Prism::CallOperatorWriteNode, Prism::CallAndWriteNode, Prism::CallOrWriteNode
       receiver_type = evaluate node.receiver, scope
       args_types, kwargs_types, block_sym, has_block = evaluate_call_node_arguments node, scope
       if block_sym
@@ -272,52 +272,52 @@ class KatakataIrb::TypeSimulator
         right = evaluate node.value, scope
         simulate_call left, node.operator, [right], nil, nil, scope, name_match: false
       end
-    when YARP::ClassVariableOperatorWriteNode, YARP::InstanceVariableOperatorWriteNode, YARP::LocalVariableOperatorWriteNode, YARP::GlobalVariableOperatorWriteNode
+    when Prism::ClassVariableOperatorWriteNode, Prism::InstanceVariableOperatorWriteNode, Prism::LocalVariableOperatorWriteNode, Prism::GlobalVariableOperatorWriteNode
       left = scope[node.name.to_s] || KatakataIrb::Types::OBJECT
       right = evaluate node.value, scope
       scope[node.name.to_s] = simulate_call left, node.operator, [right], nil, nil, scope, name_match: false
-    when YARP::ClassVariableAndWriteNode, YARP::InstanceVariableAndWriteNode, YARP::LocalVariableAndWriteNode, YARP::GlobalVariableAndWriteNode
+    when Prism::ClassVariableAndWriteNode, Prism::InstanceVariableAndWriteNode, Prism::LocalVariableAndWriteNode, Prism::GlobalVariableAndWriteNode
       right = scope.conditional { evaluate node.value, scope }
       scope[node.name.to_s] = KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
-    when YARP::ClassVariableOrWriteNode, YARP::InstanceVariableOrWriteNode, YARP::LocalVariableOrWriteNode, YARP::GlobalVariableOrWriteNode
+    when Prism::ClassVariableOrWriteNode, Prism::InstanceVariableOrWriteNode, Prism::LocalVariableOrWriteNode, Prism::GlobalVariableOrWriteNode
       left = scope[node.name.to_s] || KatakataIrb::Types::OBJECT
       right = scope.conditional { evaluate node.value, scope }
       scope[node.name.to_s] = KatakataIrb::Types::UnionType[left, right]
-    when YARP::ConstantOperatorWriteNode
+    when Prism::ConstantOperatorWriteNode
       left = scope[node.name.to_s] || KatakataIrb::Types::OBJECT
       right = evaluate node.value, scope
       scope[node.name.to_s] = simulate_call left, node.operator, [right], nil, nil, scope, name_match: false
-    when YARP::ConstantAndWriteNode
+    when Prism::ConstantAndWriteNode
       right = scope.conditional { evaluate node.value, scope }
       scope[node.name.to_s] = KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
-    when YARP::ConstantOrWriteNode
+    when Prism::ConstantOrWriteNode
       left = scope[node.name.to_s] || KatakataIrb::Types::OBJECT
       right = scope.conditional { evaluate node.value, scope }
       scope[node.name.to_s] = KatakataIrb::Types::UnionType[left, right]
-    when YARP::ConstantPathOperatorWriteNode
+    when Prism::ConstantPathOperatorWriteNode
       left, receiver, _parent_module, name = evaluate_constant_node node.target, scope
       right = evaluate node.value, scope
       value = simulate_call left, node.operator, [right], nil, nil, scope, name_match: false
       const_path_write receiver, name, value, scope
       value
-    when YARP::ConstantPathAndWriteNode
+    when Prism::ConstantPathAndWriteNode
       _left, receiver, _parent_module, name = evaluate_constant_node node.target, scope
       right = scope.conditional { evaluate node.value, scope }
       value = KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
       const_path_write receiver, name, value, scope
       value
-    when YARP::ConstantPathOrWriteNode
+    when Prism::ConstantPathOrWriteNode
       left, receiver, _parent_module, name = evaluate_constant_node node.target, scope
       right = scope.conditional { evaluate node.value, scope }
       value = KatakataIrb::Types::UnionType[left, right]
       const_path_write receiver, name, value, scope
       value
-    when YARP::ConstantPathWriteNode
+    when Prism::ConstantPathWriteNode
       receiver = evaluate node.target.parent, scope if node.target.parent
       value = evaluate node.value, scope
       const_path_write receiver, node.target.child.name.to_s, value, scope
       value
-    when YARP::LambdaNode
+    when Prism::LambdaNode
       local_table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::OBJECT] }
       block_scope = KatakataIrb::Scope.new scope, { **local_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }
       block_scope.conditional do |s|
@@ -327,14 +327,14 @@ class KatakataIrb::TypeSimulator
       block_scope.merge_jumps
       scope.update block_scope
       KatakataIrb::Types::ProcType.new
-    when YARP::LocalVariableWriteNode, YARP::GlobalVariableWriteNode, YARP::InstanceVariableWriteNode, YARP::ClassVariableWriteNode, YARP::ConstantWriteNode
+    when Prism::LocalVariableWriteNode, Prism::GlobalVariableWriteNode, Prism::InstanceVariableWriteNode, Prism::ClassVariableWriteNode, Prism::ConstantWriteNode
       scope[node.name.to_s] = evaluate node.value, scope
-    when YARP::MultiWriteNode
+    when Prism::MultiWriteNode
       evaluated_receivers = {}
       evaluate_multi_write_receiver node, scope, evaluated_receivers
       value = (
-        if node.value.is_a? YARP::ArrayNode
-          if node.value.elements.any?(YARP::SplatNode)
+        if node.value.is_a? Prism::ArrayNode
+          if node.value.elements.any?(Prism::SplatNode)
             evaluate node.value, scope
           else
             node.value.elements.map do |n|
@@ -349,15 +349,15 @@ class KatakataIrb::TypeSimulator
         end
       )
       evaluate_multi_write node, value, scope, evaluated_receivers
-    when YARP::IfNode, YARP::UnlessNode
+    when Prism::IfNode, Prism::UnlessNode
       evaluate node.predicate, scope
       KatakataIrb::Types::UnionType[*scope.run_branches(
         -> { node.statements ? evaluate(node.statements, _1) : KatakataIrb::Types::NIL },
         -> { node.consequent ? evaluate(node.consequent, _1) : KatakataIrb::Types::NIL }
       )]
-    when YARP::ElseNode
+    when Prism::ElseNode
       node.statements ? evaluate(node.statements, scope) : KatakataIrb::Types::NIL
-    when YARP::WhileNode, YARP::UntilNode
+    when Prism::WhileNode, Prism::UntilNode
       inner_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::BREAK_RESULT => nil }
       evaluate node.predicate, inner_scope
       if node.statements
@@ -369,14 +369,14 @@ class KatakataIrb::TypeSimulator
       scope.update inner_scope
       breaks = inner_scope[KatakataIrb::Scope::BREAK_RESULT]
       breaks ? KatakataIrb::Types::UnionType[breaks, KatakataIrb::Types::NIL] : KatakataIrb::Types::NIL
-    when YARP::BreakNode, YARP::NextNode, YARP::ReturnNode
+    when Prism::BreakNode, Prism::NextNode, Prism::ReturnNode
       internal_key = (
         case node
-        when YARP::BreakNode
+        when Prism::BreakNode
           KatakataIrb::Scope::BREAK_RESULT
-        when YARP::NextNode
+        when Prism::NextNode
           KatakataIrb::Scope::NEXT_RESULT
-        when YARP::ReturnNode
+        when Prism::ReturnNode
           KatakataIrb::Scope::RETURN_RESULT
         end
       )
@@ -384,7 +384,7 @@ class KatakataIrb::TypeSimulator
         arguments = node.arguments&.arguments
         if arguments.nil? || arguments.empty?
           KatakataIrb::Types::NIL
-        elsif arguments.size == 1 && !arguments.first.is_a?(YARP::SplatNode)
+        elsif arguments.size == 1 && !arguments.first.is_a?(Prism::SplatNode)
           evaluate arguments.first, scope
         else
           KatakataIrb::Types.array_of evaluate_list_splat_items(arguments, scope)
@@ -392,17 +392,17 @@ class KatakataIrb::TypeSimulator
       )
       scope.terminate_with internal_key, jump_value
       KatakataIrb::Types::NIL
-    when YARP::YieldNode
+    when Prism::YieldNode
       evaluate_list_splat_items node.arguments.arguments, scope if node.arguments
       KatakataIrb::Types::OBJECT
-    when YARP::RedoNode, YARP::RetryNode
+    when Prism::RedoNode, Prism::RetryNode
       scope.terminate
-    when YARP::ForwardingSuperNode
+    when Prism::ForwardingSuperNode
       KatakataIrb::Types::OBJECT
-    when YARP::SuperNode
+    when Prism::SuperNode
       evaluate_list_splat_items node.arguments.arguments, scope if node.arguments
       KatakataIrb::Types::OBJECT
-    when YARP::BeginNode
+    when Prism::BeginNode
       return_type = node.statements ? evaluate(node.statements, scope) : KatakataIrb::Types::NIL
       if node.rescue_clause
         if node.else_clause
@@ -419,11 +419,11 @@ class KatakataIrb::TypeSimulator
         return_type = KatakataIrb::Types::UnionType[*return_types]
       end
       if node.ensure_clause&.statements
-        # ensure_clause is YARP::EnsureNode
+        # ensure_clause is Prism::EnsureNode
         evaluate node.ensure_clause.statements, scope
       end
       return_type
-    when YARP::RescueNode
+    when Prism::RescueNode
       run_rescue = lambda do |s|
         if node.reference
           error_classes_type = evaluate_list_splat_items node.exceptions, s
@@ -433,9 +433,9 @@ class KatakataIrb::TypeSimulator
           error_types << KatakataIrb::Types::InstanceType.new(StandardError) if error_types.empty?
           error_type = KatakataIrb::Types::UnionType[*error_types]
           case node.reference
-          when YARP::LocalVariableTargetNode, YARP::InstanceVariableTargetNode, YARP::ClassVariableTargetNode, YARP::GlobalVariableTargetNode, YARP::ConstantTargetNode
+          when Prism::LocalVariableTargetNode, Prism::InstanceVariableTargetNode, Prism::ClassVariableTargetNode, Prism::GlobalVariableTargetNode, Prism::ConstantTargetNode
             s[node.reference.name.to_s] = error_type
-          when YARP::CallNode
+          when Prism::CallNode
             evaluate node.reference, s
           end
         end
@@ -450,11 +450,11 @@ class KatakataIrb::TypeSimulator
       else
         run_rescue.call scope
       end
-    when YARP::RescueModifierNode
+    when Prism::RescueModifierNode
       a = evaluate node.expression, scope
       b = scope.conditional { evaluate node.rescue_expression, _1 }
       KatakataIrb::Types::UnionType[a, b]
-    when YARP::SingletonClassNode
+    when Prism::SingletonClassNode
       klass_types = evaluate(node.expression, scope).types.filter_map do |type|
         KatakataIrb::Types::SingletonType.new type.klass if type.is_a? KatakataIrb::Types::InstanceType
       end
@@ -470,13 +470,13 @@ class KatakataIrb::TypeSimulator
       result = node.body ? evaluate(node.body, sclass_scope) : KatakataIrb::Types::NIL
       scope.update sclass_scope
       result
-    when YARP::ModuleNode, YARP::ClassNode
-      unless node.constant_path.is_a?(YARP::ConstantReadNode) || node.constant_path.is_a?(YARP::ConstantPathNode)
+    when Prism::ModuleNode, Prism::ClassNode
+      unless node.constant_path.is_a?(Prism::ConstantReadNode) || node.constant_path.is_a?(Prism::ConstantPathNode)
         # Syntax error code, example: `module a.b; end`
         return KatakataIrb::Types::NIL
       end
       const_type, _receiver, parent_module, name = evaluate_constant_node node.constant_path, scope
-      if node.is_a? YARP::ModuleNode
+      if node.is_a? Prism::ModuleNode
         module_types = const_type.types.select { _1.is_a?(KatakataIrb::Types::SingletonType) && !_1.module_or_class.is_a?(Class) }
         module_types << KatakataIrb::Types::MODULE if module_types.empty?
       else
@@ -505,7 +505,7 @@ class KatakataIrb::TypeSimulator
             nesting = [parent_nesting, parent_path + [name]]
           end
           nesting_key = [nesting[0].__id__, nesting[1]].join('::')
-          nesting_value = node.is_a?(YARP::ModuleNode) ? KatakataIrb::Types::MODULE : KatakataIrb::Types::CLASS
+          nesting_value = node.is_a?(Prism::ModuleNode) ? KatakataIrb::Types::MODULE : KatakataIrb::Types::CLASS
         end
       else
         # parent_module == :unknown
@@ -524,7 +524,7 @@ class KatakataIrb::TypeSimulator
       result = evaluate(node.body, module_scope)
       scope.update module_scope
       result
-    when YARP::ForNode
+    when Prism::ForNode
       node.statements
       collection = evaluate node.collection, scope
       inner_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::BREAK_RESULT => nil }
@@ -541,7 +541,7 @@ class KatakataIrb::TypeSimulator
       scope.update inner_scope
       breaks = inner_scope[KatakataIrb::Scope::BREAK_RESULT]
       breaks ? KatakataIrb::Types::UnionType[breaks, collection] : collection
-    when YARP::CaseNode
+    when Prism::CaseNode
       target = evaluate(node.predicate, scope) if node.predicate
       # TODO
       branches = node.conditions.map do |condition|
@@ -549,49 +549,49 @@ class KatakataIrb::TypeSimulator
       end
       if node.consequent
         branches << ->(s) { evaluate node.consequent, s }
-      elsif node.conditions.any? { _1.is_a? YARP::WhenNode }
+      elsif node.conditions.any? { _1.is_a? Prism::WhenNode }
         branches << ->(s) { KatakataIrb::Types::NIL }
       end
       KatakataIrb::Types::UnionType[*scope.run_branches(*branches)]
-    when YARP::MatchRequiredNode
+    when Prism::MatchRequiredNode
       value_type = evaluate node.value, scope
       evaluate_match_pattern value_type, node.pattern, scope
       KatakataIrb::Types::NIL # void value
-    when YARP::MatchPredicateNode
+    when Prism::MatchPredicateNode
       value_type = evaluate node.value, scope
       scope.conditional { evaluate_match_pattern value_type, node.pattern, _1 }
       KatakataIrb::Types::BOOLEAN
-    when YARP::RangeNode
+    when Prism::RangeNode
       beg_type = evaluate node.left, scope if node.left
       end_type = evaluate node.right, scope if node.right
       elem = (KatakataIrb::Types::UnionType[*[beg_type, end_type].compact]).nonnillable
       KatakataIrb::Types::InstanceType.new Range, Elem: elem
-    when YARP::DefinedNode
+    when Prism::DefinedNode
       scope.conditional { evaluate node.value, _1 }
       KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
-    when YARP::FlipFlopNode
+    when Prism::FlipFlopNode
       scope.conditional { evaluate node.left, _1 } if node.left
       scope.conditional { evaluate node.right, _1 } if node.right
       KatakataIrb::Types::BOOLEAN
-    when YARP::MultiTargetNode
-      # Raw MultiTargetNode, incomplete code like `a,b`, `*a`. https://github.com/ruby/yarp/issues/1470
+    when Prism::MultiTargetNode
+      # Raw MultiTargetNode, incomplete code like `a,b`, `*a`.
       evaluate_multi_write_receiver node, scope, nil
       KatakataIrb::Types::NIL
-    when YARP::ImplicitNode
+    when Prism::ImplicitNode
       evaluate node.value, scope
-    when YARP::MatchWriteNode
+    when Prism::MatchWriteNode
       # /(?<a>)(?<b>)/ =~ string
       evaluate node.call, scope
       node.locals.each { scope[_1.to_s] = KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL] }
       KatakataIrb::Types::BOOLEAN
-    when YARP::MatchLastLineNode
+    when Prism::MatchLastLineNode
       KatakataIrb::Types::BOOLEAN
-    when YARP::InterpolatedMatchLastLineNode
+    when Prism::InterpolatedMatchLastLineNode
       node.parts.each { evaluate _1, scope }
       KatakataIrb::Types::BOOLEAN
-    when YARP::PreExecutionNode, YARP::PostExecutionNode
+    when Prism::PreExecutionNode, Prism::PostExecutionNode
       node.statements ? evaluate(node.statements, scope) : KatakataIrb::Types::NIL
-    when YARP::AliasMethodNode, YARP::AliasGlobalVariableNode, YARP::UndefNode, YARP::MissingNode
+    when Prism::AliasMethodNode, Prism::AliasGlobalVariableNode, Prism::UndefNode, Prism::MissingNode
       # do nothing
       KatakataIrb::Types::NIL
     else
@@ -603,16 +603,16 @@ class KatakataIrb::TypeSimulator
   end
 
   def evaluate_call_node_arguments(call_node, scope)
-    # call_node.arguments is YARP::ArgumentsNode
+    # call_node.arguments is Prism::ArgumentsNode
     arguments = call_node.arguments&.arguments&.dup || []
-    block_arg = arguments.pop.expression if arguments.last.is_a? YARP::BlockArgumentNode
-    kwargs = arguments.pop.elements if arguments.last.is_a?(YARP::KeywordHashNode)
+    block_arg = arguments.pop.expression if arguments.last.is_a? Prism::BlockArgumentNode
+    kwargs = arguments.pop.elements if arguments.last.is_a?(Prism::KeywordHashNode)
     args_types = arguments.map do |arg|
       case arg
-      when YARP::ForwardingArgumentsNode
+      when Prism::ForwardingArgumentsNode
         # `f(a, ...)` treat like splat
         nil
-      when YARP::SplatNode
+      when Prism::SplatNode
         evaluate arg.expression, scope
         nil # TODO: splat
       else
@@ -622,21 +622,21 @@ class KatakataIrb::TypeSimulator
     if kwargs
       kwargs_types = kwargs.map do |arg|
         case arg
-        when YARP::AssocNode
-          if arg.key.is_a?(YARP::SymbolNode)
+        when Prism::AssocNode
+          if arg.key.is_a?(Prism::SymbolNode)
             [arg.key.value, evaluate(arg.value, scope)]
           else
             evaluate arg.key, scope
             evaluate arg.value, scope
             nil
           end
-        when YARP::AssocSplatNode
+        when Prism::AssocSplatNode
           evaluate arg.value, scope
           nil
         end
       end.compact.to_h
     end
-    if block_arg.is_a? YARP::SymbolNode
+    if block_arg.is_a? Prism::SymbolNode
       block_sym = block_arg.value
     elsif block_arg
       evaluate block_arg, scope
@@ -655,14 +655,14 @@ class KatakataIrb::TypeSimulator
 
   def assign_required_parameter(node, value, scope)
     case node
-    when YARP::RequiredParameterNode
+    when Prism::RequiredParameterNode
       scope[node.name.to_s] = value || KatakataIrb::Types::OBJECT
-    when YARP::RequiredDestructuredParameterNode
+    when Prism::RequiredDestructuredParameterNode
       values = value ? sized_splat(value, :to_ary, node.parameters.size) : []
       node.parameters.zip values do |n, v|
         assign_required_parameter n, v, scope
       end
-    when YARP::SplatNode
+    when Prism::SplatNode
       splat_value = value ? KatakataIrb::Types.array_of(value) : KatakataIrb::Types::ARRAY
       assign_required_parameter node.expression, splat_value, scope
     end
@@ -670,7 +670,7 @@ class KatakataIrb::TypeSimulator
 
   def evaluate_constant_node(node, scope)
     case node
-    when YARP::ConstantPathNode
+    when Prism::ConstantPathNode
       name = node.child.name.to_s
       if node.parent
         receiver = evaluate node.parent, scope
@@ -686,7 +686,7 @@ class KatakataIrb::TypeSimulator
         parent_module = :unknown
         type = KatakataIrb::Types::NIL
       end
-    when YARP::ConstantReadNode
+    when Prism::ConstantReadNode
       name = node.name.to_s
       type = scope[name]
     end
@@ -701,7 +701,7 @@ class KatakataIrb::TypeSimulator
     args = sized_splat(args.first, :to_ary, size) if size >= 2 && args.size == 1
     reqs = args.shift node.requireds.size
     if node.rest
-      # node.rest.class is YARP::RestParameterNode
+      # node.rest.class is Prism::RestParameterNode
       posts = []
       opts = args.shift node.optionals.size
       rest = args
@@ -714,7 +714,7 @@ class KatakataIrb::TypeSimulator
       assign_required_parameter n, v, scope
     end
     node.optionals.zip opts do |n, v|
-      # n is YARP::OptionalParameterNode
+      # n is Prism::OptionalParameterNode
       values = [v]
       values << evaluate(n.value, scope) if n.value
       scope[n.name.to_s] = KatakataIrb::Types::UnionType[*values.compact]
@@ -723,22 +723,22 @@ class KatakataIrb::TypeSimulator
       assign_required_parameter n, v, scope
     end
     if node.rest&.name
-      # node.rest is YARP::RestParameterNode
+      # node.rest is Prism::RestParameterNode
       scope[node.rest.name.to_s] = KatakataIrb::Types.array_of(*rest)
     end
     node.keywords.each do |n|
-      # n is YARP::KeywordParameterNode
+      # n is Prism::KeywordParameterNode
       name = n.name.to_s.delete(':')
       values = [kwargs.delete(name)]
       values << evaluate(n.value, scope) if n.value
       scope[name] = KatakataIrb::Types::UnionType[*values.compact]
     end
-    # node.keyword_rest is YARP::KeywordRestParameterNode or YARP::ForwardingParameterNode or YARP::NoKeywordsParameterNode
-    if node.keyword_rest.is_a?(YARP::KeywordRestParameterNode) && node.keyword_rest.name
+    # node.keyword_rest is Prism::KeywordRestParameterNode or Prism::ForwardingParameterNode or Prism::NoKeywordsParameterNode
+    if node.keyword_rest.is_a?(Prism::KeywordRestParameterNode) && node.keyword_rest.name
       scope[node.keyword_rest.name.to_s] = KatakataIrb::Types::InstanceType.new(Hash, K: KatakataIrb::Types::SYMBOL, V: KatakataIrb::Types::UnionType[*kwargs.values])
     end
     if node.block&.name
-      # node.block is YARP::BlockParameterNode
+      # node.block is Prism::BlockParameterNode
       scope[node.block.name.to_s] = KatakataIrb::Types::PROC
     end
   end
@@ -765,12 +765,12 @@ class KatakataIrb::TypeSimulator
 
   def evaluate_case_match(target, node, scope)
     case node
-    when YARP::WhenNode
+    when Prism::WhenNode
       node.conditions.each { evaluate _1, scope }
       node.statements ? evaluate(node.statements, scope) : KatakataIrb::Types::NIL
-    when YARP::InNode
+    when Prism::InNode
       pattern = node.pattern
-      if pattern in YARP::IfNode | YARP::UnlessNode
+      if pattern in Prism::IfNode | Prism::UnlessNode
         cond_node = pattern.predicate
         pattern = pattern.statements.body.first
       end
@@ -783,41 +783,41 @@ class KatakataIrb::TypeSimulator
   def evaluate_match_pattern(value, pattern, scope)
     # TODO: scope.terminate_with KatakataIrb::Scope::PATTERNMATCH_BREAK, KatakataIrb::Types::NIL
     case pattern
-    when YARP::FindPatternNode
+    when Prism::FindPatternNode
       # TODO
       evaluate_match_pattern KatakataIrb::Types::OBJECT, pattern.left, scope
       pattern.requireds.each { evaluate_match_pattern KatakataIrb::Types::OBJECT, _1, scope }
       evaluate_match_pattern KatakataIrb::Types::OBJECT, pattern.right, scope
-    when YARP::ArrayPatternNode
+    when Prism::ArrayPatternNode
       # TODO
       pattern.requireds.each { evaluate_match_pattern KatakataIrb::Types::OBJECT, _1, scope }
       evaluate_match_pattern KatakataIrb::Types::OBJECT, pattern.rest, scope if pattern.rest
       pattern.posts.each { evaluate_match_pattern KatakataIrb::Types::OBJECT, _1, scope }
       KatakataIrb::Types::ARRAY
-    when YARP::HashPatternNode
+    when Prism::HashPatternNode
       # TODO
       pattern.assocs.each { evaluate_match_pattern KatakataIrb::Types::OBJECT, _1, scope }
       KatakataIrb::Types::HASH
-    when YARP::AssocNode
+    when Prism::AssocNode
       evaluate_match_pattern value, pattern.value, scope if pattern.value
       KatakataIrb::Types::OBJECT
-    when YARP::AssocSplatNode
+    when Prism::AssocSplatNode
       # TODO
       evaluate_match_pattern KatakataIrb::Types::HASH, pattern.value, scope
       KatakataIrb::Types::OBJECT
-    when YARP::PinnedVariableNode
+    when Prism::PinnedVariableNode
       evaluate pattern.variable, scope
-    when YARP::PinnedExpressionNode
+    when Prism::PinnedExpressionNode
       evaluate pattern.expression, scope
-    when YARP::LocalVariableTargetNode
+    when Prism::LocalVariableTargetNode
       scope[pattern.name.to_s] = value
-    when YARP::AlternationPatternNode
+    when Prism::AlternationPatternNode
       KatakataIrb::Types::UnionType[evaluate_match_pattern(value, pattern.left, scope), evaluate_match_pattern(value, pattern.right, scope)]
-    when YARP::CapturePatternNode
+    when Prism::CapturePatternNode
       capture_type = class_or_value_to_instance evaluate_match_pattern(value, pattern.value, scope)
       value = capture_type unless capture_type.types.empty? || capture_type.types == [KatakataIrb::Types::OBJECT]
       evaluate_match_pattern value, pattern.target, scope
-    when YARP::SplatNode
+    when Prism::SplatNode
       value = KatakataIrb::Types.array_of value
       evaluate_match_pattern value, pattern.expression, scope if pattern.expression
       value
@@ -837,15 +837,15 @@ class KatakataIrb::TypeSimulator
 
   def evaluate_write(node, value, scope, evaluated_receivers)
     case node
-    when YARP::MultiTargetNode
+    when Prism::MultiTargetNode
       evaluate_multi_write node, value, scope, evaluated_receivers
-    when YARP::CallNode
+    when Prism::CallNode
       evaluated_receivers&.[](node.receiver) || evaluate(node.receiver, scope) if node.receiver
-    when YARP::SplatNode
+    when Prism::SplatNode
       evaluate_write node.expression, KatakataIrb::Types.array_of(value), scope, evaluated_receivers
-    when YARP::LocalVariableTargetNode, YARP::GlobalVariableTargetNode, YARP::InstanceVariableTargetNode, YARP::ClassVariableTargetNode, YARP::ConstantTargetNode
+    when Prism::LocalVariableTargetNode, Prism::GlobalVariableTargetNode, Prism::InstanceVariableTargetNode, Prism::ClassVariableTargetNode, Prism::ConstantTargetNode
       scope[node.name.to_s] = value
-    when YARP::ConstantPathTargetNode
+    when Prism::ConstantPathTargetNode
       receiver = evaluated_receivers&.[](node.parent) || evaluate(node.parent, scope) if node.parent
       const_path_write receiver, node.child.name.to_s, value, scope
       value
@@ -854,7 +854,7 @@ class KatakataIrb::TypeSimulator
 
   def evaluate_multi_write(node, values, scope, evaluated_receivers)
     values = sized_splat values, :to_ary, node.targets.size unless values.is_a? Array
-    splat_index = node.targets.find_index { _1.is_a? YARP::SplatNode }
+    splat_index = node.targets.find_index { _1.is_a? Prism::SplatNode }
     if splat_index
       pre_targets = node.targets[0...splat_index]
       splat_target = node.targets[splat_index]
@@ -873,30 +873,30 @@ class KatakataIrb::TypeSimulator
 
   def evaluate_multi_write_receiver(node, scope, evaluated_receivers)
     case node
-    when YARP::MultiWriteNode, YARP::MultiTargetNode
+    when Prism::MultiWriteNode, Prism::MultiTargetNode
       node.targets.each { evaluate_multi_write_receiver _1, scope, evaluated_receivers }
-    when YARP::CallNode
+    when Prism::CallNode
       if node.receiver
         receiver = evaluate(node.receiver, scope)
         evaluated_receivers[node.receiver] = receiver if evaluated_receivers
       end
       if node.arguments
         node.arguments.arguments&.each do |arg|
-          if arg.is_a? YARP::SplatNode
+          if arg.is_a? Prism::SplatNode
             evaluate arg.expression, scope
           else
             evaluate arg, scope
           end
         end
       end
-    when YARP::SplatNode
+    when Prism::SplatNode
       evaluate_multi_write_receiver node.expression, scope, evaluated_receivers if node.expression
     end
   end
 
   def evaluate_list_splat_items(list, scope)
     items = list.flat_map do |node|
-      if node.is_a? YARP::SplatNode
+      if node.is_a? Prism::SplatNode
         splat = evaluate node.expression, scope
         array_elem, non_array = partition_to_array splat.nonnillable, :to_a
         [*array_elem, *non_array]

@@ -49,14 +49,14 @@ class TestKatakataIrb < Minitest::Test
     assert_equal 'Complex#abs', document
   end
 
-  def test_yarp_node_names
+  def test_prism_node_names
     files = %w[type_simulator.rb completor.rb]
     codes = files.map do |file|
       File.read File.join(File.dirname(__FILE__), '../lib/katakata_irb', file)
     end
-    implemented_node_class_names = codes.join.scan(/YARP::[A-Za-z]+Node/).uniq.sort
-    ignore_class_names = ['YARP::BlockLocalVariableNode']
-    all_node_class_names = YARP.constants.grep(/Node$/).map { "YARP::#{_1}" }.sort - ['YARP::Node'] - ignore_class_names
+    implemented_node_class_names = codes.join.scan(/Prism::[A-Za-z]+Node/).uniq.sort
+    ignore_class_names = ['Prism::BlockLocalVariableNode']
+    all_node_class_names = Prism.constants.grep(/Node$/).map { "Prism::#{_1}" }.sort - ['Prism::Node'] - ignore_class_names
     assert_empty implemented_node_class_names - all_node_class_names
     assert_empty all_node_class_names - implemented_node_class_names
   end

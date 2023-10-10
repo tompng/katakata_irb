@@ -2,7 +2,7 @@ require_relative 'type_simulator'
 require 'rbs'
 require 'rbs/cli'
 require 'irb'
-require 'yarp'
+require 'prism'
 
 module KatakataIrb::Completor
   HIDDEN_METHODS = %w[Namespace TypeName] # defined by rbs, should be hidden
@@ -177,14 +177,14 @@ module KatakataIrb::Completor
   end
 
   def self.analyze(code, binding = Object::TOPLEVEL_BINDING)
-    # Workaround for https://github.com/ruby/yarp/issues/1592
+    # Workaround for https://github.com/ruby/prism/issues/1592
     return if code.match?(/%[qQ]\z/)
 
     lvars_code = binding.local_variables.map do |name|
       "#{name}="
     end.join + "nil;\n"
     code = lvars_code + code
-    ast = YARP.parse(code).value
+    ast = Prism.parse(code).value
     name = code[/(@@|@|\$)?\w*\z/]
     *parents, target_node = find_target ast, code.bytesize - name.bytesize
     return unless target_node
@@ -192,34 +192,34 @@ module KatakataIrb::Completor
     calculate_scope = -> { KatakataIrb::TypeSimulator.calculate_target_type_scope(binding, parents, target_node).last }
     calculate_type_scope = ->(node) { KatakataIrb::TypeSimulator.calculate_target_type_scope binding, [*parents, target_node], node }
 
-    if target_node in YARP::StringNode | YARP::InterpolatedStringNode
+    if target_node in Prism::StringNode | Prism::InterpolatedStringNode
       args_node = parents[-1]
       call_node = parents[-2]
-      return unless args_node.is_a?(YARP::ArgumentsNode) && args_node.arguments.size == 1
-      return unless call_node.is_a?(YARP::CallNode) && call_node.receiver.nil? && (call_node.message in 'require' | 'require_relative')
+      return unless args_node.is_a?(Prism::ArgumentsNode) && args_node.arguments.size == 1
+      return unless call_node.is_a?(Prism::CallNode) && call_node.receiver.nil? && (call_node.message in 'require' | 'require_relative')
       return [call_node.message.to_sym, name.rstrip]
     end
 
     case target_node
-    when YARP::SymbolNode
-      if parents.last.is_a? YARP::BlockArgumentNode # method(&:target)
+    when Prism::SymbolNode
+      if parents.last.is_a? Prism::BlockArgumentNode # method(&:target)
         receiver_type, _scope = calculate_type_scope.call target_node
         [:call, receiver_type, name, false]
       else
         [:symbol, name] unless name.empty?
       end
-    when YARP::CallNode
+    when Prism::CallNode
       return [:lvar_or_method, name, calculate_scope.call] if target_node.receiver.nil?
 
-      self_call = target_node.receiver.is_a? YARP::SelfNode
+      self_call = target_node.receiver.is_a? Prism::SelfNode
       op = target_node.call_operator
       receiver_type, _scope = calculate_type_scope.call target_node.receiver
       receiver_type = receiver_type.nonnillable if op == '&.'
       [op == '::' ? :call_or_const : :call, receiver_type, name, self_call]
-    when YARP::LocalVariableReadNode, YARP::LocalVariableTargetNode
+    when Prism::LocalVariableReadNode, Prism::LocalVariableTargetNode
       [:lvar_or_method, name, calculate_scope.call]
-    when YARP::ConstantReadNode, YARP::ConstantTargetNode
-      if parents.last.is_a? YARP::ConstantPathNode
+    when Prism::ConstantReadNode, Prism::ConstantTargetNode
+      if parents.last.is_a? Prism::ConstantPathNode
         path_node = parents.last
         if path_node.parent # A::B
           receiver, scope = calculate_type_scope.call(path_node.parent)
@@ -231,11 +231,11 @@ module KatakataIrb::Completor
       else
         [:const, nil, name, calculate_scope.call]
       end
-    when YARP::GlobalVariableReadNode, YARP::GlobalVariableTargetNode
+    when Prism::GlobalVariableReadNode, Prism::GlobalVariableTargetNode
       [:gvar, name, calculate_scope.call]
-    when YARP::InstanceVariableReadNode, YARP::InstanceVariableTargetNode
+    when Prism::InstanceVariableReadNode, Prism::InstanceVariableTargetNode
       [:ivar, name, calculate_scope.call]
-    when YARP::ClassVariableReadNode, YARP::ClassVariableTargetNode
+    when Prism::ClassVariableReadNode, Prism::ClassVariableTargetNode
       [:cvar, name, calculate_scope.call]
     end
   end
@@ -243,20 +243,20 @@ module KatakataIrb::Completor
   def self.find_target(node, position)
     location = (
       case node
-      when YARP::CallNode
+      when Prism::CallNode
         node.message_loc
-      when YARP::SymbolNode
+      when Prism::SymbolNode
         node.value_loc
-      when YARP::StringNode
+      when Prism::StringNode
         node.content_loc
-      when YARP::InterpolatedStringNode
+      when Prism::InterpolatedStringNode
         node.closing_loc if node.parts.empty?
       end
     )
     return [node] if location&.start_offset == position
 
     node.child_nodes.each do |n|
-      next unless n.is_a? YARP::Node
+      next unless n.is_a? Prism::Node
       match = find_target(n, position)
       next unless match
       match.unshift node
