@@ -12,6 +12,7 @@ module KatakataIrb::Completor
   def self.setup
     KatakataIrb::Types.preload_in_thread
     completion_proc = ->(target, preposing = nil, postposing = nil) do
+      verbose, $VERBOSE = $VERBOSE, nil
       code = "#{preposing}#{target}"
       irb_context = IRB.conf[:MAIN_CONTEXT]
       binding = irb_context.workspace.binding
@@ -19,10 +20,17 @@ module KatakataIrb::Completor
       KatakataIrb::Completor.prev_analyze_result = result
       candidates = case result
       in [:require | :require_relative => method, name]
-        if method == :require
-          IRB::InputCompletor.retrieve_files_to_require_from_load_path
+        if IRB.const_defined? :InputCompletor # IRB::VERSION <= 1.8.1
+          path_completor = IRB::InputCompletor
+        elsif IRB.const_defined? :RegexpCompletor # IRB::VERSION >= 1.8.2
+          path_completor = IRB::RegexpCompletor.new
+        end
+        if !path_completor
+          []
+        elsif method == :require
+          path_completor.retrieve_files_to_require_from_load_path
         else
-          IRB::InputCompletor.retrieve_files_to_require_relative_from_current_dir
+          path_completor.retrieve_files_to_require_relative_from_current_dir
         end
       in [:call_or_const, type, name, self_call]
         ((self_call ? type.all_methods: type.methods).map(&:to_s) - HIDDEN_METHODS) | type.constants
@@ -51,10 +59,6 @@ module KatakataIrb::Completor
       candidates.map(&:to_s).select { !_1.match?(all_symbols_pattern) && _1.start_with?(name) }.uniq.sort.map do
         target + _1[name.size..]
       end
-    end
-    IRB::InputCompletor::CompletionProc.define_singleton_method :call do |*args|
-      verbose, $VERBOSE = $VERBOSE, nil
-      completion_proc.call(*args)
     rescue => e
       KatakataIrb.last_completion_error = e
       KatakataIrb.log_puts
@@ -64,43 +68,66 @@ module KatakataIrb::Completor
       $VERBOSE = verbose
     end
 
-    IRB::InputCompletor.singleton_class.prepend Module.new{
-      def retrieve_completion_data(input, doc_namespace: false, **)
-        return super unless doc_namespace
-        name = input[/[a-zA-Z_0-9]+[!?=]?\z/]
-        method_doc = -> type do
-          type = type.types.find { _1.all_methods.include? name.to_sym }
-          if type in KatakataIrb::Types::SingletonType
-            "#{KatakataIrb::Types.class_name_of(type.module_or_class)}.#{name}"
-          elsif type in KatakataIrb::Types::InstanceType
-            "#{KatakataIrb::Types.class_name_of(type.klass)}##{name}"
-          end
-        end
-        call_or_const_doc = -> type do
-          if name =~ /\A[A-Z]/
-            type = type.types.grep(KatakataIrb::Types::SingletonType).find { _1.module_or_class.const_defined?(name) }
-            type.module_or_class == Object ? name : "#{KatakataIrb::Types.class_name_of(type.module_or_class)}::#{name}" if type
-          else
-            method_doc.call(type)
-          end
-        end
-
-        case KatakataIrb::Completor.prev_analyze_result
-        in [:call_or_const, type, _name, _self_call]
-          call_or_const_doc.call type
-        in [:const, type, _name]
-          # when prev_analyze_result is const, current analyze result might be call
-          call_or_const_doc.call type
-        in [:gvar, _name]
-          name
-        in [:call, type, _name, _self_call]
-          method_doc.call type
-        in [:lvar_or_method, _name, scope]
-          method_doc.call scope.self_type unless scope.local_variables.include?(name)
-        else
+    doc_namespace_proc = ->(input) do
+      name = input[/[a-zA-Z_0-9]+[!?=]?\z/]
+      method_doc = -> type do
+        type = type.types.find { _1.all_methods.include? name.to_sym }
+        if type in KatakataIrb::Types::SingletonType
+          "#{KatakataIrb::Types.class_name_of(type.module_or_class)}.#{name}"
+        elsif type in KatakataIrb::Types::InstanceType
+          "#{KatakataIrb::Types.class_name_of(type.klass)}##{name}"
         end
       end
-    }
+      call_or_const_doc = -> type do
+        if name =~ /\A[A-Z]/
+          type = type.types.grep(KatakataIrb::Types::SingletonType).find { _1.module_or_class.const_defined?(name) }
+          type.module_or_class == Object ? name : "#{KatakataIrb::Types.class_name_of(type.module_or_class)}::#{name}" if type
+        else
+          method_doc.call(type)
+        end
+      end
+
+      case KatakataIrb::Completor.prev_analyze_result
+      in [:call_or_const, type, _name, _self_call]
+        call_or_const_doc.call type
+      in [:const, type, _name]
+        # when prev_analyze_result is const, current analyze result might be call
+        call_or_const_doc.call type
+      in [:gvar, _name]
+        name
+      in [:call, type, _name, _self_call]
+        method_doc.call type
+      in [:lvar_or_method, _name, scope]
+        method_doc.call scope.self_type unless scope.local_variables.include?(name)
+      else
+      end
+    end
+
+    if IRB.const_defined? :InputCompletor # IRB::VERSION <= 1.8.1
+      IRB::InputCompletor::CompletionProc.define_singleton_method :call do |*args|
+        completion_proc.call(*args)
+      end
+      IRB::InputCompletor.singleton_class.prepend(
+        Module.new do
+          define_method :retrieve_completion_data do |input, doc_namespace: false, **kwargs|
+            return super(input, doc_namespace: false, **kwargs) unless doc_namespace
+            doc_namespace_proc.call input
+          end
+        end
+      )
+    elsif IRB.const_defined? :RegexpCompletor # IRB::VERSION >= 1.8.2
+      IRB::RegexpCompletor.class_eval do
+        define_method :completion_candidates do |preposing, target, postposing, bind:|
+          completion_proc.call(target, preposing, postposing)
+        end
+        define_method :doc_namespace do |_preposing, matched, _postposing, bind:|
+          doc_namespace_proc.call matched
+        end
+      end
+    else
+      puts 'Cannot activate katakata_irb'
+    end
+
     setup_type_dialog
   end
 
