@@ -57,17 +57,18 @@ class TestCompletor < Minitest::Test
   end
 
   def test_ivar
-    # bind = Object.new.instance_eval { @hoge = 1; binding }
-    # assert_completion('@', binding: bind, include: '@hoge')
-    # assert_completion('@h', binding: bind, include: '@hoge')
+    bind = Object.new.instance_eval { @hoge = 1; binding }
+    assert_completion('@', binding: bind, include: '@hoge')
+    assert_completion('@h', binding: bind, include: '@hoge')
     assert_completion('@fuga = 1; @', include: '@fuga')
     assert_completion('@fuga = 1; @f', include: '@fuga')
   end
 
+  @@test_cvar = 1
   def test_cvar
-    # bind = Module.new.module_eval { @@hoge = 1; binding }
-    # assert_completion('@@', binding: bind, include: '@@hoge')
-    # assert_completion('@@h', binding: bind, include: '@@hoge')
+    bind = binding
+    assert_completion('@@', binding: bind, include: '@@test_cvar')
+    assert_completion('@@t', binding: bind, include: '@@test_cvar')
     assert_completion('@@fuga = 1; @', include: '@@fuga')
     assert_completion('@@fuga = 1; @@', include: '@@fuga')
     assert_completion('@@fuga = 1; @@f', include: '@@fuga')

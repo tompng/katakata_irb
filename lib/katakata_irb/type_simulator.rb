@@ -73,7 +73,8 @@ class KatakataIrb::TypeSimulator
           scope,
           { **params_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil },
           self_type: self_type,
-          trace_lvar: false
+          trace_lvar: false,
+          trace_ivar: false
         )
         if node.parameters
           # node.parameters is Prism::ParametersNode

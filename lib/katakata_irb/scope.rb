@@ -8,7 +8,7 @@ module KatakataIrb
     RETURN_RESULT = '%return'
     PATTERNMATCH_BREAK = '%match'
 
-    attr_reader :module_nesting
+    attr_reader :module_nesting, :self_object
 
     def initialize(binding, self_object, local_variables)
       @binding = binding
@@ -223,6 +223,10 @@ module KatakataIrb
       constants
     end
 
+    def base_scope
+      @parent.mutable? ? @parent.base_scope : @parent
+    end
+
     def table_instance_variables
       ivars = @table.keys.select { BaseScope.type_by_name(_1) == :ivar }
       ivars |= @parent.table_instance_variables if @parent.mutable? && @trace_ivar
@@ -231,16 +235,27 @@ module KatakataIrb
 
     def instance_variables
       self_singleton_types = self_type.types.grep(KatakataIrb::Types::SingletonType)
-      self_singleton_types.flat_map { _1.module_or_class.instance_variables } | table_instance_variables
+      base_self = base_scope.self_object
+      if self_type.types.any? { _1.is_a?(KatakataIrb::Types::InstanceType) && _1.klass == base_self.singleton_class }
+        self_instance_variables = base_self.instance_variables.map(&:to_s)
+      end
+      [
+        self_singleton_types.flat_map { _1.module_or_class.instance_variables.map(&:to_s) },
+        self_instance_variables || [],
+        table_instance_variables
+      ].inject(:|)
+    end
+
+    def table_class_variables
+      cvars = @table.keys.select { BaseScope.type_by_name(_1) == :cvar }
+      cvars |= @parent.table_class_variables if @parent.mutable? && @trace_cvar
+      cvars
     end
 
     def class_variables
-      cvars = @table.keys.select { BaseScope.type_by_name(_1) == :cvar }
-      cvars |= @parent.class_variables if @parent.mutable? && @trace_cvar
-      unless @trace_cvar
-        m = module_nesting.first
-        cvars |= m.class_variables if m.is_a? Module
-      end
+      cvars = table_class_variables
+      m, = module_nesting.first
+      cvars |= m.class_variables.map(&:to_s) if m.is_a? Module
       cvars
     end
 

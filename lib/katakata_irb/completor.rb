@@ -55,10 +55,10 @@ module KatakataIrb::Completor
 
   def self.setup
     KatakataIrb::Types.preload_in_thread
-    completion_proc = ->(preposing, target, postposing, bind:) do
+    completion_proc = ->(preposing, target, _postposing, bind:) do
       verbose, $VERBOSE = $VERBOSE, nil
       code = "#{preposing}#{target}"
-      result = analyze code, binding
+      result = analyze code, bind
       KatakataIrb::Completor.prev_analyze_result = result
       name, candidates = candidates_from_result(result).dup
 
