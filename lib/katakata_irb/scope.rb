@@ -158,7 +158,8 @@ module KatakataIrb
     end
 
     def [](name)
-      if BaseScope.type_by_name(name) == :const
+      type = BaseScope.type_by_name(name)
+      if type == :const
         module_nesting.each do |(nesting, path)|
           value = get_const nesting, [*path, name]
           return value if value
@@ -169,7 +170,9 @@ module KatakataIrb
       if level
         value
       elsif trace? name
-        @parent[name] if trace? name
+        @parent[name]
+      elsif type == :ivar
+        self_instance_variable_get name
       end
     end
 
@@ -251,6 +254,23 @@ module KatakataIrb
         self_instance_variables || [],
         table_instance_variables
       ].inject(:|)
+    end
+
+    def self_instance_variable_get(name)
+      self_objects = self_type.types.grep(KatakataIrb::Types::SingletonType).map(&:module_or_class)
+      singleton_classes = self_type.types.grep(KatakataIrb::Types::InstanceType).map(&:klass).select(&:singleton_class?)
+      base_self = base_scope.self_object
+      singleton_classes.each do |singleton_class|
+        if singleton_class.respond_to? :attached_object
+          self_objects << singleton_class.attached_object
+        elsif singleton_class == base_self.singleton_class
+          self_objects << base_self
+        end
+      end
+      types = self_objects.map do |object|
+        BaseScope.type_of(fallback: KatakataIrb::Types::NIL) { object.instance_variable_get name }
+      end
+      KatakataIrb::Types::UnionType[*types]
     end
 
     def table_class_variables

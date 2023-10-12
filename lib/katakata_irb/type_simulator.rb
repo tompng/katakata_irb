@@ -206,7 +206,7 @@ class KatakataIrb::TypeSimulator
               numbered_parameters = node.block.locals.grep(/\A_[1-9]/).map(&:to_s)
               params_table = node.block.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
               table = { **params_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil }
-              block_scope = KatakataIrb::Scope.new s, table, self_type: block_self_type
+              block_scope = KatakataIrb::Scope.new s, table, self_type: block_self_type, trace_ivar: !block_self_type
               # TODO kwargs
               if node.block.parameters&.parameters
                 # node.block.parameters is Prism::BlockParametersNode

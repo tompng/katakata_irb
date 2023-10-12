@@ -88,6 +88,17 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('@@cvar.', include: String, binding: bind)
   end
 
+  def test_self_ivar_ref
+    obj = Object.new
+    obj.instance_variable_set(:@hoge, 1)
+    assert_call('obj.instance_eval { @hoge.', include: Integer, binding: obj.instance_eval { binding })
+    if Class.method_defined? :attached_object
+      bind = binding
+      assert_call('obj.instance_eval { @hoge.', include: Integer, binding: bind)
+      assert_call('@hoge = 1.0; obj.instance_eval { @hoge.', include: Integer, exclude: Float, binding: bind)
+    end
+  end
+
   def test_sig_dir
     assert_call('KatakataIrb::Completor.analyze("").', include: [NilClass, Array], exclude: Object)
     assert_call('KatakataIrb::Completor.analyze("")[rand(4)].', include: [Symbol, Object, String, TrueClass, FalseClass], exclude: NilClass)
