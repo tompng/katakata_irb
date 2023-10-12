@@ -55,11 +55,9 @@ module KatakataIrb::Completor
 
   def self.setup
     KatakataIrb::Types.preload_in_thread
-    completion_proc = ->(target, preposing = nil, postposing = nil) do
+    completion_proc = ->(preposing, target, postposing, bind:) do
       verbose, $VERBOSE = $VERBOSE, nil
       code = "#{preposing}#{target}"
-      irb_context = IRB.conf[:MAIN_CONTEXT]
-      binding = irb_context.workspace.binding
       result = analyze code, binding
       KatakataIrb::Completor.prev_analyze_result = result
       name, candidates = candidates_from_result(result).dup
@@ -113,8 +111,9 @@ module KatakataIrb::Completor
     end
 
     if IRB.const_defined? :InputCompletor # IRB::VERSION <= 1.8.1
-      IRB::InputCompletor::CompletionProc.define_singleton_method :call do |*args|
-        completion_proc.call(*args)
+      IRB::InputCompletor::CompletionProc.define_singleton_method :call do |target, preposing = '', postposing = ''|
+        bind = IRB.conf[:MAIN_CONTEXT].workspace.binding
+        completion_proc.call(preposing, target, postposing, bind: bind)
       end
       IRB::InputCompletor.singleton_class.prepend(
         Module.new do
@@ -127,7 +126,7 @@ module KatakataIrb::Completor
     elsif IRB.const_defined? :RegexpCompletor # IRB::VERSION >= 1.8.2
       IRB::RegexpCompletor.class_eval do
         define_method :completion_candidates do |preposing, target, postposing, bind:|
-          completion_proc.call(target, preposing, postposing)
+          completion_proc.call(preposing, target, postposing, bind: bind)
         end
         define_method :doc_namespace do |_preposing, matched, _postposing, bind:|
           doc_namespace_proc.call matched
