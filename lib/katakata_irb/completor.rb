@@ -11,10 +11,17 @@ module KatakataIrb::Completor
   def self.candidates_from_result(result)
     candidates = case result
     in [:require | :require_relative => method, name]
-      if method == :require
-        IRB::InputCompletor.retrieve_files_to_require_from_load_path
+      if IRB.const_defined? :InputCompletor # IRB::VERSION <= 1.8.1
+        path_completor = IRB::InputCompletor
+      elsif IRB.const_defined? :RegexpCompletor # IRB::VERSION >= 1.8.2
+        path_completor = IRB::RegexpCompletor.new
+      end
+      if !path_completor
+        []
+      elsif method == :require
+        path_completor.retrieve_files_to_require_from_load_path
       else
-        IRB::InputCompletor.retrieve_files_to_require_relative_from_current_dir
+        path_completor.retrieve_files_to_require_relative_from_current_dir
       end
     in [:call_or_const, type, name, self_call]
       ((self_call ? type.all_methods : type.methods).map(&:to_s) - HIDDEN_METHODS) | type.constants
