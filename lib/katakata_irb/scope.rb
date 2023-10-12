@@ -235,9 +235,16 @@ module KatakataIrb
 
     def instance_variables
       self_singleton_types = self_type.types.grep(KatakataIrb::Types::SingletonType)
+      singleton_classes = self_type.types.grep(KatakataIrb::Types::InstanceType).map(&:klass).select(&:singleton_class?)
       base_self = base_scope.self_object
-      if self_type.types.any? { _1.is_a?(KatakataIrb::Types::InstanceType) && _1.klass == base_self.singleton_class }
-        self_instance_variables = base_self.instance_variables.map(&:to_s)
+      self_instance_variables = singleton_classes.flat_map do |singleton_class|
+        if singleton_class.respond_to? :attached_object
+          singleton_class.attached_object.instance_variables.map(&:to_s)
+        elsif singleton_class == base_self.singleton_class
+          base_self.instance_variables.map(&:to_s)
+        else
+          []
+        end
       end
       [
         self_singleton_types.flat_map { _1.module_or_class.instance_variables.map(&:to_s) },
