@@ -96,7 +96,17 @@ class TestTypeAnalyze < Minitest::Test
       bind = binding
       assert_call('obj.instance_eval { @hoge.', include: Integer, binding: bind)
       assert_call('@hoge = 1.0; obj.instance_eval { @hoge.', include: Integer, exclude: Float, binding: bind)
+      assert_call('@hoge = 1.0; obj.instance_eval { @hoge = "" }; @hoge.', include: Float, exclude: [Integer, String], binding: bind)
+      assert_call('@fuga = 1.0; obj.instance_eval { @fuga.', exclude: Float, binding: bind)
+      assert_call('@fuga = 1.0; obj.instance_eval { @fuga = "" }; @fuga.', include: Float, exclude: [Integer, String], binding: bind)
     end
+  end
+
+  def test_module_cvar_ref
+    bind = binding
+    assert_call('@@foo=1; class A; @@foo.', exclude: Integer, binding: bind)
+    assert_call('@@foo=1; class A; @@foo=1.0; @@foo.', include: Float, exclude: Integer, binding: bind)
+    assert_call('@@foo=1; class A; @@foo=1.0; end; @@foo.', include: Integer, exclude: Float, binding: bind)
   end
 
   def test_sig_dir

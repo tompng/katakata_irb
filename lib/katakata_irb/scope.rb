@@ -26,7 +26,7 @@ module KatakataIrb
 
     def level() = 0
 
-    def level_of(_name) = 0
+    def level_of(_name, _var_type) = 0
 
     def mutable?() = false
 
@@ -146,9 +146,17 @@ module KatakataIrb
       type == :cvar ? @trace_cvar : type == :ivar ? @trace_ivar : type == :lvar ? @trace_lvar : true
     end
 
-    def level_of(name)
+    def level_of(name, var_type)
+      case var_type
+      when :ivar
+        return level unless @trace_ivar
+      when :cvar
+        return level unless @trace_cvar
+      when :gvar
+        return 0
+      end
       variable_level, = @table[name]
-      variable_level || parent.level_of(name)
+      variable_level || parent.level_of(name, var_type)
     end
 
     def get_const(nesting, path, key = nil)
@@ -182,12 +190,13 @@ module KatakataIrb
     end
 
     def []=(name, value)
-      if BaseScope.type_by_name(name) == :const
+      type = BaseScope.type_by_name(name)
+      if type == :const
         parent_module, parent_path = module_nesting.first
         set_const parent_module, [*parent_path, name], value
         return
       end
-      variable_level = level_of name
+      variable_level = level_of name, type
       @table[name] = [variable_level, value] if variable_level
     end
 
