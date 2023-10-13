@@ -49,7 +49,7 @@ class KatakataIrb::TypeSimulator
       evaluate node.statements, scope
     when Prism::StatementsNode
       if node.body.empty?
-        KatakataIrb::NIL
+        KatakataIrb::Types::NIL
       else
         node.body.map { evaluate _1, scope }.last
       end

@@ -269,7 +269,6 @@ module KatakataIrb::Completor
       return match
     end
 
-    return [node] if node.location.start_offset == position
-    nil
+    [node] if node.location.start_offset == position
   end
 end

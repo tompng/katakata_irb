@@ -1,6 +1,3 @@
-require 'rbs'
-require 'rbs/cli'
-
 module KatakataIrb; end
 module KatakataIrb::Types
   singleton_class.attr_reader :rbs_builder, :rbs_load_error
@@ -12,6 +9,8 @@ module KatakataIrb::Types
   end
 
   def self.load_rbs_builder
+    require 'rbs'
+    require 'rbs/cli'
     loader = RBS::CLI::LibraryOptions.new.loader
     loader.add path: Pathname('sig')
     RBS::DefinitionBuilder.new env: RBS::Environment.from_loader(loader).resolve_type_names
