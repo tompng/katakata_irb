@@ -1,65 +1,72 @@
-require_relative 'nesting_parser'
 require_relative 'type_simulator'
 require 'rbs'
 require 'rbs/cli'
 require 'irb'
+require 'prism'
 
 module KatakataIrb::Completor
-  using KatakataIrb::TypeSimulator::LexerElemMatcher
   HIDDEN_METHODS = %w[Namespace TypeName] # defined by rbs, should be hidden
   singleton_class.attr_accessor :prev_analyze_result
 
+  def self.candidates_from_result(result)
+    candidates = case result
+    in [:require | :require_relative => method, name]
+      if IRB.const_defined? :InputCompletor # IRB::VERSION <= 1.8.1
+        path_completor = IRB::InputCompletor
+      elsif IRB.const_defined? :RegexpCompletor # IRB::VERSION >= 1.8.2
+        path_completor = IRB::RegexpCompletor.new
+      end
+      if !path_completor
+        []
+      elsif method == :require
+        path_completor.retrieve_files_to_require_from_load_path
+      else
+        path_completor.retrieve_files_to_require_relative_from_current_dir
+      end
+    in [:call_or_const, type, name, self_call]
+      ((self_call ? type.all_methods : type.methods).map(&:to_s) - HIDDEN_METHODS) | type.constants
+    in [:const, type, name, scope]
+      if type
+        scope_constants = type.types.flat_map do |t|
+          scope.table_module_constants(t.module_or_class) if t.is_a?(KatakataIrb::Types::SingletonType)
+        end
+        (scope_constants.compact | type.constants.map(&:to_s)).sort
+      else
+        scope.constants.sort
+      end
+    in [:ivar, name, scope]
+      ivars = scope.instance_variables.sort
+      name == '@' ? ivars + scope.class_variables.sort : ivars
+    in [:cvar, name, scope]
+      scope.class_variables
+    in [:gvar, name, scope]
+      scope.global_variables
+    in [:symbol, name]
+      Symbol.all_symbols.map { _1.inspect[1..] }
+    in [:call, type, name, self_call]
+      (self_call ? type.all_methods : type.methods).map(&:to_s) - HIDDEN_METHODS
+    in [:lvar_or_method, name, scope]
+      scope.self_type.all_methods.map(&:to_s) | scope.local_variables
+    else
+      []
+    end
+    [name || '', candidates]
+  end
+
   def self.setup
     KatakataIrb::Types.preload_in_thread
-    completion_proc = ->(target, preposing = nil, postposing = nil) do
+    completion_proc = ->(preposing, target, _postposing, bind:) do
       verbose, $VERBOSE = $VERBOSE, nil
       code = "#{preposing}#{target}"
-      irb_context = IRB.conf[:MAIN_CONTEXT]
-      binding = irb_context.workspace.binding
-      result = analyze code, binding
+      result = analyze code, bind
       KatakataIrb::Completor.prev_analyze_result = result
-      candidates = case result
-      in [:require | :require_relative => method, name]
-        if IRB.const_defined? :InputCompletor # IRB::VERSION <= 1.8.1
-          path_completor = IRB::InputCompletor
-        elsif IRB.const_defined? :RegexpCompletor # IRB::VERSION >= 1.8.2
-          path_completor = IRB::RegexpCompletor.new
-        end
-        if !path_completor
-          []
-        elsif method == :require
-          path_completor.retrieve_files_to_require_from_load_path
-        else
-          path_completor.retrieve_files_to_require_relative_from_current_dir
-        end
-      in [:call_or_const, type, name, self_call]
-        ((self_call ? type.all_methods: type.methods).map(&:to_s) - HIDDEN_METHODS) | type.constants
-      in [:const, type, name]
-        type.constants
-      in [:ivar, name, *_scope]
-        # TODO: scope
-        ivars = binding.eval('self').instance_variables rescue []
-        cvars = (binding.eval('self').class_variables rescue nil) if name == '@'
-        ivars | (cvars || [])
-      in [:cvar, name, *_scope]
-        # TODO: scope
-        binding.eval('self').class_variables rescue []
-      in [:gvar, name]
-        global_variables
-      in [:symbol, name]
-        Symbol.all_symbols.map { _1.inspect[1..] }
-      in [:call, type, name, self_call]
-        (self_call ? type.all_methods : type.methods).map(&:to_s) - HIDDEN_METHODS
-      in [:lvar_or_method, name, scope]
-        scope.self_type.all_methods.map(&:to_s) | scope.local_variables
-      else
-        []
-      end
+      name, candidates = candidates_from_result(result).dup
+
       all_symbols_pattern = /\A[ -\/:-@\[-`\{-~]*\z/
       candidates.map(&:to_s).select { !_1.match?(all_symbols_pattern) && _1.start_with?(name) }.uniq.sort.map do
         target + _1[name.size..]
       end
-    rescue => e
+    rescue SyntaxError, StandardError => e
       KatakataIrb.last_completion_error = e
       KatakataIrb.log_puts
       KatakataIrb.log_puts "#{e.inspect} stored to KatakataIrb.last_completion_error"
@@ -90,10 +97,10 @@ module KatakataIrb::Completor
       case KatakataIrb::Completor.prev_analyze_result
       in [:call_or_const, type, _name, _self_call]
         call_or_const_doc.call type
-      in [:const, type, _name]
+      in [:const, type, _name, scope]
         # when prev_analyze_result is const, current analyze result might be call
-        call_or_const_doc.call type
-      in [:gvar, _name]
+        call_or_const_doc.call type if type
+      in [:gvar, _name, _scope]
         name
       in [:call, type, _name, _self_call]
         method_doc.call type
@@ -104,8 +111,9 @@ module KatakataIrb::Completor
     end
 
     if IRB.const_defined? :InputCompletor # IRB::VERSION <= 1.8.1
-      IRB::InputCompletor::CompletionProc.define_singleton_method :call do |*args|
-        completion_proc.call(*args)
+      IRB::InputCompletor::CompletionProc.define_singleton_method :call do |target, preposing = '', postposing = ''|
+        bind = IRB.conf[:MAIN_CONTEXT].workspace.binding
+        completion_proc.call(preposing, target, postposing, bind: bind)
       end
       IRB::InputCompletor.singleton_class.prepend(
         Module.new do
@@ -118,7 +126,7 @@ module KatakataIrb::Completor
     elsif IRB.const_defined? :RegexpCompletor # IRB::VERSION >= 1.8.2
       IRB::RegexpCompletor.class_eval do
         define_method :completion_candidates do |preposing, target, postposing, bind:|
-          completion_proc.call(target, preposing, postposing)
+          completion_proc.call(preposing, target, postposing, bind: bind)
         end
         define_method :doc_namespace do |_preposing, matched, _postposing, bind:|
           doc_namespace_proc.call matched
@@ -174,179 +182,94 @@ module KatakataIrb::Completor
     Reline.add_dialog_proc(:show_type, type_dialog_proc, Reline::DEFAULT_DIALOG_CONTEXT)
   end
 
-  def self.empty_binding()
-    Kernel.binding
-  end
+  def self.analyze(code, binding = Object::TOPLEVEL_BINDING)
+    # Workaround for https://github.com/ruby/prism/issues/1592
+    return if code.match?(/%[qQ]\z/)
 
-  def self.analyze(code, binding = empty_binding)
     lvars_code = binding.local_variables.map do |name|
       "#{name}="
     end.join + "nil;\n"
     code = lvars_code + code
-    tokens = KatakataIrb::NestingParser.tokenize code
-    last_opens = KatakataIrb::NestingParser.open_tokens(tokens)
-    closings = last_opens.map do |t|
-      case t.tok
-      when /\A%.?[<>]\z/
-        $/ + '>'
-      when '{', '#{', /\A%.?[{}]\z/
-        $/ + '}'
-      when '(', /\A%.?[()]\z/
-        # do not insert \n before closing paren. workaround to avoid syntax error of "a in ^(b\n)"
-        ')'
-      when '[', /\A%.?[\[\]]\z/
-        $/ + ']'
-      when /\A%.?(.)\z/
-        $1
-      when '"', "'", '/', '`'
-        t.tok
-      when /\A<<[~-]?(?:"(?<s>.+)"|'(?<s>.+)'|(?<s>.+))/
-        $/ + ($1 || $2 || $3) + $/
-      when ':"', ":'", ':'
-        t.tok[1]
-      when '?'
-        # ternary operator
-        ' : value'
-      when '|'
-        # block args
-        '|'
+    ast = Prism.parse(code).value
+    name = code[/(@@|@|\$)?\w*\z/]
+    *parents, target_node = find_target ast, code.bytesize - name.bytesize
+    return unless target_node
+
+    calculate_scope = -> { KatakataIrb::TypeSimulator.calculate_target_type_scope(binding, parents, target_node).last }
+    calculate_type_scope = ->(node) { KatakataIrb::TypeSimulator.calculate_target_type_scope binding, [*parents, target_node], node }
+
+    if target_node in Prism::StringNode | Prism::InterpolatedStringNode
+      args_node = parents[-1]
+      call_node = parents[-2]
+      return unless args_node.is_a?(Prism::ArgumentsNode) && args_node.arguments.size == 1
+      return unless call_node.is_a?(Prism::CallNode) && call_node.receiver.nil? && (call_node.message in 'require' | 'require_relative')
+      return [call_node.message.to_sym, name.rstrip]
+    end
+
+    case target_node
+    when Prism::SymbolNode
+      if parents.last.is_a? Prism::BlockArgumentNode # method(&:target)
+        receiver_type, _scope = calculate_type_scope.call target_node
+        [:call, receiver_type, name, false]
       else
-        $/ + 'end'
+        [:symbol, name] unless name.empty?
       end
-    end
-    # remove error tokens
-    tokens.pop while tokens&.last&.tok&.empty?
+    when Prism::CallNode
+      return [:lvar_or_method, name, calculate_scope.call] if target_node.receiver.nil?
 
-    case tokens.last
-    in { event: :on_ignored_by_ripper, tok: '.' }
-      suffix = 'method'
-      name = ''
-    in { dot: true }
-      suffix = 'method'
-      name = ''
-    in { event: :on_symbeg }
-      suffix = 'symbol'
-      name = ''
-    in { event: :on_ident | :on_kw, tok: }
-      return unless code.delete_suffix! tok
-      suffix = 'method'
-      name = tok
-    in { event: :on_const, tok: }
-      return unless code.delete_suffix! tok
-      suffix = 'Const'
-      name = tok
-    in { event: :on_tstring_content, tok: }
-      return unless code.delete_suffix! tok
-      suffix = 'string'
-      name = tok.rstrip
-    in { event: :on_gvar, tok: }
-      return unless code.delete_suffix! tok
-      suffix = '$gvar'
-      name = tok
-    in { event: :on_ivar, tok: }
-      return unless code.delete_suffix! tok
-      suffix = '@ivar'
-      name = tok
-    in { event: :on_cvar, tok: }
-      return unless code.delete_suffix! tok
-      suffix = '@@cvar'
-      name = tok
-    else
-      return
-    end
-    sexp = Ripper.sexp code + suffix + closings.reverse.join
-    lines = code.lines
-    line_no = lines.size
-    col = lines.last.bytesize
-    if lines.last.end_with? "\n"
-      line_no += 1
-      col = 0
-    end
-
-    if sexp in [:program, [_lvars_exp, *rest_statements]]
-      sexp = [:program, rest_statements]
-    end
-
-    *parents, expression, target = find_target sexp, line_no, col
-    in_class_module = parents&.any? { _1 in [:class | :module,] }
-    icvar_available = !in_class_module
-    return unless target in [_type, String, [Integer, Integer]]
-    if target in [:@gvar,]
-      return [:gvar, name]
-    elsif target in [:@ivar,]
-      return [:ivar, name] if icvar_available
-    elsif target in [:@cvar,]
-      return [:cvar, name] if icvar_available
-    end
-    return unless expression
-    calculate_scope = -> { KatakataIrb::TypeSimulator.calculate_binding_scope binding, parents, expression }
-    calculate_receiver = -> receiver { KatakataIrb::TypeSimulator.calculate_receiver binding, parents, receiver }
-
-    if (target in [:@tstring_content,]) && (parents[-4] in [:command, [:@ident, 'require' | 'require_relative' => require_method,],])
-      # `require 'target'`
-      return [require_method.to_sym, name.rstrip]
-    end
-    if (target in [:@ident,]) && (expression in [:symbol,]) && (parents[-2] in [:args_add_block, Array => _args, [:symbol_literal, ^expression]])
-      # `method(&:target)`
-      receiver_ref = [:var_ref, [:@ident, '_1', [0, 0]]]
-      block_statements = [receiver_ref]
-      parents[-1] = parents[-2][-1] = [:brace_block, nil, block_statements]
-      parents << block_statements
-      return [:call, calculate_receiver.call(receiver_ref), name, false]
-    end
-    case expression
-    in [:vcall | :var_ref, [:@ident,]]
+      self_call = target_node.receiver.is_a? Prism::SelfNode
+      op = target_node.call_operator
+      receiver_type, _scope = calculate_type_scope.call target_node.receiver
+      receiver_type = receiver_type.nonnillable if op == '&.'
+      [op == '::' ? :call_or_const : :call, receiver_type, name, self_call]
+    when Prism::LocalVariableReadNode, Prism::LocalVariableTargetNode
       [:lvar_or_method, name, calculate_scope.call]
-    in [:symbol, [:@ident | :@const | :@op | :@kw,]]
-      [:symbol, name] unless name.empty?
-    in [:var_ref | :const_ref, [:@const,]]
-      # TODO
-      [:const, KatakataIrb::Types::SingletonType.new(Object), name]
-    in [:var_ref, [:@gvar,]]
-      [:gvar, name]
-    in [:var_ref, [:@ivar,]]
-      [:ivar, name, calculate_scope.call.self_type] if icvar_available
-    in [:var_ref, [:@cvar,]]
-      [:cvar, name, calculate_scope.call.self_type] if icvar_available
-    in [:call, receiver, [:@op, '::',] | :'::', [:@ident | :@const,]]
-      self_call = (receiver in [:var_ref, [:@kw, 'self',]])
-      [:call_or_const, calculate_receiver.call(receiver), name, self_call]
-    in [:call, receiver, [:@period,], [:@ident | :@const,]]
-      self_call = (receiver in [:var_ref, [:@kw, 'self',]])
-      [:call, calculate_receiver.call(receiver), name, self_call]
-    in [:call, receiver, [:@op, '&.',], [:@ident | :@const,]]
-      self_call = (receiver in [:var_ref, [:@kw, 'self',]])
-      [:call, calculate_receiver.call(receiver).nonnillable, name, self_call]
-    in [:const_path_ref, receiver, [:@const,]]
-      [:const, calculate_receiver.call(receiver), name]
-    in [:top_const_ref, [:@const,]]
-      [:const, KatakataIrb::Types::SingletonType.new(Object), name]
-    in [:def,] | [:string_content,] | [:field | :var_field | :const_path_field,] | [:defs,] | [:rest_param,] | [:kwrest_param,] | [:blockarg,] | [[:@ident,],]
-    in [Array,] # `xstring`, /regexp/
-    else
-      KatakataIrb.log_puts
-      KatakataIrb.log_puts [:UNIMPLEMENTED_EXPRESSION, expression].inspect
-      KatakataIrb.log_puts
-      nil
+    when Prism::ConstantReadNode, Prism::ConstantTargetNode
+      if parents.last.is_a? Prism::ConstantPathNode
+        path_node = parents.last
+        if path_node.parent # A::B
+          receiver, scope = calculate_type_scope.call(path_node.parent)
+          [:const, receiver, name, scope]
+        else # ::A
+          scope = calculate_scope.call
+          [:const, KatakataIrb::Types::SingletonType.new(Object), name, scope]
+        end
+      else
+        [:const, nil, name, calculate_scope.call]
+      end
+    when Prism::GlobalVariableReadNode, Prism::GlobalVariableTargetNode
+      [:gvar, name, calculate_scope.call]
+    when Prism::InstanceVariableReadNode, Prism::InstanceVariableTargetNode
+      [:ivar, name, calculate_scope.call]
+    when Prism::ClassVariableReadNode, Prism::ClassVariableTargetNode
+      [:cvar, name, calculate_scope.call]
     end
   end
 
-  def self.find_target(sexp, line, col, stack = [sexp])
-    return unless sexp.is_a? Array
-    sexp.each do |child|
-      case child
-      in [Symbol, String, [Integer => l, Integer => c]]
-        if l == line && c == col
-          stack << child
-          return stack
-        end
-      else
-        stack << child
-        result = find_target(child, line, col, stack)
-        return result if result
-        stack.pop
+  def self.find_target(node, position)
+    location = (
+      case node
+      when Prism::CallNode
+        node.message_loc
+      when Prism::SymbolNode
+        node.value_loc
+      when Prism::StringNode
+        node.content_loc
+      when Prism::InterpolatedStringNode
+        node.closing_loc if node.parts.empty?
       end
+    )
+    return [node] if location&.start_offset == position
+
+    node.child_nodes.each do |n|
+      next unless n.is_a? Prism::Node
+      match = find_target(n, position)
+      next unless match
+      match.unshift node
+      return match
     end
+
+    return [node] if node.location.start_offset == position
     nil
   end
 end

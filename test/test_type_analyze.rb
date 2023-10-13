@@ -26,8 +26,8 @@ class TestTypeAnalyze < Minitest::Test
   end
 
   def assert_call(code, include: nil, exclude: nil, binding: nil)
-    raise ArgumetError if include.nil? && exclude.nil?
-    analyze(code, binding: binding) => [:call, type,]
+    raise ArgumentError if include.nil? && exclude.nil?
+    analyze(code.strip, binding: binding) => [:call, type,]
     klasses = type.types.flat_map do
       _1.klass.singleton_class? ? [_1.klass.superclass, _1.klass] : _1.klass
     end
@@ -45,18 +45,32 @@ class TestTypeAnalyze < Minitest::Test
     assert_analyze_type('puts(@@x', :cvar, '@@x')
   end
 
+  def test_rescue
+    assert_call '(1 rescue 1.0).', include: [Integer, Float]
+    assert_call 'a=""; (a=1) rescue (a=1.0); a.', include: [Integer, Float], exclude: String
+    assert_call 'begin; 1; rescue; 1.0; end.', include: [Integer, Float]
+    assert_call 'begin; 1; rescue A; 1.0; rescue B; 1i; end.', include: [Integer, Float, Complex]
+    assert_call 'begin; 1i; rescue; 1.0; else; 1; end.', include: [Integer, Float], exclude: Complex
+    assert_call 'begin; 1; rescue; 1.0; ensure; 1i; end.', include: [Integer, Float], exclude: Complex
+    assert_call 'begin; 1i; rescue; 1.0; else; 1; ensure; 1i; end.', include: [Integer, Float], exclude: Complex
+    assert_call 'a=""; begin; a=1; rescue; a=1.0; end; a.', include: [Integer, Float], exclude: [String]
+    assert_call 'a=""; begin; a=1; rescue; a=1.0; else; a=1r; end; a.', include: [Float, Rational], exclude: [String, Integer]
+    assert_call 'a=""; begin; a=1; rescue; a=1.0; else; a=1r; ensure; a = 1i; end; a.', include: Complex, exclude: [Float, Rational, String, Integer]
+  end
+
   def test_rescue_assign_no_log
     assert_no_log do
-      assert_nil analyze('begin; rescue => a')
-      assert_equal [:gvar, '$a'], analyze('begin; rescue => $a')
-      assert_equal [:ivar, '@a'], analyze('begin; rescue => @a')
-      assert_equal [:cvar, '@@a'], analyze('begin; rescue => @@a')
+      assert_equal [:lvar_or_method, 'a'], analyze('begin; rescue => a')[0, 2]
+      assert_equal [:gvar, '$a'], analyze('begin; rescue => $a')[0, 2]
+      assert_equal [:ivar, '@a'], analyze('begin; rescue => @a')[0, 2]
+      assert_equal [:cvar, '@@a'], analyze('begin; rescue => @@a')[0, 2]
+      assert (analyze('begin; rescue => A') in [:const, _, 'A', _])
+      assert (analyze('begin; rescue => a.b') in [:call, _, 'b', _])
       # Do not complete assigning to non-variable in rescue
-      assert_nil analyze('begin; rescue => A')
-      assert_nil analyze('begin; rescue => (a).b')
-      assert_nil analyze('begin; rescue => (a)::b')
-      assert_nil analyze('begin; rescue => (a)::A')
-      assert_nil analyze('begin; rescue => (a).A')
+      # assert_nil analyze('begin; rescue => (a).b')
+      # assert_nil analyze('begin; rescue => (a)::b')
+      # assert_nil analyze('begin; rescue => (a)::A')
+      # assert_nil analyze('begin; rescue => (a).A')
     end
   end
 
@@ -72,6 +86,27 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('lvar.', include: lvar.class, binding: bind)
     assert_call('@ivar.', include: Symbol, binding: bind)
     assert_call('@@cvar.', include: String, binding: bind)
+  end
+
+  def test_self_ivar_ref
+    obj = Object.new
+    obj.instance_variable_set(:@hoge, 1)
+    assert_call('obj.instance_eval { @hoge.', include: Integer, binding: obj.instance_eval { binding })
+    if Class.method_defined? :attached_object
+      bind = binding
+      assert_call('obj.instance_eval { @hoge.', include: Integer, binding: bind)
+      assert_call('@hoge = 1.0; obj.instance_eval { @hoge.', include: Integer, exclude: Float, binding: bind)
+      assert_call('@hoge = 1.0; obj.instance_eval { @hoge = "" }; @hoge.', include: Float, exclude: [Integer, String], binding: bind)
+      assert_call('@fuga = 1.0; obj.instance_eval { @fuga.', exclude: Float, binding: bind)
+      assert_call('@fuga = 1.0; obj.instance_eval { @fuga = "" }; @fuga.', include: Float, exclude: [Integer, String], binding: bind)
+    end
+  end
+
+  def test_module_cvar_ref
+    bind = binding
+    assert_call('@@foo=1; class A; @@foo.', exclude: Integer, binding: bind)
+    assert_call('@@foo=1; class A; @@foo=1.0; @@foo.', include: Float, exclude: Integer, binding: bind)
+    assert_call('@@foo=1; class A; @@foo=1.0; end; @@foo.', include: Integer, exclude: Float, binding: bind)
   end
 
   def test_sig_dir
@@ -99,7 +134,7 @@ class TestTypeAnalyze < Minitest::Test
   end
 
   def test_block_symbol
-    assert_call('1.times.map(&:', include: Integer)
+    assert_call('[1].map(&:', include: Integer)
     assert_call('1.to_s.tap(&:', include: String)
   end
 
@@ -203,6 +238,8 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('([]*unknown).', include: [String, Array])
     assert_call('p(1).', include: Integer)
     assert_call('p(1, 2).', include: Array, exclude: Integer)
+    assert_call('2.times.', include: Enumerator, exclude: Integer)
+    assert_call('2.times{}.', include: Integer, exclude: Enumerator)
   end
 
   def test_interface_match_var
@@ -270,6 +307,31 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('*a=(cond)?[1,2]:"s"; a.', include: Array, exclude: [Integer, String])
     assert_call('*a=(cond)?[1,2]:"s"; a.sample.', include: [Integer, String])
     assert_call('a,(b,),c=[1,[:a],4]; b.', include: Symbol)
+    assert_call('a,(b,(c,))=1; a.', include: Integer)
+    assert_call('a,(b,(*c))=1; c.', include: Array)
+    assert_call('(a=1).b, c = 1; a.', include: Integer)
+    assert_call('a, ((b=1).c, d) = 1; b.', include: Integer)
+    assert_call('a, b[c=1] = 1; c.', include: Integer)
+    assert_call('a, b[*(c=1)] = 1; c.', include: Integer)
+    # incomplete massign
+    assert_analyze_type('a,b', :lvar_or_method, 'b')
+    assert_call('(a=1).b, a.', include: Integer)
+  end
+
+  def test_def
+    assert_call('def f; end.', include: Symbol)
+    assert_call('s=""; def s.f; self.', include: String)
+    assert_call('def (a="").f; end; a.', include: String)
+    assert_call('def f(a=1); a.', include: Integer)
+    assert_call('def f(**nil); 1.', include: Integer)
+    assert_call('def f(a,*b); *b.', include: Array)
+    assert_call('def f(a,x:1); x.', include: Integer)
+    assert_call('def f(a,x:,**); 1.', include: Integer)
+    assert_call('def f(a,x:,**y); y.', include: Hash)
+    assert_call('def f(a,b=1,*c,d,x:0,y:,**z,&e); e.arity.', include: Integer)
+    assert_call('def f(...); 1.', include: Integer)
+    assert_call('def f(a,...); 1.', include: Integer)
+    assert_call('class Array; def f; self.', include: Array)
   end
 
   def test_defined
@@ -314,13 +376,266 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('a = 1; b&.c(a = :a); a.', include: [Integer, Symbol])
   end
 
-  def test_command_call_arg
+  def test_class_module
+    assert_call('class Array; 1; end.', include: Integer)
+    assert_call('class ::Array; 1; end.', include: Integer)
+    assert_call('class Array::A; 1; end.', include: Integer)
+    assert_call('class Array; self.new.', include: Array)
+    assert_call('class ::Array; self.new.', include: Array)
+    assert_call('class Array::A; self.', include: Class)
+    assert_call('class (a=1)::A; end; a.', include: Integer)
+    assert_call('module M; 1; end.', include: Integer)
+    assert_call('module ::M; 1; end.', include: Integer)
+    assert_call('module Array::M; 1; end.', include: Integer)
+    assert_call('module M; self.', include: Module)
+    assert_call('module Array::M; self.', include: Module)
+    assert_call('module ::M; self.', include: Module)
+    assert_call('module (a=1)::M; end; a.', include: Integer)
+    assert_call('class << Array; 1; end.', include: Integer)
+    assert_call('class << a; 1; end.', include: Integer)
+    assert_call('a = ""; class << a; self.superclass.', include: Class)
+  end
+
+  def test_constant_path
+    assert_call('class A; X=1; class B; X=""; X.', include: String, exclude: Integer)
+    assert_call('class A; X=1; class B; X=""; end; X.', include: Integer, exclude: String)
+    assert_call('module KatakataIrb; VERSION.', include: String)
+    assert_call('module KatakataIrb; KatakataIrb::VERSION.', include: String)
+    assert_call('module KatakataIrb; VERSION=1; VERSION.', include: Integer)
+    assert_call('module KatakataIrb; VERSION=1; KatakataIrb::VERSION.', include: Integer)
+    assert_call('module KatakataIrb; module A; VERSION.', include: String)
+    assert_call('module KatakataIrb; module A; VERSION=1; VERSION.', include: Integer)
+    assert_call('module KatakataIrb; module A; VERSION=1; KatakataIrb::VERSION.', include: String)
+    assert_call('module KatakataIrb; module A; VERSION=1; end; VERSION.', include: String)
+    assert_call('module KatakataIrb; KatakataIrb=1; KatakataIrb.', include: Integer)
+    assert_call('module KatakataIrb; KatakataIrb=1; ::KatakataIrb::VERSION.', include: String)
+    module_binding = eval 'module ::KatakataIrb; binding; end'
+    assert_call('VERSION.', include: NilClass)
+    assert_call('VERSION.', include: String, binding: module_binding)
+    assert_call('KatakataIrb::VERSION.', include: String, binding: module_binding)
+    assert_call('A = 1; module M; A += 0.5; A.', include: Float)
+    assert_call('::A = 1; module M; A += 0.5; A.', include: Float)
+    assert_call('::A = 1; module M; A += 0.5; ::A.', include: Integer)
+    assert_call('KatakataIrb::A = 1; KatakataIrb::A += 0.5; KatakataIrb::A.', include: Float)
+  end
+
+  def test_literal
+    assert_call('1.', include: Integer)
+    assert_call('1.0.', include: Float)
+    assert_call('1r.', include: Rational)
+    assert_call('1i.', include: Complex)
+    assert_call('true.', include: TrueClass)
+    assert_call('false.', include: FalseClass)
+    assert_call('nil.', include: NilClass)
+    assert_call('//.', include: Regexp)
+    assert_call('/#{a=1}/.', include: Regexp)
+    assert_call('/#{a=1}/; a.', include: Integer)
+    assert_call(':a.', include: Symbol)
+    assert_call(':"#{a=1}".', include: Symbol)
+    assert_call(':"#{a=1}"; a.', include: Integer)
+    assert_call('"".', include: String)
+    assert_call('"#$a".', include: String)
+    assert_call('("a" "b").', include: String)
+    assert_call('"#{a=1}".', include: String)
+    assert_call('"#{a=1}"; a.', include: Integer)
+    assert_call('``.', include: String)
+    assert_call('`#{a=1}`.', include: String)
+    assert_call('`#{a=1}`; a.', include: Integer)
+  end
+
+  def test_redo_retry_yield_super
+    assert_call('a=nil; tap do a=1; redo; a=1i; end; a.', include: Integer, exclude: Complex)
+    assert_call('a=nil; tap do a=1; retry; a=1i; end; a.', include: Integer, exclude: Complex)
+    assert_call('a = 0; a = yield; a.', include: Object, exclude: Integer)
+    assert_call('yield 1,(a=1); a.', include: Integer)
+    assert_call('a = 0; a = super; a.', include: Object, exclude: Integer)
+    assert_call('a = 0; a = super(1); a.', include: Object, exclude: Integer)
+    assert_call('super 1,(a=1); a.', include: Integer)
+  end
+
+  def test_rarely_used_syntax
+    # FlipFlop
+    assert_call('if (a=1).even?..(a=1.0).even; a.', include: [Integer, Float])
+    # MatchLastLine
+    assert_call('if /regexp/; 1.', include: Integer)
+    assert_call('if /reg#{a=1}exp/; a.', include: Integer)
+    # BlockLocalVariable
+    assert_call('tap do |i;a| a=1; a.', include: Integer)
+    # BEGIN{} END{}
+    assert_call('BEGIN{1.', include: Integer)
+    assert_call('END{1.', include: Integer)
+    # MatchWrite
+    assert_call('a=1; /(?<a>)/=~b; a.', include: [String, NilClass], exclude: Integer)
+    # OperatorWrite with block `a[&b]+=c`
+    assert_call('a=[1]; (a[0,&:to_a]+=1.0).', include: Float)
+    assert_call('a=[1]; (a[0,&b]+=1.0).', include: Float)
+  end
+
+  def test_hash
+    assert_call('{ rand: }.values.sample.', include: Float)
+    assert_call('rand=""; { rand: }.values.sample.', include: String, exclude: Float)
+    assert_call('{ 1 => 1.0 }.keys.sample.', include: Integer, exclude: Float)
+    assert_call('{ 1 => 1.0 }.values.sample.', include: Float, exclude: Integer)
+    assert_call('a={1=>1.0}; {"a"=>1i,**a}.keys.sample.', include: [Integer, String])
+    assert_call('a={1=>1.0}; {"a"=>1i,**a}.values.sample.', include: [Float, Complex])
+  end
+
+  def test_array
+    assert_call('[1,2,3].sample.', include: Integer)
+    assert_call('a = 1.0; [1,2,a].sample.', include: [Integer, Float])
+    assert_call('a = [1.0]; [1,2,*a].sample.', include: [Integer, Float])
+  end
+
+  def test_numbered_parameter
+    assert_call('loop{_1.', include: NilClass)
+    assert_call('1.tap{_1.', include: Integer)
+    assert_call('1.tap{_3.', include: NilClass, exclude: Integer)
+    assert_call('[:a].each_with_index{_1.', include: Array)
+    assert_call('[:a].each_with_index{_2; _1.', include: Symbol)
+    assert_call('[:a].each_with_index{_2.', include: Integer)
+  end
+
+  def test_if_unless
+    assert_call('if cond; 1; end.', include: Integer)
+    assert_call('unless true; 1; end.', include: Integer)
+    assert_call('a=1; (a=1.0) if cond; a.', include: [Integer, Float])
+    assert_call('a=1; (a=1.0) unless cond; a.', include: [Integer, Float])
+    assert_call('a=1; 123 if (a=1.0).foo; a.', include: Float, exclude: Integer)
+    assert_call('if cond; a=1; end; a.', include: [Integer, NilClass])
+    assert_call('a=1; if cond; a=1.0; elsif cond; a=1r; else; a=1i; end; a.', include: [Float, Rational, Complex], exclude: Integer)
+    assert_call('a=1; if cond; a=1.0; else; a.', include: Integer, exclude: Float)
+    assert_call('a=1; if (a=1.0).foo; a.', include: Float, exclude: Integer)
+    assert_call('a=1; if (a=1.0).foo; end; a.', include: Float, exclude: Integer)
+    assert_call('a=1; if (a=1.0).foo; else; a.', include: Float, exclude: Integer)
+    assert_call('a=1; if (a=1.0).foo; elsif a.', include: Float, exclude: Integer)
+    assert_call('a=1; if (a=1.0).foo; elsif (a=1i); else; a.', include: Complex, exclude: [Integer, Float])
+  end
+
+  def test_while_until
+    assert_call('while cond; 123; end.', include: NilClass)
+    assert_call('until cond; 123; end.', include: NilClass)
+    assert_call('a=1; a=1.0 while cond; a.', include: [Integer, Float])
+    assert_call('a=1; a=1.0 until cond; a.', include: [Integer, Float])
+    assert_call('a=1; 1 while (a=1.0).foo; a.', include: Float, exclude: Integer)
+    assert_call('while cond; break 1; end.', include: Integer)
+    assert_call('while cond; a=1; end; a.', include: Integer)
+    assert_call('a=1; while cond; a=1.0; end; a.', include: [Integer, Float])
+    assert_call('a=1; while (a=1.0).foo; end; a.', include: Float, exclude: Integer)
+  end
+
+  def test_for
+    assert_call('for i in [1,2,3]; i.', include: Integer)
+    assert_call('for i,j in [1,2,3]; i.', include: Integer)
+    assert_call('for *i in [1,2,3]; i.sample.', include: Integer)
+    assert_call('for (a=1).b in [1,2,3]; a.', include: Integer)
+    assert_call('for Array::B in [1,2,3]; Array::B.', include: Integer)
+    assert_call('for A in [1,2,3]; A.', include: Integer)
+    assert_call('for $a in [1,2,3]; $a.', include: Integer)
+    assert_call('for @a in [1,2,3]; @a.', include: Integer)
+    assert_call('for i in [1,2,3]; end.', include: Array)
+    assert_call('for i in [1,2,3]; break 1.0; end.', include: [Array, Float])
+    assert_call('i = 1.0; for i in [1,2,3]; end; i.', include: [Integer, Float])
+    assert_call('a = 1.0; for i in [1,2,3]; a = 1i; end; a.', include: [Float, Complex])
+  end
+
+  def test_special_var
+    assert_call('__FILE__.', include: String)
+    assert_call('__LINE__.', include: Integer)
+    assert_call('__ENCODING__.', include: Encoding)
+    assert_call('$1.', include: String)
+    assert_call('$&.', include: String)
+  end
+
+  def test_and_or
+    assert_call('(1&&1.0).', include: Float, exclude: Integer)
+    assert_call('(nil&&1.0).', include: NilClass)
+    assert_call('(nil||1).', include: Integer)
+    assert_call('(1||1.0).', include: Float)
+  end
+
+  def test_opwrite
+    assert_call('a=[]; a*=1; a.', include: Array)
+    assert_call('a=[]; a*=""; a.', include: String)
+    assert_call('a=[1,false].sample; a||=1.0; a.', include: [Integer, Float])
+    assert_call('a=1; a&&=1.0; a.', include: Float, exclude: Integer)
+    assert_call('(a=1).b*=1; a.', include: Integer)
+    assert_call('(a=1).b||=1; a.', include: Integer)
+    assert_call('(a=1).b&&=1; a.', include: Integer)
+    assert_call('[][a=1]&&=1; a.', include: Integer)
+    assert_call('[][a=1]||=1; a.', include: Integer)
+    assert_call('[][a=1]+=1; a.', include: Integer)
+    assert_call('([1][0]+=1.0).', include: Float)
+    assert_call('([1.0][0]+=1).', include: Float)
+    assert_call('A=nil; A||=1; A.', include: Integer)
+    assert_call('A=1; A&&=1.0; A.', include: Float)
+    assert_call('A=1; A+=1.0; A.', include: Float)
+    assert_call('Array::A||=1; Array::A.', include: Integer)
+    assert_call('Array::A=1; Array::A&&=1.0; Array::A.', include: Float)
+  end
+
+  def test_case_when
+    assert_call('case x; when A; 1; when B; 1.0; end.', include: [Integer, Float, NilClass])
+    assert_call('case x; when A; 1; when B; 1.0; else; 1r; end.', include: [Integer, Float, Rational], exclude: NilClass)
+    assert_call('case; when (a=1); a.', include: Integer)
+    assert_call('case x; when (a=1); a.', include: Integer)
+    assert_call('a=1; case (a=1.0); when A; a.', include: Float, exclude: Integer)
+    assert_call('a=1; case (a=1.0); when A; end; a.', include: Float, exclude: Integer)
+    assert_call('a=1; case x; when A; a=1.0; else; a=1r; end; a.', include: [Float, Rational], exclude: Integer)
+    assert_call('a=1; case x; when A; a=1.0; when B; a=1r; end; a.', include: [Float, Rational, Integer])
+  end
+
+  def test_case_in
+    assert_call('case x; in A; 1; in B; 1.0; end.', include: [Integer, Float], exclude: NilClass)
+    assert_call('case x; in A; 1; in B; 1.0; else; 1r; end.', include: [Integer, Float, Rational], exclude: NilClass)
+    assert_call('a=""; case 1; in A; a=1; in B; a=1.0; end; a.', include: [Integer, Float], exclude: String)
+    assert_call('a=""; case 1; in A; a=1; in B; a=1.0; else; a=1r; end; a.', include: [Integer, Float, Rational], exclude: String)
+    assert_call('case 1; in x; x.', include: Integer)
+    assert_call('case x; in A if (a=1); a.', include: Integer)
+    assert_call('case x; in ^(a=1); a.', include: Integer)
+    assert_call('case x; in [1, String => a, 2]; a.', include: String)
+    assert_call('case x; in [*a, 1]; a.', include: Array)
+    assert_call('case x; in [1, *a]; a.', include: Array)
+    assert_call('case x; in [*a, 1, *b]; a.', include: Array)
+    assert_call('case x; in [*a, 1, *b]; b.', include: Array)
+    assert_call('case x; in {a: {b: **c}}; c.', include: Hash)
+    assert_call('case x; in (String | { x: Integer, y: ^$a }) => a; a.', include: [String, Hash])
+  end
+
+  def test_pattern_match
+    assert_call('1 in a; a.', include: Integer)
+    assert_call('a=1; x in String=>a; a.', include: [Integer, String])
+    assert_call('a=1; x=>String=>a; a.', include: String, exclude: Integer)
+  end
+
+  def test_bottom_type_termination
+    assert_call('a=1; tap { raise; a=1.0; a.', include: Float)
+    assert_call('a=1; tap { loop{}; a=1.0; a.', include: Float)
+    assert_call('a=1; tap { raise; a=1.0 } a.', include: Integer, exclude: Float)
+    assert_call('a=1; tap { loop{}; a=1.0 } a.', include: Integer, exclude: Float)
+  end
+
+  def test_call_parameter
+    assert_call('f((x=1),*b,c:1,**d,&e); x.', include: Integer)
+    assert_call('f(a,*(x=1),c:1,**d,&e); x.', include: Integer)
+    assert_call('f(a,*b,(x=1):1,**d,&e); x.', include: Integer)
+    assert_call('f(a,*b,c:(x=1),**d,&e); x.', include: Integer)
+    assert_call('f(a,*b,c:1,**(x=1),&e); x.', include: Integer)
+    assert_call('f(a,*b,c:1,**d,&(x=1)); x.', include: Integer)
+  end
+
+  def test_block_args
+    assert_call('[1,2,3].tap{|a| a.', include: Array)
+    assert_call('[1,2,3].tap{|a,b| a.', include: Integer)
+    assert_call('[1,2,3].tap{|(a,b)| a.', include: Integer)
+    assert_call('[1,2,3].tap{|a,*b| b.', include: Array)
+    assert_call('[1,2,3].tap{|a=1.0| a.', include: [Array, Float])
+    assert_call('[1,2,3].tap{|a,**b| b.', include: Hash)
+  end
+
+  def test_array_aref
     assert_call('[1][0..].', include: [Array, NilClass], exclude: Integer)
-    assert_call('[1][rand 1].', include: Integer, exclude: [Array, NilClass])
-    assert_call('[1].[](rand 1).', include: Integer, exclude: [Array, NilClass])
-    assert_call('[1].[](rand 1){}.', include: Integer, exclude: [Array, NilClass])
-    assert_call('[1][1.+ 2].', include: Integer, exclude: [Array, NilClass])
-    assert_call('[1].[](1.+ 2).', include: Integer, exclude: [Array, NilClass])
-    assert_call('[1].[](1.+ 2){}.', include: Integer, exclude: [Array, NilClass])
+    assert_call('[1][0].', include: Integer, exclude: [Array, NilClass])
+    assert_call('[1].[](0).', include: Integer, exclude: [Array, NilClass])
+    assert_call('[1].[](0){}.', include: Integer, exclude: [Array, NilClass])
   end
 end

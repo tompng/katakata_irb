@@ -91,7 +91,11 @@ module KatakataIrb::Types
         keyreqs = method_type.type.required_keywords
         keyopts = method_type.type.optional_keywords
         keyrest = method_type.type.rest_keywords
-        args = (kwargs_type && keyreqs.empty? && keyopts.empty? && keyrest.nil?) ? args_types + [kwargs_type] : args_types
+        args = args_types
+        if kwargs_type&.any? && keyreqs.empty? && keyopts.empty? && keyrest.nil?
+          kw_value_type = UnionType[*kwargs_type.values]
+          args += [InstanceType.new(Hash, K: SYMBOL, V: kw_value_type)]
+        end
         if has_splat
           score += 1 if args.count { !(_1 in Splat) } <= reqs.size + opts.size + trailings.size
         elsif reqs.size + trailings.size <= args.size && (rest || args.size <= reqs.size + opts.size + trailings.size)
@@ -323,6 +327,11 @@ module KatakataIrb::Types
 
   BOOLEAN = UnionType[TRUE, FALSE]
 
+  def self.array_of(*types)
+    type = types.size >= 2 ? UnionType[*types] : types.first || OBJECT
+    InstanceType.new Array, Elem: type
+  end
+
   def self.from_rbs_type(return_type, self_type, extra_vars = {})
     case return_type
     when RBS::Types::Bases::Self
@@ -401,6 +410,10 @@ module KatakataIrb::Types
       end
       InstanceType.new klass, params || {}
     end
+  end
+
+  def self.method_return_bottom?(method)
+    method.type.return_type.is_a? RBS::Types::Bases::Bottom
   end
 
   def self.match_free_variables(vars, types, values)

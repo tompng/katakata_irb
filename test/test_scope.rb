@@ -15,18 +15,22 @@ class TestScope < Minitest::Test
     assert_equal [*expected_types].map(&:klass).to_set, type.types.map(&:klass).to_set
   end
 
+  def table(*local_variable_names)
+    local_variable_names.to_h { [_1, NIL] }
+  end
+
   def base_scope
-    BaseScope.new(binding, Object.new)
+    BaseScope.new(binding, Object.new, [])
   end
 
   def test_lvar
-    scope = Scope.new base_scope
+    scope = Scope.new base_scope, table('a')
     scope['a'] = A
     assert_equal A, scope['a']
   end
 
   def test_conditional
-    scope = Scope.new base_scope
+    scope = Scope.new base_scope, table('a')
     scope.conditional do |sub_scope|
       sub_scope['a'] = A
     end
@@ -34,7 +38,7 @@ class TestScope < Minitest::Test
   end
 
   def test_branch
-    scope = Scope.new base_scope
+    scope = Scope.new base_scope, table('a', 'b', 'c', 'd')
     scope['c'] = A
     scope['d'] = B
     scope.run_branches(
@@ -49,8 +53,20 @@ class TestScope < Minitest::Test
     assert_type [C, D, E], scope['d']
   end
 
+  def test_scope_local_variables
+    scope1 = Scope.new base_scope, table('a', 'b')
+    scope2 = Scope.new scope1, table('b', 'c'), trace_lvar: false
+    scope3 = Scope.new scope2, table('c', 'd')
+    scope4 = Scope.new scope2, table('d', 'e')
+    assert_empty base_scope.local_variables
+    assert_equal %w[a b], scope1.local_variables.sort
+    assert_equal %w[b c], scope2.local_variables.sort
+    assert_equal %w[b c d], scope3.local_variables.sort
+    assert_equal %w[b c d e], scope4.local_variables.sort
+  end
+
   def test_nested_scope
-    scope = Scope.new base_scope
+    scope = Scope.new base_scope, table('a', 'b', 'c')
     scope['a'] = A
     scope['b'] = A
     scope['c'] = A
@@ -72,7 +88,7 @@ class TestScope < Minitest::Test
   end
 
   def test_break
-    scope = Scope.new base_scope
+    scope = Scope.new base_scope, table('a')
     scope['a'] = A
     breakable_scope = Scope.new scope, { Scope::BREAK_RESULT => nil }
     breakable_scope.conditional do |sub|

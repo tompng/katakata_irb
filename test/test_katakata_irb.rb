@@ -10,7 +10,7 @@ class TestKatakataIrb < Minitest::Test
     original_output = KatakataIrb.log_output
     KatakataIrb::TypeSimulator::DigTarget.class_eval do
       alias_method :original_dig?, :dig?
-      def dig?(*) = true
+      def dig?(node) = !!node
     end
     KatakataIrb.log_output = Object.new.tap do |output|
       def output.puts(*)
@@ -40,13 +40,34 @@ class TestKatakataIrb < Minitest::Test
     end
   end
 
-  def test_irb_input_completor_compatibility
-    completion = IRB::InputCompletor.retrieve_completion_data 'at_exi', bind: binding, doc_namespace: false
-    assert_equal ['at_exit'], completion
+  def test_irb_completor_compatibility
+    if IRB.const_defined? :InputCompletor # IRB::VERSION <= 1.8.1
+      completion = IRB::InputCompletor.retrieve_completion_data 'at_exi', bind: binding, doc_namespace: false
+      assert_equal ['at_exit'], completion
+      KatakataIrb::Completor.prev_analyze_result = KatakataIrb::Completor.analyze 'a = 1.to_c; a.abs', binding
+      document = IRB::InputCompletor.retrieve_completion_data 'a.abs', bind: binding, doc_namespace: true
+      assert_equal 'Complex#abs', document
+    elsif IRB.const_defined? :RegexpCompletor # IRB::VERSION >= 1.8.2
+      completion = IRB::RegexpCompletor.new.completion_candidates '', 'at_exi', '', bind: binding
+      assert_equal ['at_exit'], completion
+      KatakataIrb::Completor.prev_analyze_result = KatakataIrb::Completor.analyze 'a = 1.to_c; a.abs', binding
+      document = IRB::RegexpCompletor.new.doc_namespace 'a=1.to_c; ', 'a.abs', '', bind: binding
+      assert_equal 'Complex#abs', document
+    else
+      raise
+    end
+  end
 
-    KatakataIrb::Completor.prev_analyze_result = KatakataIrb::Completor.analyze 'a = 1.to_c; a.abs', binding
-    document = IRB::InputCompletor.retrieve_completion_data 'a.abs', bind: binding, doc_namespace: true
-    assert_equal 'Complex#abs', document
+  def test_prism_node_names
+    files = %w[type_simulator.rb completor.rb]
+    codes = files.map do |file|
+      File.read File.join(File.dirname(__FILE__), '../lib/katakata_irb', file)
+    end
+    implemented_node_class_names = codes.join.scan(/Prism::[A-Za-z]+Node/).uniq.sort
+    ignore_class_names = ['Prism::BlockLocalVariableNode']
+    all_node_class_names = Prism.constants.grep(/Node$/).map { "Prism::#{_1}" }.sort - ['Prism::Node'] - ignore_class_names
+    assert_empty implemented_node_class_names - all_node_class_names
+    assert_empty all_node_class_names - implemented_node_class_names
   end
 
   SYNTAX_TEST_CODE_3_1_PLUS = <<~'RUBY'
