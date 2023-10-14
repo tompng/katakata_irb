@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module KatakataIrb; end
 module KatakataIrb::Types
   singleton_class.attr_reader :rbs_builder, :rbs_load_error
