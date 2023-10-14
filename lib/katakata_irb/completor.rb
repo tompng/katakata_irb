@@ -79,9 +79,9 @@ module KatakataIrb::Completor
       name = input[/[a-zA-Z_0-9]+[!?=]?\z/]
       method_doc = -> type do
         type = type.types.find { _1.all_methods.include? name.to_sym }
-        if type in KatakataIrb::Types::SingletonType
+        if type.is_a? KatakataIrb::Types::SingletonType
           "#{KatakataIrb::Types.class_name_of(type.module_or_class)}.#{name}"
-        elsif type in KatakataIrb::Types::InstanceType
+        elsif type.is_a? KatakataIrb::Types::InstanceType
           "#{KatakataIrb::Types.class_name_of(type.klass)}##{name}"
         end
       end
@@ -198,11 +198,11 @@ module KatakataIrb::Completor
     calculate_scope = -> { KatakataIrb::TypeSimulator.calculate_target_type_scope(binding, parents, target_node).last }
     calculate_type_scope = ->(node) { KatakataIrb::TypeSimulator.calculate_target_type_scope binding, [*parents, target_node], node }
 
-    if target_node in Prism::StringNode | Prism::InterpolatedStringNode
+    if target_node.is_a?(Prism::StringNode) || target_node.is_a?(Prism::InterpolatedStringNode)
       args_node = parents[-1]
       call_node = parents[-2]
       return unless args_node.is_a?(Prism::ArgumentsNode) && args_node.arguments.size == 1
-      return unless call_node.is_a?(Prism::CallNode) && call_node.receiver.nil? && (call_node.message in 'require' | 'require_relative')
+      return unless call_node.is_a?(Prism::CallNode) && call_node.receiver.nil? && (call_node.message == 'require' || call_node.message == 'require_relative')
       return [call_node.message.to_sym, name.rstrip]
     end
 
