@@ -13,10 +13,10 @@ module KatakataIrb::Completor
   def self.candidates_from_result(result)
     candidates = case result
     in [:require | :require_relative => method, name]
-      if IRB.const_defined? :InputCompletor # IRB::VERSION <= 1.8.1
-        path_completor = IRB::InputCompletor
-      elsif IRB.const_defined? :RegexpCompletor # IRB::VERSION >= 1.8.2
+      if IRB.const_defined? :RegexpCompletor # IRB::VERSION >= 1.8.2
         path_completor = IRB::RegexpCompletor.new
+      elsif IRB.const_defined? :InputCompletor # IRB::VERSION <= 1.8.1
+        path_completor = IRB::InputCompletor
       end
       if !path_completor
         []
@@ -112,7 +112,16 @@ module KatakataIrb::Completor
       end
     end
 
-    if IRB.const_defined? :InputCompletor # IRB::VERSION <= 1.8.1
+    if IRB.const_defined? :RegexpCompletor # IRB::VERSION >= 1.8.2
+      IRB::RegexpCompletor.class_eval do
+        define_method :completion_candidates do |preposing, target, postposing, bind:|
+          completion_proc.call(preposing, target, postposing, bind: bind)
+        end
+        define_method :doc_namespace do |_preposing, matched, _postposing, bind:|
+          doc_namespace_proc.call matched
+        end
+      end
+    elsif IRB.const_defined? :InputCompletor # IRB::VERSION <= 1.8.1
       IRB::InputCompletor::CompletionProc.define_singleton_method :call do |target, preposing = '', postposing = ''|
         bind = IRB.conf[:MAIN_CONTEXT].workspace.binding
         completion_proc.call(preposing, target, postposing, bind: bind)
@@ -125,15 +134,6 @@ module KatakataIrb::Completor
           end
         end
       )
-    elsif IRB.const_defined? :RegexpCompletor # IRB::VERSION >= 1.8.2
-      IRB::RegexpCompletor.class_eval do
-        define_method :completion_candidates do |preposing, target, postposing, bind:|
-          completion_proc.call(preposing, target, postposing, bind: bind)
-        end
-        define_method :doc_namespace do |_preposing, matched, _postposing, bind:|
-          doc_namespace_proc.call matched
-        end
-      end
     else
       puts 'Cannot activate katakata_irb'
     end
