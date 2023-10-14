@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require_relative 'type_simulator'
 require 'rbs'
 require 'rbs/cli'

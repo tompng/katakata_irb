@@ -1,8 +1,8 @@
 # frozen_string_literal: true
+
+require 'ripper'
 require 'test_helper'
 
-# Needed for ruby 3.0 test
-Refinement = Object unless defined? Refinement
 KatakataIrb::Types.preload_in_thread.join
 
 class TestKatakataIrb < Minitest::Test

@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'katakata_irb/version'
 require 'katakata_irb/completor'
 require 'katakata_irb/types'
