@@ -75,8 +75,8 @@ module KatakataIrb::Completor
       $VERBOSE = verbose
     end
 
-    doc_namespace_proc = ->(input) do
-      name = input[/[a-zA-Z_0-9]+[!?=]?\z/]
+    doc_namespace_proc = -> input do
+      name = input[/[a-zA-Z_0-9]*[!?=]?\z/]
       method_doc = -> type do
         type = type.types.find { _1.all_methods.include? name.to_sym }
         if type.is_a? KatakataIrb::Types::SingletonType
@@ -94,18 +94,44 @@ module KatakataIrb::Completor
         end
       end
 
+      value_doc = -> type do
+        return unless type
+        type.types.each do |t|
+          case t
+          when KatakataIrb::Types::SingletonType
+            return KatakataIrb::Types.class_name_of(t.module_or_class)
+          when KatakataIrb::Types::InstanceType
+            return KatakataIrb::Types.class_name_of(t.klass)
+          when KatakataIrb::Types::ProcType
+            return 'Proc'
+          end
+        end
+        nil
+      end
+
       case KatakataIrb::Completor.prev_analyze_result
       in [:call_or_const, type, _name, _self_call]
         call_or_const_doc.call type
       in [:const, type, _name, scope]
-        # when prev_analyze_result is const, current analyze result might be call
-        call_or_const_doc.call type if type
-      in [:gvar, _name, _scope]
-        name
+        if type
+          call_or_const_doc.call type
+        else
+          value_doc.call scope[name]
+        end
+      in [:gvar, _name, scope]
+        value_doc.call scope["$#{name}"]
+      in [:ivar, _name, scope]
+        value_doc.call scope["@#{name}"]
+      in [:cvar, _name, scope]
+        value_doc.call scope["@@#{name}"]
       in [:call, type, _name, _self_call]
         method_doc.call type
       in [:lvar_or_method, _name, scope]
-        method_doc.call scope.self_type unless scope.local_variables.include?(name)
+        if scope.local_variables.include?(name)
+          value_doc.call scope[name]
+        else
+          method_doc.call scope.self_type
+        end
       else
       end
     end
@@ -191,7 +217,7 @@ module KatakataIrb::Completor
     end.join + "nil;\n"
     code = lvars_code + code
     ast = Prism.parse(code).value
-    name = code[/(@@|@|\$)?\w*\z/]
+    name = code[/(@@|@|\$)?\w*[!?=]?\z/]
     *parents, target_node = find_target ast, code.bytesize - name.bytesize
     return unless target_node
 
