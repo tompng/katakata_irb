@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'test_helper'
 
 class TestType < Minitest::Test
@@ -43,7 +45,7 @@ class TestType < Minitest::Test
   end
 
   def test_type_methods
-    s = ''
+    s = +''
     class << s
       def foobar; end
       private def foobaz; end

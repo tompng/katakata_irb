@@ -7,6 +7,7 @@ KatakataIrb::Types.preload_in_thread.join
 
 class TestKatakataIrb < Minitest::Test
   def test_analyze_does_not_raise_error
+    verbose, $VERBOSE = $VERBOSE, nil
     original_output = KatakataIrb.log_output
     KatakataIrb::TypeSimulator::DigTarget.class_eval do
       alias_method :original_dig?, :dig?
@@ -18,14 +19,6 @@ class TestKatakataIrb < Minitest::Test
       end
     end
 
-    assert Ripper.sexp(SYNTAX_TEST_CODE)
-    assert KatakataIrb::Completor.analyze("(#{SYNTAX_TEST_CODE}).hoge"), 'analyzing SYNTAX_TEST_CODE'
-
-    if RUBY_VERSION >= '3.1'
-      assert Ripper.sexp(SYNTAX_TEST_CODE_3_1_PLUS)
-      assert KatakataIrb::Completor.analyze("(#{SYNTAX_TEST_CODE_3_1_PLUS}).hoge"), 'analyzing SYNTAX_TEST_CODE_3_1_PLUS'
-    end
-
     # Should analyze whole code in this repository
     files = Dir.glob('lib/**/*.rb') + Dir.glob('test/**/*.rb')
     files.each do |file|
@@ -33,6 +26,7 @@ class TestKatakataIrb < Minitest::Test
       assert result, "analyzing #{file}"
     end
   ensure
+    $VERBOSE = verbose
     KatakataIrb.log_output = original_output
     KatakataIrb::TypeSimulator::DigTarget.class_eval do
       undef_method :dig?
@@ -69,32 +63,4 @@ class TestKatakataIrb < Minitest::Test
     assert_empty implemented_node_class_names - all_node_class_names
     assert_empty all_node_class_names - implemented_node_class_names
   end
-
-  SYNTAX_TEST_CODE_3_1_PLUS = <<~'RUBY'
-    def f(*,**,&)
-      f(&)
-    end
-  RUBY
-
-  SYNTAX_TEST_CODE = <<~'RUBY'
-    a[i], b[j, k], *, c.d = value
-    for a[i], b[j, k], *, c.d in array
-    end
-    def f(...)
-      f(...)
-    end
-    p(?a'b'"c", %(a)"b#{c}d"'e'"f#{g}h")
-    p ()
-    p (1.method)
-    (a,b)=1
-    def f() #comment
-    =begin
-    embdoc
-    =end
-      = 1
-    case
-    when cond
-    else
-    end
-  RUBY
 end

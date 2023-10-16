@@ -16,7 +16,7 @@ module KatakataIrb::Types
     loader = RBS::CLI::LibraryOptions.new.loader
     loader.add path: Pathname('sig')
     RBS::DefinitionBuilder.new env: RBS::Environment.from_loader(loader).resolve_type_names
-  rescue => e
+  rescue LoadError, StandardError => e
     @rbs_load_error = e
     puts "\r\nKatakataIRB failed to initialize RBS::DefinitionBuilder: #{e.class}\r\n"
     puts "See `KatakataIrb::Types.rbs_load_error` for more details.\r\n"
@@ -35,7 +35,7 @@ module KatakataIrb::Types
   def self.rbs_search_method(klass, method_name, singleton)
     klass.ancestors.each do |ancestor|
       name = class_name_of ancestor
-      next unless name
+      next unless name && rbs_builder
       type_name = RBS::TypeName(name).absolute!
       definition = (singleton ? rbs_builder.build_singleton(type_name) : rbs_builder.build_instance(type_name)) rescue nil
       method = definition.methods[method_name] if definition
@@ -207,7 +207,7 @@ module KatakataIrb::Types
     def nonnillable() = self
     def rbs_methods
       name = KatakataIrb::Types.class_name_of(@klass)
-      return {} unless name
+      return {} unless name && KatakataIrb::Types.rbs_builder
 
       type_name = RBS::TypeName(name).absolute!
       KatakataIrb::Types.rbs_builder.build_instance(type_name).methods rescue {}

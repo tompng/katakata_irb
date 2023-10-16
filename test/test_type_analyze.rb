@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'test_helper'
 KatakataIrb::Types.preload_in_thread.join
 
@@ -117,7 +119,7 @@ class TestTypeAnalyze < Minitest::Test
 
   def test_lvar_singleton_method
     a = 1
-    b = ''
+    b = +''
     c = Object.new
     d = [a, b, c]
     binding = Kernel.binding
@@ -355,7 +357,7 @@ class TestTypeAnalyze < Minitest::Test
   def test_self
     integer_binding = 1.instance_eval { Kernel.binding }
     assert_call('self.', include: [Integer], binding: integer_binding)
-    string = ''
+    string = +''
     string_binding = string.instance_eval { Kernel.binding }
     assert_call('self.', include: [string.singleton_class], binding: string_binding)
     object = Object.new
