@@ -50,13 +50,14 @@ class TestType < Minitest::Test
       def foobar; end
       private def foobaz; end
     end
-    # Some instance methods are delayed defined (example: ActiveRecord's column method)
-    # dedup is defined in rbs but not defined in ruby <= 3.1
-    targets = [:foobar, :foobaz, :dedup]
+    String.define_method(:foobarbaz) {}
+    targets = [:foobar, :foobaz, :foobarbaz]
     type = KatakataIrb::Types.type_from_object s
-    assert_equal [:foobar, :dedup], targets & type.methods
-    assert_equal [:foobar, :foobaz, :dedup], targets & type.all_methods
-    assert_equal [:dedup], targets & KatakataIrb::Types::STRING.methods
-    assert_equal [:dedup], targets & KatakataIrb::Types::STRING.all_methods
+    assert_equal [:foobar, :foobarbaz], targets & type.methods
+    assert_equal [:foobar, :foobaz, :foobarbaz], targets & type.all_methods
+    assert_equal [:foobarbaz], targets & KatakataIrb::Types::STRING.methods
+    assert_equal [:foobarbaz], targets & KatakataIrb::Types::STRING.all_methods
+  ensure
+    String.remove_method :foobarbaz
   end
 end

@@ -78,7 +78,7 @@ module KatakataIrb::Types
         [t, t.klass, false]
       end
     end
-    has_splat = args_types.any? { _1 in Splat }
+    has_splat = args_types.any? { _1.is_a? Splat }
     methods_with_score = receivers.flat_map do |receiver_type, klass, singleton|
       method = rbs_search_method klass, method_name, singleton
       next [] unless method
@@ -98,7 +98,7 @@ module KatakataIrb::Types
           args += [InstanceType.new(Hash, K: SYMBOL, V: kw_value_type)]
         end
         if has_splat
-          score += 1 if args.count { !(_1 in Splat) } <= reqs.size + opts.size + trailings.size
+          score += 1 if args.count { !(_1.is_a? Splat) } <= reqs.size + opts.size + trailings.size
         elsif reqs.size + trailings.size <= args.size && (rest || args.size <= reqs.size + opts.size + trailings.size)
           score += 2
           centers = args[reqs.size...-trailings.size]
@@ -375,11 +375,11 @@ module KatakataIrb::Types
     when RBS::Types::Variable
       if extra_vars.key? return_type.name
         extra_vars[return_type.name]
-      elsif self_type in InstanceType
+      elsif self_type.is_a? InstanceType
         self_type.params[return_type.name] || OBJECT
-      elsif self_type in UnionType
+      elsif self_type.is_a? UnionType
         types = self_type.types.filter_map do |t|
-          t.params[return_type.name] if t in InstanceType
+          t.params[return_type.name] if t.is_a? InstanceType
         end
         UnionType[*types]
       else
