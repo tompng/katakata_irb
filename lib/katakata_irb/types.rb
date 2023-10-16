@@ -16,7 +16,7 @@ module KatakataIrb::Types
     loader = RBS::CLI::LibraryOptions.new.loader
     loader.add path: Pathname('sig')
     RBS::DefinitionBuilder.new env: RBS::Environment.from_loader(loader).resolve_type_names
-  rescue => e
+  rescue LoadError, StandardError => e
     @rbs_load_error = e
     puts "\r\nKatakataIRB failed to initialize RBS::DefinitionBuilder: #{e.class}\r\n"
     puts "See `KatakataIrb::Types.rbs_load_error` for more details.\r\n"
