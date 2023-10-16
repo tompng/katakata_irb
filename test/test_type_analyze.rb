@@ -29,7 +29,9 @@ class TestTypeAnalyze < Minitest::Test
 
   def assert_call(code, include: nil, exclude: nil, binding: nil)
     raise ArgumentError if include.nil? && exclude.nil?
-    analyze(code.strip, binding: binding) => [:call, type,]
+
+    result = analyze(code.strip, binding: binding)
+    type = result[1] if result[0] == :call
     klasses = type.types.flat_map do
       _1.klass.singleton_class? ? [_1.klass.superclass, _1.klass] : _1.klass
     end
@@ -66,13 +68,8 @@ class TestTypeAnalyze < Minitest::Test
       assert_equal [:gvar, '$a'], analyze('begin; rescue => $a')[0, 2]
       assert_equal [:ivar, '@a'], analyze('begin; rescue => @a')[0, 2]
       assert_equal [:cvar, '@@a'], analyze('begin; rescue => @@a')[0, 2]
-      assert (analyze('begin; rescue => A') in [:const, _, 'A', _])
-      assert (analyze('begin; rescue => a.b') in [:call, _, 'b', _])
-      # Do not complete assigning to non-variable in rescue
-      # assert_nil analyze('begin; rescue => (a).b')
-      # assert_nil analyze('begin; rescue => (a)::b')
-      # assert_nil analyze('begin; rescue => (a)::A')
-      # assert_nil analyze('begin; rescue => (a).A')
+      assert_equal [:const, 'A'], analyze('begin; rescue => A').values_at(0, 2)
+      assert_equal [:call, 'b'], analyze('begin; rescue => a.b').values_at(0, 2)
     end
   end
 

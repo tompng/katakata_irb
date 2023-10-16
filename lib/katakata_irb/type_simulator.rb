@@ -771,7 +771,7 @@ class KatakataIrb::TypeSimulator
       node.statements ? evaluate(node.statements, scope) : KatakataIrb::Types::NIL
     when Prism::InNode
       pattern = node.pattern
-      if pattern in Prism::IfNode | Prism::UnlessNode
+      if pattern.is_a?(Prism::IfNode) || pattern.is_a?(Prism::UnlessNode)
         cond_node = pattern.predicate
         pattern = pattern.statements.body.first
       end
@@ -935,7 +935,7 @@ class KatakataIrb::TypeSimulator
     methods = KatakataIrb::Types.rbs_methods receiver, method_name.to_sym, args, kwargs, !!block
     block_called = false
     type_breaks = methods.map do |method, given_params, method_params|
-      receiver_vars = (receiver in KatakataIrb::Types::InstanceType) ? receiver.params : {}
+      receiver_vars = receiver.is_a?(KatakataIrb::Types::InstanceType) ? receiver.params : {}
       free_vars = method.type.free_variables - receiver_vars.keys.to_set
       vars = receiver_vars.merge KatakataIrb::Types.match_free_variables(free_vars, method_params, given_params)
       if block && method.block
@@ -961,7 +961,7 @@ class KatakataIrb::TypeSimulator
 
     if method_name.to_sym == :new
       receiver.types.each do |type|
-        if (type in KatakataIrb::Types::SingletonType) && type.module_or_class.is_a?(Class)
+        if type.is_a?(KatakataIrb::Types::SingletonType) && type.module_or_class.is_a?(Class)
           types << KatakataIrb::Types::InstanceType.new(type.module_or_class)
         end
       end
