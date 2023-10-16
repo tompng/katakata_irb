@@ -516,7 +516,6 @@ class KatakataIrb::TypeSimulator
       module_scope = KatakataIrb::Scope.new(
         scope,
         { **table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil },
-        trace_cvar: false,
         trace_ivar: false,
         trace_lvar: false,
         self_type: KatakataIrb::Types::UnionType[*module_types],
