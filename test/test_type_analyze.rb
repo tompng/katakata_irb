@@ -77,17 +77,19 @@ class TestTypeAnalyze < Minitest::Test
   end
 
   def test_ref
-    lvar = 1
-    bind = Class.new do
-      instance_variable_set(:@ivar, :a)
-      class_variable_set(:@@cvar, 'a')
-      break binding
-    end
+    bind = eval <<~RUBY
+      class (Module.new)::A
+        @ivar = :a
+        @@cvar = 'a'
+        binding
+      end
+    RUBY
     assert_call('STDIN.', include: STDIN.singleton_class)
     assert_call('$stdin.', include: $stdin.singleton_class)
-    assert_call('lvar.', include: lvar.class, binding: bind)
     assert_call('@ivar.', include: Symbol, binding: bind)
     assert_call('@@cvar.', include: String, binding: bind)
+    lbind = eval('lvar = 1; binding')
+    assert_call('lvar.', include: Integer, binding: lbind)
   end
 
   def test_self_ivar_ref
@@ -104,11 +106,18 @@ class TestTypeAnalyze < Minitest::Test
     end
   end
 
+  class CVarModule
+    @@test_cvar = 1
+  end
   def test_module_cvar_ref
     bind = binding
     assert_call('@@foo=1; class A; @@foo.', exclude: Integer, binding: bind)
     assert_call('@@foo=1; class A; @@foo=1.0; @@foo.', include: Float, exclude: Integer, binding: bind)
     assert_call('@@foo=1; class A; @@foo=1.0; end; @@foo.', include: Integer, exclude: Float, binding: bind)
+    assert_call('module CVarModule; @@test_cvar.', include: Integer, binding: bind)
+    assert_call('class Array; @@foo = 1; end; class Array; @@foo.', include: Integer, binding: bind)
+    assert_call('class Array; class B; @@foo = 1; end; class B; @@foo.', include: Integer, binding: bind)
+    assert_call('class Array; class B; @@foo = 1; end; @@foo.', exclude: Integer, binding: bind)
   end
 
   def test_sig_dir
@@ -401,6 +410,7 @@ class TestTypeAnalyze < Minitest::Test
   def test_constant_path
     assert_call('class A; X=1; class B; X=""; X.', include: String, exclude: Integer)
     assert_call('class A; X=1; class B; X=""; end; X.', include: Integer, exclude: String)
+    assert_call('class A; class B; X=1; end; end; class A; class B; X.', include: Integer)
     assert_call('module KatakataIrb; VERSION.', include: String)
     assert_call('module KatakataIrb; KatakataIrb::VERSION.', include: String)
     assert_call('module KatakataIrb; VERSION=1; VERSION.', include: Integer)

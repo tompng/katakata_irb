@@ -38,6 +38,8 @@ module KatakataIrb
     end
 
     def get_const(nesting, path, _key = nil)
+      return unless nesting
+
       result = path.reduce nesting do |mod, name|
         return nil unless mod.is_a?(Module) && module_own_constant?(mod, name)
         mod.const_get name
@@ -45,18 +47,25 @@ module KatakataIrb
       KatakataIrb::Types.type_from_object result
     end
 
+    def get_cvar(nesting, path, name, _key = nil)
+      return KatakataIrb::Types::NIL unless nesting
+
+      result = path.reduce nesting do |mod, n|
+        return KatakataIrb::Types::NIL unless mod.is_a?(Module) && module_own_constant?(mod, n)
+        mod.const_get n
+      end
+      value = result.class_variable_get name if result.is_a?(Module) && name.size >= 3 && result.class_variable_defined?(name)
+      Types.type_from_object value
+    end
+
     def [](name)
       @cache[name] ||= (
         fallback = KatakataIrb::Types::NIL
         case BaseScope.type_by_name name
-        when :cvar
-          BaseScope.type_of(fallback: fallback) { @self_object.class_variable_get name }
         when :ivar
           BaseScope.type_of(fallback: fallback) { @self_object.instance_variable_get name }
         when :lvar
           BaseScope.type_of(fallback: fallback) { @binding.local_variable_get(name) }
-        when :const
-          BaseScope.type_of(fallback: fallback) { @binding.eval name }
         when :gvar
           BaseScope.type_of(fallback: fallback) { @binding.eval name if @global_variables.include? name }
         end
@@ -81,6 +90,7 @@ module KatakataIrb
 
     def self.type_by_name(name)
       if name.start_with? '@@'
+        # "@@cvar" or "@@cvar::[module_id]::[module_path]"
         :cvar
       elsif name.start_with? '@'
         :ivar
@@ -88,7 +98,8 @@ module KatakataIrb
         :gvar
       elsif name.start_with? '%'
         :internal
-      elsif name[0].downcase != name[0]
+      elsif name[0].downcase != name[0] || name[0].match?(/\d/)
+        # "ConstName" or "[module_id]::[const_path]"
         :const
       else
         :lvar
@@ -101,10 +112,9 @@ module KatakataIrb
 
     def self.from_binding(binding, locals) = new(BaseScope.new(binding, binding.eval('self'), locals))
 
-    def initialize(parent, table = {}, trace_cvar: true, trace_ivar: true, trace_lvar: true, self_type: nil, nesting: nil)
+    def initialize(parent, table = {}, trace_ivar: true, trace_lvar: true, self_type: nil, nesting: nil)
       @parent = parent
       @level = parent.level + 1
-      @trace_cvar = trace_cvar
       @trace_ivar = trace_ivar
       @trace_lvar = trace_lvar
       @module_nesting = nesting ? [nesting, *parent.module_nesting] : parent.module_nesting
@@ -145,15 +155,13 @@ module KatakataIrb
     def trace?(name)
       return false unless @parent
       type = BaseScope.type_by_name(name)
-      type == :cvar ? @trace_cvar : type == :ivar ? @trace_ivar : type == :lvar ? @trace_lvar : true
+      type == :ivar ? @trace_ivar : type == :lvar ? @trace_lvar : true
     end
 
     def level_of(name, var_type)
       case var_type
       when :ivar
         return level unless @trace_ivar
-      when :cvar
-        return level unless @trace_cvar
       when :gvar
         return 0
       end
@@ -167,14 +175,27 @@ module KatakataIrb
       value || @parent.get_const(nesting, path, key)
     end
 
+    def get_cvar(nesting, path, name, key = nil)
+      key ||= [name, nesting.__id__, path].join('::')
+      _l, value = @table[key]
+      value || @parent.get_cvar(nesting, path, name, key)
+    end
+
     def [](name)
       type = BaseScope.type_by_name(name)
       if type == :const
+        return get_const(nil, nil, name) || KatakataIrb::Types::NIL if name.include?('::')
+
         module_nesting.each do |(nesting, path)|
           value = get_const nesting, [*path, name]
           return value if value
         end
-        KatakataIrb::Types::NIL
+        return KatakataIrb::Types::NIL
+      elsif type == :cvar
+        return get_cvar(nil, nil, nil, name) if name.include?('::')
+
+        nesting, path = module_nesting.first
+        return get_cvar(nesting, path, name)
       end
       level, value = @table[name]
       if level
@@ -191,11 +212,28 @@ module KatakataIrb
       @table[key] = [0, value]
     end
 
+    def set_cvar(nesting, path, name, value)
+      key = [name, nesting.__id__, path].join('::')
+      @table[key] = [0, value]
+    end
+
     def []=(name, value)
       type = BaseScope.type_by_name(name)
       if type == :const
-        parent_module, parent_path = module_nesting.first
-        set_const parent_module, [*parent_path, name], value
+        if name.include?('::')
+          @table[name] = [0, value]
+        else
+          parent_module, parent_path = module_nesting.first
+          set_const parent_module, [*parent_path, name], value
+        end
+        return
+      elsif type == :cvar
+        if name.include?('::')
+          @table[name] = [0, value]
+        else
+          parent_module, parent_path = module_nesting.first
+          set_cvar parent_module, parent_path, name, value
+        end
         return
       end
       variable_level = level_of name, type
@@ -285,7 +323,7 @@ module KatakataIrb
     end
 
     def table_class_variables
-      cvars = @table.keys.select { BaseScope.type_by_name(_1) == :cvar }
+      cvars = @table.keys.filter_map { _1.split('::', 2).first if BaseScope.type_by_name(_1) == :cvar }
       cvars |= @parent.table_class_variables if @parent.mutable? && @trace_cvar
       cvars
     end
