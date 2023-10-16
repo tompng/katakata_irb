@@ -33,8 +33,7 @@ class TestCompletor < Minitest::Test
   end
 
   def test_lvar
-    hoge = 1
-    bind = binding
+    bind = eval('hoge = 1; binding')
     assert_completion('hoge.', binding: bind, include: 'abs')
     assert_completion('hoge.a', binding: bind, include: 'abs')
     assert_completion('hoge = ""; hoge.', binding: bind, include: 'ascii_only?')
