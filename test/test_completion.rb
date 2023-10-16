@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'test_helper'
 KatakataIrb::Types.preload_in_thread.join
 
