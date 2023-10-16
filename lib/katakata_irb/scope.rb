@@ -324,7 +324,7 @@ module KatakataIrb
 
     def table_class_variables
       cvars = @table.keys.filter_map { _1.split('::', 2).first if BaseScope.type_by_name(_1) == :cvar }
-      cvars |= @parent.table_class_variables if @parent.mutable? && @trace_cvar
+      cvars |= @parent.table_class_variables if @parent.mutable?
       cvars
     end
 
