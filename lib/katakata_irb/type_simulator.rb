@@ -40,7 +40,7 @@ class KatakataIrb::TypeSimulator
 
   def evaluate(node, scope)
     result = evaluate_inner(node, scope)
-    @dig_targets.resolve result, scope if @dig_targets.target?(node)
+    @dig_targets.resolve result, scope if @dig_targets.target? node
     result
   end
 
@@ -474,7 +474,8 @@ class KatakataIrb::TypeSimulator
       result
     when Prism::ModuleNode, Prism::ClassNode
       unless node.constant_path.is_a?(Prism::ConstantReadNode) || node.constant_path.is_a?(Prism::ConstantPathNode)
-        # Syntax error code, example: `module a.b; end`
+        # Incomplete class/module `class (statement[cursor_here])::Name; end`
+        evaluate node.constant_path, scope
         return KatakataIrb::Types::NIL
       end
       const_type, _receiver, parent_module, name = evaluate_constant_node node.constant_path, scope
@@ -490,8 +491,8 @@ class KatakataIrb::TypeSimulator
       return KatakataIrb::Types::NIL unless node.body
 
       table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
-      if parent_module.is_a?(Module) || parent_module.nil?
-        value = parent_module.const_get name if parent_module&.const_defined?(name)
+      if !name.empty? && (parent_module.is_a?(Module) || parent_module.nil?)
+        value = parent_module.const_get name if parent_module&.const_defined? name
         unless value
           value_type = scope[name]
           value = value_type.module_or_class if value_type.is_a? KatakataIrb::Types::SingletonType
@@ -691,6 +692,7 @@ class KatakataIrb::TypeSimulator
       name = node.name.to_s
       type = scope[name]
     end
+    @dig_targets.resolve type, scope if @dig_targets.target? node
     [type, receiver, parent_module, name]
   end
 
