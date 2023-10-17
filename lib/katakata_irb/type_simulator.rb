@@ -40,7 +40,7 @@ class KatakataIrb::TypeSimulator
 
   def evaluate(node, scope)
     result = evaluate_inner(node, scope)
-    @dig_targets.resolve result, scope if @dig_targets.target?(node)
+    @dig_targets.resolve result, scope if @dig_targets.target? node
     result
   end
 
@@ -691,6 +691,7 @@ class KatakataIrb::TypeSimulator
       name = node.name.to_s
       type = scope[name]
     end
+    @dig_targets.resolve type, scope if @dig_targets.target? node
     [type, receiver, parent_module, name]
   end
 
