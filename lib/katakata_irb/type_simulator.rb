@@ -474,7 +474,8 @@ class KatakataIrb::TypeSimulator
       result
     when Prism::ModuleNode, Prism::ClassNode
       unless node.constant_path.is_a?(Prism::ConstantReadNode) || node.constant_path.is_a?(Prism::ConstantPathNode)
-        # Syntax error code, example: `module a.b; end`
+        # Incomplete class/module `class (statement[cursor_here])::Name; end`
+        evaluate node.constant_path, scope
         return KatakataIrb::Types::NIL
       end
       const_type, _receiver, parent_module, name = evaluate_constant_node node.constant_path, scope

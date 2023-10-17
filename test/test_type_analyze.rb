@@ -385,6 +385,8 @@ class TestTypeAnalyze < Minitest::Test
   end
 
   def test_class_module
+    assert_call('class (1.', include: Integer)
+    assert_call('class (a=1)::B; end; a.', include: Integer)
     assert_call('class Array; 1; end.', include: Integer)
     assert_call('class ::Array; 1; end.', include: Integer)
     assert_call('class Array::A; 1; end.', include: Integer)
