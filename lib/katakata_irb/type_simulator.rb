@@ -490,8 +490,8 @@ class KatakataIrb::TypeSimulator
       return KatakataIrb::Types::NIL unless node.body
 
       table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
-      if parent_module.is_a?(Module) || parent_module.nil?
-        value = parent_module.const_get name if parent_module&.const_defined?(name)
+      if !name.empty? && (parent_module.is_a?(Module) || parent_module.nil?)
+        value = parent_module.const_get name if parent_module&.const_defined? name
         unless value
           value_type = scope[name]
           value = value_type.module_or_class if value_type.is_a? KatakataIrb::Types::SingletonType

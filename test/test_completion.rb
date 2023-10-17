@@ -48,6 +48,8 @@ class TestCompletor < Minitest::Test
     assert_completion('KatakataIrb::T', include: 'Types')
     assert_completion('FooBar=1; F', include: 'FooBar')
     assert_completion('::FooBar=1; ::F', include: 'FooBar')
+    assert_completion('::', include: 'Array')
+    assert_completion('class ::', include: 'Array')
   end
 
   def test_gvar
