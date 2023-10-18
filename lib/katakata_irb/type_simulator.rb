@@ -454,7 +454,7 @@ class KatakataIrb::TypeSimulator
       end
     )
     evaluate_multi_write node, value, scope, evaluated_receivers
-    value
+    value.is_a?(Array) ? KatakataIrb::Types.array_of(*value) : value
   end
 
   def evaluate_if_node(node, scope) = evaluate_if_unless(node, scope)
@@ -520,8 +520,15 @@ class KatakataIrb::TypeSimulator
     KatakataIrb::Types::OBJECT
   end
 
-  def evaluate_redo_node(_node, scope) = scope.terminate
-  def evaluate_retry_node(_node, scope) = scope.terminate
+  def evaluate_redo_node(_node, scope)
+    scope.terminate
+    KatakataIrb::Types::NIL
+  end
+
+  def evaluate_retry_node(_node, scope)
+    scope.terminate
+    KatakataIrb::Types::NIL
+  end
 
   def evaluate_forwarding_super_node(_node, _scope) = KatakataIrb::Types::OBJECT
 
