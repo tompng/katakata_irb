@@ -39,570 +39,731 @@ class KatakataIrb::TypeSimulator
   end
 
   def evaluate(node, scope)
-    result = evaluate_inner(node, scope)
-    @dig_targets.resolve result, scope if @dig_targets.target? node
-    result
-  end
-
-  def evaluate_inner(node, scope)
-    case node
-    when Prism::ProgramNode
-      evaluate node.statements, scope
-    when Prism::StatementsNode
-      if node.body.empty?
-        KatakataIrb::Types::NIL
-      else
-        node.body.map { evaluate _1, scope }.last
-      end
-    when Prism::DefNode
-      if node.receiver
-        self_type = evaluate node.receiver, scope
-      else
-        current_self_types = scope.self_type.types
-        self_types = current_self_types.map do |type|
-          if type.is_a?(KatakataIrb::Types::SingletonType) && type.module_or_class.is_a?(Class)
-            KatakataIrb::Types::InstanceType.new type.module_or_class
-          else
-            type
-          end
-        end
-        self_type = KatakataIrb::Types::UnionType[*self_types]
-      end
-      if @dig_targets.dig?(node.body) || @dig_targets.dig?(node.parameters)
-        params_table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
-        method_scope = KatakataIrb::Scope.new(
-          scope,
-          { **params_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil },
-          self_type: self_type,
-          trace_lvar: false,
-          trace_ivar: false
-        )
-        if node.parameters
-          # node.parameters is Prism::ParametersNode
-          assign_parameters node.parameters, method_scope, [], {}
-        end
-
-        if @dig_targets.dig?(node.body)
-          method_scope.conditional do |s|
-            evaluate node.body, s
-          end
-        end
-        method_scope.merge_jumps
-        scope.update method_scope
-      end
-      KatakataIrb::Types::SYMBOL
-    when Prism::IntegerNode
-      KatakataIrb::Types::INTEGER
-    when Prism::FloatNode
-      KatakataIrb::Types::FLOAT
-    when Prism::RationalNode
-      KatakataIrb::Types::RATIONAL
-    when Prism::ImaginaryNode
-      KatakataIrb::Types::COMPLEX
-    when Prism::StringNode
-      KatakataIrb::Types::STRING
-    when Prism::XStringNode
-      KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
-    when Prism::SymbolNode
-      KatakataIrb::Types::SYMBOL
-    when Prism::RegularExpressionNode
-      KatakataIrb::Types::REGEXP
-    when Prism::StringConcatNode
-      evaluate node.left, scope
-      evaluate node.right, scope
-      KatakataIrb::Types::STRING
-    when Prism::InterpolatedStringNode
-      node.parts.each { evaluate _1, scope }
-      KatakataIrb::Types::STRING
-    when Prism::InterpolatedXStringNode
-      node.parts.each { evaluate _1, scope }
-      KatakataIrb::Types::STRING
-    when Prism::InterpolatedSymbolNode
-      node.parts.each { evaluate _1, scope }
-      KatakataIrb::Types::SYMBOL
-    when Prism::InterpolatedRegularExpressionNode
-      node.parts.each { evaluate _1, scope }
-      KatakataIrb::Types::REGEXP
-    when Prism::EmbeddedStatementsNode
-      node.statements ? evaluate(node.statements, scope) : KatakataIrb::Types::NIL
-      KatakataIrb::Types::STRING
-    when Prism::EmbeddedVariableNode
-      evaluate node.variable, scope
-      KatakataIrb::Types::STRING
-    when Prism::ArrayNode
-      KatakataIrb::Types.array_of evaluate_list_splat_items(node.elements, scope)
-    when Prism::HashNode, Prism::KeywordHashNode
-      keys = []
-      values = []
-      node.elements.each do |assoc|
-        case assoc
-        when Prism::AssocNode
-          keys << evaluate(assoc.key, scope)
-          values << evaluate(assoc.value, scope)
-        when Prism::AssocSplatNode
-          hash = evaluate assoc.value, scope
-          unless hash.is_a?(KatakataIrb::Types::InstanceType) && hash.klass == Hash
-            hash = simulate_call hash, :to_hash, [], nil, nil, scope
-          end
-          if hash.is_a?(KatakataIrb::Types::InstanceType) && hash.klass == Hash
-            keys << hash.params[:K] if hash.params[:K]
-            values << hash.params[:V] if hash.params[:V]
-          end
-        end
-      end
-      if keys.empty? && values.empty?
-        KatakataIrb::Types::InstanceType.new Hash
-      else
-        KatakataIrb::Types::InstanceType.new Hash, K: KatakataIrb::Types::UnionType[*keys], V: KatakataIrb::Types::UnionType[*values]
-      end
-    when Prism::ParenthesesNode
-      node.body ? evaluate(node.body, scope) : KatakataIrb::Types::NIL
-    when Prism::ConstantPathNode
-      type, = evaluate_constant_node node, scope
-      type
-    when Prism::SelfNode
-      scope.self_type
-    when Prism::TrueNode
-      KatakataIrb::Types::TRUE
-    when Prism::FalseNode
-      KatakataIrb::Types::FALSE
-    when Prism::NilNode
-      KatakataIrb::Types::NIL
-    when Prism::SourceFileNode
-        KatakataIrb::Types::STRING
-    when Prism::SourceLineNode
-        KatakataIrb::Types::INTEGER
-    when Prism::SourceEncodingNode
-      KatakataIrb::Types::InstanceType.new Encoding
-    when Prism::NumberedReferenceReadNode, Prism::BackReferenceReadNode
-      KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
-    when Prism::LocalVariableReadNode
-      scope[node.name.to_s] || KatakataIrb::Types::NIL
-    when Prism::ConstantReadNode, Prism::GlobalVariableReadNode, Prism::InstanceVariableReadNode, Prism::ClassVariableReadNode
-      scope[node.name.to_s] || KatakataIrb::Types::NIL
-    when Prism::CallNode
-      # TODO: return type of []=, field= when operator_loc.nil?
-      receiver_type = node.receiver ? evaluate(node.receiver, scope) : scope.self_type
-      evaluate_method = lambda do |scope|
-        args_types, kwargs_types, block_sym_node, has_block = evaluate_call_node_arguments node, scope
-
-        if block_sym_node
-          block_sym = block_sym_node.value
-          if @dig_targets.target? block_sym_node
-            # method(args, &:completion_target)
-            call_block_proc = ->(block_args, _self_type) do
-              block_receiver = block_args.first || KatakataIrb::Types::OBJECT
-              @dig_targets.resolve block_receiver, scope
-              KatakataIrb::Types::OBJECT
-            end
-          else
-            call_block_proc = ->(block_args, _self_type) do
-              block_receiver, *rest = block_args
-              block_receiver ? simulate_call(block_receiver || KatakataIrb::Types::OBJECT, block_sym, rest, nil, nil, scope) : KatakataIrb::Types::OBJECT
-            end
-          end
-        elsif node.block.is_a? Prism::BlockNode
-          call_block_proc = ->(block_args, block_self_type) do
-            scope.conditional do |s|
-              numbered_parameters = node.block.locals.grep(/\A_[1-9]/).map(&:to_s)
-              params_table = node.block.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
-              table = { **params_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil }
-              block_scope = KatakataIrb::Scope.new s, table, self_type: block_self_type, trace_ivar: !block_self_type
-              # TODO kwargs
-              if node.block.parameters&.parameters
-                # node.block.parameters is Prism::BlockParametersNode
-                assign_parameters node.block.parameters.parameters, block_scope, block_args, {}
-              elsif !numbered_parameters.empty?
-                assign_numbered_parameters numbered_parameters, block_scope, block_args, {}
-              end
-              result = node.block.body ? evaluate(node.block.body, block_scope) : KatakataIrb::Types::NIL
-              block_scope.merge_jumps
-              s.update block_scope
-              nexts = block_scope[KatakataIrb::Scope::NEXT_RESULT]
-              breaks = block_scope[KatakataIrb::Scope::BREAK_RESULT]
-              if block_scope.terminated?
-                [KatakataIrb::Types::UnionType[*nexts], breaks]
-              else
-                [KatakataIrb::Types::UnionType[result, *nexts], breaks]
-              end
-            end
-          end
-        elsif has_block
-          call_block_proc = ->(_block_args, _self_type) { KatakataIrb::Types::OBJECT }
-        end
-        simulate_call receiver_type, node.name, args_types, kwargs_types, call_block_proc, scope
-      end
-      if node.call_operator == '&.'
-        result = scope.conditional { evaluate_method.call _1 }
-        if receiver_type.nillable?
-          KatakataIrb::Types::UnionType[result, KatakataIrb::Types::NIL]
-        else
-          result
-        end
-      else
-        evaluate_method.call scope
-      end
-    when Prism::AndNode, Prism::OrNode
-      left = evaluate node.left, scope
-      right = scope.conditional { evaluate node.right, _1 }
-      if node.operator == '&&'
-        KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
-      else
-        KatakataIrb::Types::UnionType[left, right]
-      end
-    when Prism::CallOperatorWriteNode, Prism::CallAndWriteNode, Prism::CallOrWriteNode
-      receiver_type = evaluate node.receiver, scope
-      args_types, kwargs_types, block_sym_node, has_block = evaluate_call_node_arguments node, scope
-      if block_sym_node
-        block_sym = block_sym_node.value
-        call_block_proc = ->(block_args, _self_type) do
-          block_receiver, *rest = block_args
-          block_receiver ? simulate_call(block_receiver || KatakataIrb::Types::OBJECT, block_sym, rest, nil, nil, scope) : KatakataIrb::Types::OBJECT
-        end
-      elsif has_block
-        call_block_proc = ->(_block_args, _self_type) { KatakataIrb::Types::OBJECT }
-      end
-      method = node.write_name.to_s.delete_suffix('=')
-      left = simulate_call receiver_type, method, args_types, kwargs_types, call_block_proc, scope
-      if node.operator == '&&='
-        right = scope.conditional { evaluate node.value, _1 }
-        KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
-      elsif node.operator == '||='
-        right = scope.conditional { evaluate node.value, _1 }
-        KatakataIrb::Types::UnionType[left, right]
-      else
-        right = evaluate node.value, scope
-        simulate_call left, node.operator, [right], nil, nil, scope, name_match: false
-      end
-    when Prism::ClassVariableOperatorWriteNode, Prism::InstanceVariableOperatorWriteNode, Prism::LocalVariableOperatorWriteNode, Prism::GlobalVariableOperatorWriteNode
-      left = scope[node.name.to_s] || KatakataIrb::Types::OBJECT
-      right = evaluate node.value, scope
-      scope[node.name.to_s] = simulate_call left, node.operator, [right], nil, nil, scope, name_match: false
-    when Prism::ClassVariableAndWriteNode, Prism::InstanceVariableAndWriteNode, Prism::LocalVariableAndWriteNode, Prism::GlobalVariableAndWriteNode
-      right = scope.conditional { evaluate node.value, scope }
-      scope[node.name.to_s] = KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
-    when Prism::ClassVariableOrWriteNode, Prism::InstanceVariableOrWriteNode, Prism::LocalVariableOrWriteNode, Prism::GlobalVariableOrWriteNode
-      left = scope[node.name.to_s] || KatakataIrb::Types::OBJECT
-      right = scope.conditional { evaluate node.value, scope }
-      scope[node.name.to_s] = KatakataIrb::Types::UnionType[left, right]
-    when Prism::ConstantOperatorWriteNode
-      left = scope[node.name.to_s] || KatakataIrb::Types::OBJECT
-      right = evaluate node.value, scope
-      scope[node.name.to_s] = simulate_call left, node.operator, [right], nil, nil, scope, name_match: false
-    when Prism::ConstantAndWriteNode
-      right = scope.conditional { evaluate node.value, scope }
-      scope[node.name.to_s] = KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
-    when Prism::ConstantOrWriteNode
-      left = scope[node.name.to_s] || KatakataIrb::Types::OBJECT
-      right = scope.conditional { evaluate node.value, scope }
-      scope[node.name.to_s] = KatakataIrb::Types::UnionType[left, right]
-    when Prism::ConstantPathOperatorWriteNode
-      left, receiver, _parent_module, name = evaluate_constant_node node.target, scope
-      right = evaluate node.value, scope
-      value = simulate_call left, node.operator, [right], nil, nil, scope, name_match: false
-      const_path_write receiver, name, value, scope
-      value
-    when Prism::ConstantPathAndWriteNode
-      _left, receiver, _parent_module, name = evaluate_constant_node node.target, scope
-      right = scope.conditional { evaluate node.value, scope }
-      value = KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
-      const_path_write receiver, name, value, scope
-      value
-    when Prism::ConstantPathOrWriteNode
-      left, receiver, _parent_module, name = evaluate_constant_node node.target, scope
-      right = scope.conditional { evaluate node.value, scope }
-      value = KatakataIrb::Types::UnionType[left, right]
-      const_path_write receiver, name, value, scope
-      value
-    when Prism::ConstantPathWriteNode
-      receiver = evaluate node.target.parent, scope if node.target.parent
-      value = evaluate node.value, scope
-      const_path_write receiver, node.target.child.name.to_s, value, scope
-      value
-    when Prism::LambdaNode
-      local_table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::OBJECT] }
-      block_scope = KatakataIrb::Scope.new scope, { **local_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }
-      block_scope.conditional do |s|
-        assign_parameters node.parameters.parameters, s, [], {} if node.parameters&.parameters
-        evaluate node.body, s if node.body
-      end
-      block_scope.merge_jumps
-      scope.update block_scope
-      KatakataIrb::Types::ProcType.new
-    when Prism::LocalVariableWriteNode, Prism::GlobalVariableWriteNode, Prism::InstanceVariableWriteNode, Prism::ClassVariableWriteNode, Prism::ConstantWriteNode
-      scope[node.name.to_s] = evaluate node.value, scope
-    when Prism::MultiWriteNode
-      evaluated_receivers = {}
-      evaluate_multi_write_receiver node, scope, evaluated_receivers
-      value = (
-        if node.value.is_a? Prism::ArrayNode
-          if node.value.elements.any?(Prism::SplatNode)
-            evaluate node.value, scope
-          else
-            node.value.elements.map do |n|
-              evaluate n, scope
-            end
-          end
-        elsif node.value
-          evaluate node.value, scope
-        else
-          # For syntax invalid code like `(*a).b`
-          KatakataIrb::Types::NIL
-        end
-      )
-      evaluate_multi_write node, value, scope, evaluated_receivers
-    when Prism::IfNode, Prism::UnlessNode
-      evaluate node.predicate, scope
-      KatakataIrb::Types::UnionType[*scope.run_branches(
-        -> { node.statements ? evaluate(node.statements, _1) : KatakataIrb::Types::NIL },
-        -> { node.consequent ? evaluate(node.consequent, _1) : KatakataIrb::Types::NIL }
-      )]
-    when Prism::ElseNode
-      node.statements ? evaluate(node.statements, scope) : KatakataIrb::Types::NIL
-    when Prism::WhileNode, Prism::UntilNode
-      inner_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::BREAK_RESULT => nil }
-      evaluate node.predicate, inner_scope
-      if node.statements
-        inner_scope.conditional do |s|
-          evaluate node.statements, s
-        end
-      end
-      inner_scope.merge_jumps
-      scope.update inner_scope
-      breaks = inner_scope[KatakataIrb::Scope::BREAK_RESULT]
-      breaks ? KatakataIrb::Types::UnionType[breaks, KatakataIrb::Types::NIL] : KatakataIrb::Types::NIL
-    when Prism::BreakNode, Prism::NextNode, Prism::ReturnNode
-      internal_key = (
-        case node
-        when Prism::BreakNode
-          KatakataIrb::Scope::BREAK_RESULT
-        when Prism::NextNode
-          KatakataIrb::Scope::NEXT_RESULT
-        when Prism::ReturnNode
-          KatakataIrb::Scope::RETURN_RESULT
-        end
-      )
-      jump_value = (
-        arguments = node.arguments&.arguments
-        if arguments.nil? || arguments.empty?
-          KatakataIrb::Types::NIL
-        elsif arguments.size == 1 && !arguments.first.is_a?(Prism::SplatNode)
-          evaluate arguments.first, scope
-        else
-          KatakataIrb::Types.array_of evaluate_list_splat_items(arguments, scope)
-        end
-      )
-      scope.terminate_with internal_key, jump_value
-      KatakataIrb::Types::NIL
-    when Prism::YieldNode
-      evaluate_list_splat_items node.arguments.arguments, scope if node.arguments
-      KatakataIrb::Types::OBJECT
-    when Prism::RedoNode, Prism::RetryNode
-      scope.terminate
-    when Prism::ForwardingSuperNode
-      KatakataIrb::Types::OBJECT
-    when Prism::SuperNode
-      evaluate_list_splat_items node.arguments.arguments, scope if node.arguments
-      KatakataIrb::Types::OBJECT
-    when Prism::BeginNode
-      return_type = node.statements ? evaluate(node.statements, scope) : KatakataIrb::Types::NIL
-      if node.rescue_clause
-        if node.else_clause
-          return_types = scope.run_branches(
-            ->{ evaluate node.rescue_clause, _1 },
-            ->{ evaluate node.else_clause, _1 }
-          )
-        else
-          return_types = [
-            return_type,
-            scope.conditional { evaluate node.rescue_clause, _1 }
-          ]
-        end
-        return_type = KatakataIrb::Types::UnionType[*return_types]
-      end
-      if node.ensure_clause&.statements
-        # ensure_clause is Prism::EnsureNode
-        evaluate node.ensure_clause.statements, scope
-      end
-      return_type
-    when Prism::RescueNode
-      run_rescue = lambda do |s|
-        if node.reference
-          error_classes_type = evaluate_list_splat_items node.exceptions, s
-          error_types = error_classes_type.types.filter_map do
-            KatakataIrb::Types::InstanceType.new _1.module_or_class if _1.is_a?(KatakataIrb::Types::SingletonType)
-          end
-          error_types << KatakataIrb::Types::InstanceType.new(StandardError) if error_types.empty?
-          error_type = KatakataIrb::Types::UnionType[*error_types]
-          case node.reference
-          when Prism::LocalVariableTargetNode, Prism::InstanceVariableTargetNode, Prism::ClassVariableTargetNode, Prism::GlobalVariableTargetNode, Prism::ConstantTargetNode
-            s[node.reference.name.to_s] = error_type
-          when Prism::CallNode
-            evaluate node.reference, s
-          end
-        end
-        node.statements ? evaluate(node.statements, s) : KatakataIrb::Types::NIL
-      end
-      if node.consequent # begin; rescue A; rescue B; end
-        types = scope.run_branches(
-          run_rescue,
-          -> { evaluate node.consequent, _1 }
-        )
-        KatakataIrb::Types::UnionType[*types]
-      else
-        run_rescue.call scope
-      end
-    when Prism::RescueModifierNode
-      a = evaluate node.expression, scope
-      b = scope.conditional { evaluate node.rescue_expression, _1 }
-      KatakataIrb::Types::UnionType[a, b]
-    when Prism::SingletonClassNode
-      klass_types = evaluate(node.expression, scope).types.filter_map do |type|
-        KatakataIrb::Types::SingletonType.new type.klass if type.is_a? KatakataIrb::Types::InstanceType
-      end
-      klass_types = [KatakataIrb::Types::CLASS] if klass_types.empty?
-      table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
-      sclass_scope = KatakataIrb::Scope.new(
-        scope,
-        { **table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil },
-        trace_ivar: false,
-        trace_lvar: false,
-        self_type: KatakataIrb::Types::UnionType[*klass_types]
-      )
-      result = node.body ? evaluate(node.body, sclass_scope) : KatakataIrb::Types::NIL
-      scope.update sclass_scope
-      result
-    when Prism::ModuleNode, Prism::ClassNode
-      unless node.constant_path.is_a?(Prism::ConstantReadNode) || node.constant_path.is_a?(Prism::ConstantPathNode)
-        # Incomplete class/module `class (statement[cursor_here])::Name; end`
-        evaluate node.constant_path, scope
-        return KatakataIrb::Types::NIL
-      end
-      const_type, _receiver, parent_module, name = evaluate_constant_node node.constant_path, scope
-      if node.is_a? Prism::ModuleNode
-        module_types = const_type.types.select { _1.is_a?(KatakataIrb::Types::SingletonType) && !_1.module_or_class.is_a?(Class) }
-        module_types << KatakataIrb::Types::MODULE if module_types.empty?
-      else
-        select_class_type = -> { _1.is_a?(KatakataIrb::Types::SingletonType) && _1.module_or_class.is_a?(Class) }
-        module_types = const_type.types.select(&select_class_type)
-        module_types += evaluate(node.superclass, scope).types.select(&select_class_type) if node.superclass
-        module_types << KatakataIrb::Types::CLASS if module_types.empty?
-      end
-      return KatakataIrb::Types::NIL unless node.body
-
-      table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
-      if !name.empty? && (parent_module.is_a?(Module) || parent_module.nil?)
-        value = parent_module.const_get name if parent_module&.const_defined? name
-        unless value
-          value_type = scope[name]
-          value = value_type.module_or_class if value_type.is_a? KatakataIrb::Types::SingletonType
-        end
-
-        if value.is_a? Module
-          nesting = [value, []]
-        else
-          if parent_module
-            nesting = [parent_module, [name]]
-          else
-            parent_nesting, parent_path = scope.module_nesting.first
-            nesting = [parent_nesting, parent_path + [name]]
-          end
-          nesting_key = [nesting[0].__id__, nesting[1]].join('::')
-          nesting_value = node.is_a?(Prism::ModuleNode) ? KatakataIrb::Types::MODULE : KatakataIrb::Types::CLASS
-        end
-      else
-        # parent_module == :unknown
-        # TODO: dummy module
-      end
-      module_scope = KatakataIrb::Scope.new(
-        scope,
-        { **table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil },
-        trace_ivar: false,
-        trace_lvar: false,
-        self_type: KatakataIrb::Types::UnionType[*module_types],
-        nesting: nesting
-      )
-      module_scope[nesting_key] = nesting_value if nesting_value
-      result = evaluate(node.body, module_scope)
-      scope.update module_scope
-      result
-    when Prism::ForNode
-      node.statements
-      collection = evaluate node.collection, scope
-      inner_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::BREAK_RESULT => nil }
-      ary_type = simulate_call collection, :to_ary, [], nil, nil, nil, name_match: false
-      element_types = ary_type.types.filter_map do |ary|
-        ary.params[:Elem] if ary.is_a?(KatakataIrb::Types::InstanceType) && ary.klass == Array
-      end
-      element_type = KatakataIrb::Types::UnionType[*element_types]
-      inner_scope.conditional do |s|
-        evaluate_write node.index, element_type, s, nil
-        evaluate node.statements, s if node.statements
-      end
-      inner_scope.merge_jumps
-      scope.update inner_scope
-      breaks = inner_scope[KatakataIrb::Scope::BREAK_RESULT]
-      breaks ? KatakataIrb::Types::UnionType[breaks, collection] : collection
-    when Prism::CaseNode
-      target = evaluate(node.predicate, scope) if node.predicate
-      # TODO
-      branches = node.conditions.map do |condition|
-        ->(s) { evaluate_case_match target, condition, s }
-      end
-      if node.consequent
-        branches << ->(s) { evaluate node.consequent, s }
-      elsif node.conditions.any? { _1.is_a? Prism::WhenNode }
-        branches << ->(s) { KatakataIrb::Types::NIL }
-      end
-      KatakataIrb::Types::UnionType[*scope.run_branches(*branches)]
-    when Prism::MatchRequiredNode
-      value_type = evaluate node.value, scope
-      evaluate_match_pattern value_type, node.pattern, scope
-      KatakataIrb::Types::NIL # void value
-    when Prism::MatchPredicateNode
-      value_type = evaluate node.value, scope
-      scope.conditional { evaluate_match_pattern value_type, node.pattern, _1 }
-      KatakataIrb::Types::BOOLEAN
-    when Prism::RangeNode
-      beg_type = evaluate node.left, scope if node.left
-      end_type = evaluate node.right, scope if node.right
-      elem = (KatakataIrb::Types::UnionType[*[beg_type, end_type].compact]).nonnillable
-      KatakataIrb::Types::InstanceType.new Range, Elem: elem
-    when Prism::DefinedNode
-      scope.conditional { evaluate node.value, _1 }
-      KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
-    when Prism::FlipFlopNode
-      scope.conditional { evaluate node.left, _1 } if node.left
-      scope.conditional { evaluate node.right, _1 } if node.right
-      KatakataIrb::Types::BOOLEAN
-    when Prism::MultiTargetNode
-      # Raw MultiTargetNode, incomplete code like `a,b`, `*a`.
-      evaluate_multi_write_receiver node, scope, nil
-      KatakataIrb::Types::NIL
-    when Prism::ImplicitNode
-      evaluate node.value, scope
-    when Prism::MatchWriteNode
-      # /(?<a>)(?<b>)/ =~ string
-      evaluate node.call, scope
-      node.locals.each { scope[_1.to_s] = KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL] }
-      KatakataIrb::Types::BOOLEAN
-    when Prism::MatchLastLineNode
-      KatakataIrb::Types::BOOLEAN
-    when Prism::InterpolatedMatchLastLineNode
-      node.parts.each { evaluate _1, scope }
-      KatakataIrb::Types::BOOLEAN
-    when Prism::PreExecutionNode, Prism::PostExecutionNode
-      node.statements ? evaluate(node.statements, scope) : KatakataIrb::Types::NIL
-    when Prism::AliasMethodNode, Prism::AliasGlobalVariableNode, Prism::UndefNode, Prism::MissingNode
-      # do nothing
-      KatakataIrb::Types::NIL
+    method = "evaluate_#{node.type}"
+    if respond_to? method
+      result = send method, node, scope
     else
       KatakataIrb.log_puts
       KatakataIrb.log_puts :NOMATCH
       KatakataIrb.log_puts node.inspect
+      result = KatakataIrb::Types::NIL
+    end
+    @dig_targets.resolve result, scope if @dig_targets.target? node
+    result
+  end
+
+  def evaluate_program_node(node, scope)
+    evaluate node.statements, scope
+  end
+
+  def evaluate_statements_node(node, scope)
+    if node.body.empty?
       KatakataIrb::Types::NIL
+    else
+      node.body.map { evaluate _1, scope }.last
     end
   end
+
+  def evaluate_def_node(node, scope)
+    if node.receiver
+      self_type = evaluate node.receiver, scope
+    else
+      current_self_types = scope.self_type.types
+      self_types = current_self_types.map do |type|
+        if type.is_a?(KatakataIrb::Types::SingletonType) && type.module_or_class.is_a?(Class)
+          KatakataIrb::Types::InstanceType.new type.module_or_class
+        else
+          type
+        end
+      end
+      self_type = KatakataIrb::Types::UnionType[*self_types]
+    end
+    if @dig_targets.dig?(node.body) || @dig_targets.dig?(node.parameters)
+      params_table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
+      method_scope = KatakataIrb::Scope.new(
+        scope,
+        { **params_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil },
+        self_type: self_type,
+        trace_lvar: false,
+        trace_ivar: false
+      )
+      if node.parameters
+        # node.parameters is Prism::ParametersNode
+        assign_parameters node.parameters, method_scope, [], {}
+      end
+
+      if @dig_targets.dig?(node.body)
+        method_scope.conditional do |s|
+          evaluate node.body, s
+        end
+      end
+      method_scope.merge_jumps
+      scope.update method_scope
+    end
+    KatakataIrb::Types::SYMBOL
+  end
+
+  def evaluate_integer_node(_node, _scope) = KatakataIrb::Types::INTEGER
+
+  def evaluate_float_node(_node, _scope) = KatakataIrb::Types::FLOAT
+
+  def evaluate_rational_node(_node, _scope) = KatakataIrb::Types::RATIONAL
+
+  def evaluate_imaginary_node(_node, _scope) = KatakataIrb::Types::COMPLEX
+
+  def evaluate_string_node(_node, _scope) = KatakataIrb::Types::STRING
+
+  def evaluate_x_string_node(_node, _scope)
+    KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
+  end
+
+  def evaluate_symbol_node(_node, _scope) = KatakataIrb::Types::SYMBOL
+
+  def evaluate_regular_expression_node(_node, _scope) = KatakataIrb::Types::REGEXP
+
+  def evaluate_string_concat_node(node, scope)
+    evaluate node.left, scope
+    evaluate node.right, scope
+    KatakataIrb::Types::STRING
+  end
+
+  def evaluate_interpolated_string_node(node, scope)
+    node.parts.each { evaluate _1, scope }
+    KatakataIrb::Types::STRING
+  end
+
+  def evaluate_interpolated_x_string_node(node, scope)
+    node.parts.each { evaluate _1, scope }
+    KatakataIrb::Types::STRING
+  end
+
+  def evaluate_interpolated_symbol_node(node, scope)
+    node.parts.each { evaluate _1, scope }
+    KatakataIrb::Types::SYMBOL
+  end
+
+  def evaluate_interpolated_regular_expression_node(node, scope)
+    node.parts.each { evaluate _1, scope }
+    KatakataIrb::Types::REGEXP
+  end
+
+  def evaluate_embedded_statements_node(node, scope)
+    node.statements ? evaluate(node.statements, scope) : KatakataIrb::Types::NIL
+    KatakataIrb::Types::STRING
+  end
+
+  def evaluate_embedded_variable_node(node, scope)
+    evaluate node.variable, scope
+    KatakataIrb::Types::STRING
+  end
+
+  def evaluate_array_node(node, scope)
+    KatakataIrb::Types.array_of evaluate_list_splat_items(node.elements, scope)
+  end
+
+  def evaluate_hash_node(node, scope) = evaluate_hash(node, scope)
+  def evaluate_keyword_hash_node(node, scope) = evaluate_hash(node, scope)
+  def evaluate_hash(node, scope)
+    keys = []
+    values = []
+    node.elements.each do |assoc|
+      case assoc
+      when Prism::AssocNode
+        keys << evaluate(assoc.key, scope)
+        values << evaluate(assoc.value, scope)
+      when Prism::AssocSplatNode
+        hash = evaluate assoc.value, scope
+        unless hash.is_a?(KatakataIrb::Types::InstanceType) && hash.klass == Hash
+          hash = simulate_call hash, :to_hash, [], nil, nil, scope
+        end
+        if hash.is_a?(KatakataIrb::Types::InstanceType) && hash.klass == Hash
+          keys << hash.params[:K] if hash.params[:K]
+          values << hash.params[:V] if hash.params[:V]
+        end
+      end
+    end
+    if keys.empty? && values.empty?
+      KatakataIrb::Types::InstanceType.new Hash
+    else
+      KatakataIrb::Types::InstanceType.new Hash, K: KatakataIrb::Types::UnionType[*keys], V: KatakataIrb::Types::UnionType[*values]
+    end
+  end
+
+  def evaluate_parentheses_node(node, scope)
+    node.body ? evaluate(node.body, scope) : KatakataIrb::Types::NIL
+  end
+
+  def evaluate_constant_path_node(node, scope)
+    type, = evaluate_constant_node_info node, scope
+    type
+  end
+
+  def evaluate_self_node(_node, scope) = scope.self_type
+
+  def evaluate_true_node(_node, _scope) = KatakataIrb::Types::TRUE
+
+  def evaluate_false_node(_node, _scope) = KatakataIrb::Types::FALSE
+
+  def evaluate_nil_node(_node, _scope) = KatakataIrb::Types::NIL
+
+  def evaluate_source_file_node(_node, _scope) = KatakataIrb::Types::STRING
+
+  def evaluate_source_line_node(_node, _scope) = KatakataIrb::Types::INTEGER
+
+  def evaluate_source_encoding_node(_node, _scope) = KatakataIrb::Types::InstanceType.new(Encoding)
+
+  def evaluate_numbered_reference_read_node(_node, _scope)
+    KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
+  end
+
+  def evaluate_back_reference_read_node(_node, _scope)
+    KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
+  end
+
+  def evaluate_reference_read(node, scope)
+    scope[node.name.to_s] || KatakataIrb::Types::NIL
+  end
+  alias evaluate_constant_read_node evaluate_reference_read
+  alias evaluate_global_variable_read_node evaluate_reference_read
+  alias evaluate_local_variable_read_node evaluate_reference_read
+  alias evaluate_class_variable_read_node evaluate_reference_read
+  alias evaluate_instance_variable_read_node evaluate_reference_read
+
+
+  def evaluate_call_node(node, scope)
+    # TODO: return type of []=, field= when operator_loc.nil?
+    receiver_type = node.receiver ? evaluate(node.receiver, scope) : scope.self_type
+    evaluate_method = lambda do |scope|
+      args_types, kwargs_types, block_sym_node, has_block = evaluate_call_node_arguments node, scope
+
+      if block_sym_node
+        block_sym = block_sym_node.value
+        if @dig_targets.target? block_sym_node
+          # method(args, &:completion_target)
+          call_block_proc = ->(block_args, _self_type) do
+            block_receiver = block_args.first || KatakataIrb::Types::OBJECT
+            @dig_targets.resolve block_receiver, scope
+            KatakataIrb::Types::OBJECT
+          end
+        else
+          call_block_proc = ->(block_args, _self_type) do
+            block_receiver, *rest = block_args
+            block_receiver ? simulate_call(block_receiver || KatakataIrb::Types::OBJECT, block_sym, rest, nil, nil, scope) : KatakataIrb::Types::OBJECT
+          end
+        end
+      elsif node.block.is_a? Prism::BlockNode
+        call_block_proc = ->(block_args, block_self_type) do
+          scope.conditional do |s|
+            numbered_parameters = node.block.locals.grep(/\A_[1-9]/).map(&:to_s)
+            params_table = node.block.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
+            table = { **params_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil }
+            block_scope = KatakataIrb::Scope.new s, table, self_type: block_self_type, trace_ivar: !block_self_type
+            # TODO kwargs
+            if node.block.parameters&.parameters
+              # node.block.parameters is Prism::BlockParametersNode
+              assign_parameters node.block.parameters.parameters, block_scope, block_args, {}
+            elsif !numbered_parameters.empty?
+              assign_numbered_parameters numbered_parameters, block_scope, block_args, {}
+            end
+            result = node.block.body ? evaluate(node.block.body, block_scope) : KatakataIrb::Types::NIL
+            block_scope.merge_jumps
+            s.update block_scope
+            nexts = block_scope[KatakataIrb::Scope::NEXT_RESULT]
+            breaks = block_scope[KatakataIrb::Scope::BREAK_RESULT]
+            if block_scope.terminated?
+              [KatakataIrb::Types::UnionType[*nexts], breaks]
+            else
+              [KatakataIrb::Types::UnionType[result, *nexts], breaks]
+            end
+          end
+        end
+      elsif has_block
+        call_block_proc = ->(_block_args, _self_type) { KatakataIrb::Types::OBJECT }
+      end
+      simulate_call receiver_type, node.name, args_types, kwargs_types, call_block_proc, scope
+    end
+    if node.call_operator == '&.'
+      result = scope.conditional { evaluate_method.call _1 }
+      if receiver_type.nillable?
+        KatakataIrb::Types::UnionType[result, KatakataIrb::Types::NIL]
+      else
+        result
+      end
+    else
+      evaluate_method.call scope
+    end
+  end
+
+  def evaluate_and_node(node, scope) = evaluate_and_or(node, scope, and_op: true)
+  def evaluate_or_node(node, scope) = evaluate_and_or(node, scope, and_op: false)
+  def evaluate_and_or(node, scope, and_op:)
+    left = evaluate node.left, scope
+    right = scope.conditional { evaluate node.right, _1 }
+    if and_op
+      KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
+    else
+      KatakataIrb::Types::UnionType[left, right]
+    end
+  end
+
+  def evaluate_call_operator_write_node(node, scope) = evaluate_call_write(node, scope, :operator)
+  def evaluate_call_and_write_node(node, scope) = evaluate_call_write(node, scope, :and)
+  def evaluate_call_or_write_node(node, scope) = evaluate_call_write(node, scope, :or)
+  def evaluate_call_write(node, scope, operator)
+    receiver_type = evaluate node.receiver, scope
+    args_types, kwargs_types, block_sym_node, has_block = evaluate_call_node_arguments node, scope
+    if block_sym_node
+      block_sym = block_sym_node.value
+      call_block_proc = ->(block_args, _self_type) do
+        block_receiver, *rest = block_args
+        block_receiver ? simulate_call(block_receiver || KatakataIrb::Types::OBJECT, block_sym, rest, nil, nil, scope) : KatakataIrb::Types::OBJECT
+      end
+    elsif has_block
+      call_block_proc = ->(_block_args, _self_type) { KatakataIrb::Types::OBJECT }
+    end
+    method = node.write_name.to_s.delete_suffix('=')
+    left = simulate_call receiver_type, method, args_types, kwargs_types, call_block_proc, scope
+    case operator
+    when :and
+      right = scope.conditional { evaluate node.value, _1 }
+      KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
+    when :or
+      right = scope.conditional { evaluate node.value, _1 }
+      KatakataIrb::Types::UnionType[left, right]
+    else
+      right = evaluate node.value, scope
+      simulate_call left, node.operator, [right], nil, nil, scope, name_match: false
+    end
+  end
+
+  def evaluate_variable_operator_write(node, scope)
+    left = scope[node.name.to_s] || KatakataIrb::Types::OBJECT
+    right = evaluate node.value, scope
+    scope[node.name.to_s] = simulate_call left, node.operator, [right], nil, nil, scope, name_match: false
+  end
+  alias evaluate_global_variable_operator_write_node evaluate_variable_operator_write
+  alias evaluate_local_variable_operator_write_node evaluate_variable_operator_write
+  alias evaluate_class_variable_operator_write_node evaluate_variable_operator_write
+  alias evaluate_instance_variable_operator_write_node evaluate_variable_operator_write
+
+  def evaluate_variable_and_write(node, scope)
+    right = scope.conditional { evaluate node.value, scope }
+    scope[node.name.to_s] = KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
+  end
+  alias evaluate_global_variable_and_write_node evaluate_variable_and_write
+  alias evaluate_local_variable_and_write_node evaluate_variable_and_write
+  alias evaluate_class_variable_and_write_node evaluate_variable_and_write
+  alias evaluate_instance_variable_and_write_node evaluate_variable_and_write
+
+  def evaluate_variable_or_write(node, scope)
+    left = scope[node.name.to_s] || KatakataIrb::Types::OBJECT
+    right = scope.conditional { evaluate node.value, scope }
+    scope[node.name.to_s] = KatakataIrb::Types::UnionType[left, right]
+  end
+  alias evaluate_global_variable_or_write_node evaluate_variable_or_write
+  alias evaluate_local_variable_or_write_node evaluate_variable_or_write
+  alias evaluate_class_variable_or_write_node evaluate_variable_or_write
+  alias evaluate_instance_variable_or_write_node evaluate_variable_or_write
+
+  def evaluate_constant_operator_write_node(node, scope)
+    left = scope[node.name.to_s] || KatakataIrb::Types::OBJECT
+    right = evaluate node.value, scope
+    scope[node.name.to_s] = simulate_call left, node.operator, [right], nil, nil, scope, name_match: false
+  end
+
+  def evaluate_constant_and_write_node(node, scope)
+    right = scope.conditional { evaluate node.value, scope }
+    scope[node.name.to_s] = KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
+  end
+
+  def evaluate_constant_or_write_node(node, scope)
+    left = scope[node.name.to_s] || KatakataIrb::Types::OBJECT
+    right = scope.conditional { evaluate node.value, scope }
+    scope[node.name.to_s] = KatakataIrb::Types::UnionType[left, right]
+  end
+
+  def evaluate_constant_path_operator_write_node(node, scope)
+    left, receiver, _parent_module, name = evaluate_constant_node_info node.target, scope
+    right = evaluate node.value, scope
+    value = simulate_call left, node.operator, [right], nil, nil, scope, name_match: false
+    const_path_write receiver, name, value, scope
+    value
+  end
+
+  def evaluate_constant_path_and_write_node(node, scope)
+    _left, receiver, _parent_module, name = evaluate_constant_node_info node.target, scope
+    right = scope.conditional { evaluate node.value, scope }
+    value = KatakataIrb::Types::UnionType[right, KatakataIrb::Types::NIL, KatakataIrb::Types::FALSE]
+    const_path_write receiver, name, value, scope
+    value
+  end
+
+  def evaluate_constant_path_or_write_node(node, scope)
+    left, receiver, _parent_module, name = evaluate_constant_node_info node.target, scope
+    right = scope.conditional { evaluate node.value, scope }
+    value = KatakataIrb::Types::UnionType[left, right]
+    const_path_write receiver, name, value, scope
+    value
+  end
+
+  def evaluate_constant_path_write_node(node, scope)
+    receiver = evaluate node.target.parent, scope if node.target.parent
+    value = evaluate node.value, scope
+    const_path_write receiver, node.target.child.name.to_s, value, scope
+    value
+  end
+
+  def evaluate_lambda_node(node, scope)
+    local_table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::OBJECT] }
+    block_scope = KatakataIrb::Scope.new scope, { **local_table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil }
+    block_scope.conditional do |s|
+      assign_parameters node.parameters.parameters, s, [], {} if node.parameters&.parameters
+      evaluate node.body, s if node.body
+    end
+    block_scope.merge_jumps
+    scope.update block_scope
+    KatakataIrb::Types::ProcType.new
+  end
+
+  def evaluate_reference_write(node, scope)
+    scope[node.name.to_s] = evaluate node.value, scope
+  end
+  alias evaluate_constant_write_node evaluate_reference_write
+  alias evaluate_global_variable_write_node evaluate_reference_write
+  alias evaluate_local_variable_write_node evaluate_reference_write
+  alias evaluate_class_variable_write_node evaluate_reference_write
+  alias evaluate_instance_variable_write_node evaluate_reference_write
+
+  def evaluate_multi_write_node(node, scope)
+    evaluated_receivers = {}
+    evaluate_multi_write_receiver node, scope, evaluated_receivers
+    value = (
+      if node.value.is_a? Prism::ArrayNode
+        if node.value.elements.any?(Prism::SplatNode)
+          evaluate node.value, scope
+        else
+          node.value.elements.map do |n|
+            evaluate n, scope
+          end
+        end
+      elsif node.value
+        evaluate node.value, scope
+      else
+        # For syntax invalid code like `(*a).b`
+        KatakataIrb::Types::NIL
+      end
+    )
+    evaluate_multi_write node, value, scope, evaluated_receivers
+  end
+
+  def evaluate_if_node(node, scope) = evaluate_if_unless(node, scope)
+  def evaluate_unless_node(node, scope) = evaluate_if_unless(node, scope)
+  def evaluate_if_unless(node, scope)
+    evaluate node.predicate, scope
+    KatakataIrb::Types::UnionType[*scope.run_branches(
+      -> { node.statements ? evaluate(node.statements, _1) : KatakataIrb::Types::NIL },
+      -> { node.consequent ? evaluate(node.consequent, _1) : KatakataIrb::Types::NIL }
+    )]
+  end
+
+  def evaluate_else_node(node, scope)
+    node.statements ? evaluate(node.statements, scope) : KatakataIrb::Types::NIL
+  end
+
+  def evaluate_while_until(node, scope)
+    inner_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::BREAK_RESULT => nil }
+    evaluate node.predicate, inner_scope
+    if node.statements
+      inner_scope.conditional do |s|
+        evaluate node.statements, s
+      end
+    end
+    inner_scope.merge_jumps
+    scope.update inner_scope
+    breaks = inner_scope[KatakataIrb::Scope::BREAK_RESULT]
+    breaks ? KatakataIrb::Types::UnionType[breaks, KatakataIrb::Types::NIL] : KatakataIrb::Types::NIL
+  end
+  alias evaluate_while_node evaluate_while_until
+  alias evaluate_until_node evaluate_while_until
+
+  def evaluate_break_node(node, scope) = evaluate_jump(node, scope, :break)
+  def evaluate_next_node(node, scope) = evaluate_jump(node, scope, :next)
+  def evaluate_return_node(node, scope) = evaluate_jump(node, scope, :return)
+  def evaluate_jump(node, scope, mode)
+    internal_key = (
+      case mode
+      when :break
+        KatakataIrb::Scope::BREAK_RESULT
+      when :next
+        KatakataIrb::Scope::NEXT_RESULT
+      when :return
+        KatakataIrb::Scope::RETURN_RESULT
+      end
+    )
+    jump_value = (
+      arguments = node.arguments&.arguments
+      if arguments.nil? || arguments.empty?
+        KatakataIrb::Types::NIL
+      elsif arguments.size == 1 && !arguments.first.is_a?(Prism::SplatNode)
+        evaluate arguments.first, scope
+      else
+        KatakataIrb::Types.array_of evaluate_list_splat_items(arguments, scope)
+      end
+    )
+    scope.terminate_with internal_key, jump_value
+    KatakataIrb::Types::NIL
+  end
+
+  def evaluate_yield_node(node, scope)
+    evaluate_list_splat_items node.arguments.arguments, scope if node.arguments
+    KatakataIrb::Types::OBJECT
+  end
+
+  def evaluate_redo_node(_node, scope) = scope.terminate
+  def evaluate_retry_node(_node, scope) = scope.terminate
+
+  def evaluate_forwarding_super_node(_node, _scope) = KatakataIrb::Types::OBJECT
+
+  def evaluate_super_node(node, scope)
+    evaluate_list_splat_items node.arguments.arguments, scope if node.arguments
+    KatakataIrb::Types::OBJECT
+  end
+
+  def evaluate_begin_node(node, scope)
+    return_type = node.statements ? evaluate(node.statements, scope) : KatakataIrb::Types::NIL
+    if node.rescue_clause
+      if node.else_clause
+        return_types = scope.run_branches(
+          ->{ evaluate node.rescue_clause, _1 },
+          ->{ evaluate node.else_clause, _1 }
+        )
+      else
+        return_types = [
+          return_type,
+          scope.conditional { evaluate node.rescue_clause, _1 }
+        ]
+      end
+      return_type = KatakataIrb::Types::UnionType[*return_types]
+    end
+    if node.ensure_clause&.statements
+      # ensure_clause is Prism::EnsureNode
+      evaluate node.ensure_clause.statements, scope
+    end
+    return_type
+  end
+
+  def evaluate_rescue_node(node, scope)
+    run_rescue = lambda do |s|
+      if node.reference
+        error_classes_type = evaluate_list_splat_items node.exceptions, s
+        error_types = error_classes_type.types.filter_map do
+          KatakataIrb::Types::InstanceType.new _1.module_or_class if _1.is_a?(KatakataIrb::Types::SingletonType)
+        end
+        error_types << KatakataIrb::Types::InstanceType.new(StandardError) if error_types.empty?
+        error_type = KatakataIrb::Types::UnionType[*error_types]
+        case node.reference
+        when Prism::LocalVariableTargetNode, Prism::InstanceVariableTargetNode, Prism::ClassVariableTargetNode, Prism::GlobalVariableTargetNode, Prism::ConstantTargetNode
+          s[node.reference.name.to_s] = error_type
+        when Prism::CallNode
+          evaluate node.reference, s
+        end
+      end
+      node.statements ? evaluate(node.statements, s) : KatakataIrb::Types::NIL
+    end
+    if node.consequent # begin; rescue A; rescue B; end
+      types = scope.run_branches(
+        run_rescue,
+        -> { evaluate node.consequent, _1 }
+      )
+      KatakataIrb::Types::UnionType[*types]
+    else
+      run_rescue.call scope
+    end
+  end
+
+  def evaluate_rescue_modifier_node(node, scope)
+    a = evaluate node.expression, scope
+    b = scope.conditional { evaluate node.rescue_expression, _1 }
+    KatakataIrb::Types::UnionType[a, b]
+  end
+
+  def evaluate_singleton_class_node(node, scope)
+    klass_types = evaluate(node.expression, scope).types.filter_map do |type|
+      KatakataIrb::Types::SingletonType.new type.klass if type.is_a? KatakataIrb::Types::InstanceType
+    end
+    klass_types = [KatakataIrb::Types::CLASS] if klass_types.empty?
+    table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
+    sclass_scope = KatakataIrb::Scope.new(
+      scope,
+      { **table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil },
+      trace_ivar: false,
+      trace_lvar: false,
+      self_type: KatakataIrb::Types::UnionType[*klass_types]
+    )
+    result = node.body ? evaluate(node.body, sclass_scope) : KatakataIrb::Types::NIL
+    scope.update sclass_scope
+    result
+  end
+
+  def evaluate_class_node(node, scope) = evaluate_class_module(node, scope, true)
+  def evaluate_module_node(node, scope) = evaluate_class_module(node, scope, false)
+  def evaluate_class_module(node, scope, is_class)
+    unless node.constant_path.is_a?(Prism::ConstantReadNode) || node.constant_path.is_a?(Prism::ConstantPathNode)
+      # Incomplete class/module `class (statement[cursor_here])::Name; end`
+      evaluate node.constant_path, scope
+      return KatakataIrb::Types::NIL
+    end
+    const_type, _receiver, parent_module, name = evaluate_constant_node_info node.constant_path, scope
+    if is_class
+      select_class_type = -> { _1.is_a?(KatakataIrb::Types::SingletonType) && _1.module_or_class.is_a?(Class) }
+      module_types = const_type.types.select(&select_class_type)
+      module_types += evaluate(node.superclass, scope).types.select(&select_class_type) if node.superclass
+      module_types << KatakataIrb::Types::CLASS if module_types.empty?
+    else
+      module_types = const_type.types.select { _1.is_a?(KatakataIrb::Types::SingletonType) && !_1.module_or_class.is_a?(Class) }
+      module_types << KatakataIrb::Types::MODULE if module_types.empty?
+    end
+    return KatakataIrb::Types::NIL unless node.body
+
+    table = node.locals.to_h { [_1.to_s, KatakataIrb::Types::NIL] }
+    if !name.empty? && (parent_module.is_a?(Module) || parent_module.nil?)
+      value = parent_module.const_get name if parent_module&.const_defined? name
+      unless value
+        value_type = scope[name]
+        value = value_type.module_or_class if value_type.is_a? KatakataIrb::Types::SingletonType
+      end
+
+      if value.is_a? Module
+        nesting = [value, []]
+      else
+        if parent_module
+          nesting = [parent_module, [name]]
+        else
+          parent_nesting, parent_path = scope.module_nesting.first
+          nesting = [parent_nesting, parent_path + [name]]
+        end
+        nesting_key = [nesting[0].__id__, nesting[1]].join('::')
+        nesting_value = is_class ? KatakataIrb::Types::CLASS : KatakataIrb::Types::MODULE
+      end
+    else
+      # parent_module == :unknown
+      # TODO: dummy module
+    end
+    module_scope = KatakataIrb::Scope.new(
+      scope,
+      { **table, KatakataIrb::Scope::BREAK_RESULT => nil, KatakataIrb::Scope::NEXT_RESULT => nil, KatakataIrb::Scope::RETURN_RESULT => nil },
+      trace_ivar: false,
+      trace_lvar: false,
+      self_type: KatakataIrb::Types::UnionType[*module_types],
+      nesting: nesting
+    )
+    module_scope[nesting_key] = nesting_value if nesting_value
+    result = evaluate(node.body, module_scope)
+    scope.update module_scope
+    result
+  end
+
+  def evaluate_for_node(node, scope)
+    node.statements
+    collection = evaluate node.collection, scope
+    inner_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::BREAK_RESULT => nil }
+    ary_type = simulate_call collection, :to_ary, [], nil, nil, nil, name_match: false
+    element_types = ary_type.types.filter_map do |ary|
+      ary.params[:Elem] if ary.is_a?(KatakataIrb::Types::InstanceType) && ary.klass == Array
+    end
+    element_type = KatakataIrb::Types::UnionType[*element_types]
+    inner_scope.conditional do |s|
+      evaluate_write node.index, element_type, s, nil
+      evaluate node.statements, s if node.statements
+    end
+    inner_scope.merge_jumps
+    scope.update inner_scope
+    breaks = inner_scope[KatakataIrb::Scope::BREAK_RESULT]
+    breaks ? KatakataIrb::Types::UnionType[breaks, collection] : collection
+  end
+
+  def evaluate_case_node(node, scope)
+    target = evaluate(node.predicate, scope) if node.predicate
+    # TODO
+    branches = node.conditions.map do |condition|
+      ->(s) { evaluate_case_match target, condition, s }
+    end
+    if node.consequent
+      branches << ->(s) { evaluate node.consequent, s }
+    elsif node.conditions.any? { _1.is_a? Prism::WhenNode }
+      branches << ->(_s) { KatakataIrb::Types::NIL }
+    end
+    KatakataIrb::Types::UnionType[*scope.run_branches(*branches)]
+  end
+
+  def evaluate_match_required_node(node, scope)
+    value_type = evaluate node.value, scope
+    evaluate_match_pattern value_type, node.pattern, scope
+    KatakataIrb::Types::NIL # void value
+  end
+
+  def evaluate_match_predicate_node(node, scope)
+    value_type = evaluate node.value, scope
+    scope.conditional { evaluate_match_pattern value_type, node.pattern, _1 }
+    KatakataIrb::Types::BOOLEAN
+  end
+
+  def evaluate_range_node(node, scope)
+    beg_type = evaluate node.left, scope if node.left
+    end_type = evaluate node.right, scope if node.right
+    elem = (KatakataIrb::Types::UnionType[*[beg_type, end_type].compact]).nonnillable
+    KatakataIrb::Types::InstanceType.new Range, Elem: elem
+  end
+
+  def evaluate_defined_node(node, scope)
+    scope.conditional { evaluate node.value, _1 }
+    KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL]
+  end
+
+  def evaluate_flip_flop_node(node, scope)
+    scope.conditional { evaluate node.left, _1 } if node.left
+    scope.conditional { evaluate node.right, _1 } if node.right
+    KatakataIrb::Types::BOOLEAN
+  end
+
+  def evaluate_multi_target_node(node, scope)
+    # Raw MultiTargetNode, incomplete code like `a,b`, `*a`.
+    evaluate_multi_write_receiver node, scope, nil
+    KatakataIrb::Types::NIL
+  end
+
+  def evaluate_implicit_node(node, scope)
+    evaluate node.value, scope
+  end
+
+  def evaluate_match_write_node(node, scope)
+    # /(?<a>)(?<b>)/ =~ string
+    evaluate node.call, scope
+    node.locals.each { scope[_1.to_s] = KatakataIrb::Types::UnionType[KatakataIrb::Types::STRING, KatakataIrb::Types::NIL] }
+    KatakataIrb::Types::BOOLEAN
+  end
+
+  def evaluate_match_last_line_node(_node, _scope)
+    KatakataIrb::Types::BOOLEAN
+  end
+
+  def evaluate_interpolated_match_last_line_node(node, scope)
+    node.parts.each { evaluate _1, scope }
+    KatakataIrb::Types::BOOLEAN
+  end
+
+  def evaluate_pre_execution_node(node, scope)
+    node.statements ? evaluate(node.statements, scope) : KatakataIrb::Types::NIL
+  end
+
+  def evaluate_post_execution_node(node, scope)
+    node.statements && @dig_targets.dig?(node.statements) ? evaluate(node.statements, scope) : KatakataIrb::Types::NIL
+  end
+
+  def evaluate_alias_method_node(_node, _scope) = KatakataIrb::Types::NIL
+  def evaluate_alias_global_variable_node(_node, _scope) = KatakataIrb::Types::NIL
+  def evaluate_undef_node(_node, _scope) = KatakataIrb::Types::NIL
+  def evaluate_missing_node(_node, _scope) = KatakataIrb::Types::NIL
 
   def evaluate_call_node_arguments(call_node, scope)
     # call_node.arguments is Prism::ArgumentsNode
@@ -670,7 +831,7 @@ class KatakataIrb::TypeSimulator
     end
   end
 
-  def evaluate_constant_node(node, scope)
+  def evaluate_constant_node_info(node, scope)
     case node
     when Prism::ConstantPathNode
       name = node.child.name.to_s
