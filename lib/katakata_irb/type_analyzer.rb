@@ -5,7 +5,7 @@ require_relative 'types'
 require_relative 'scope'
 require 'prism'
 
-class KatakataIrb::TypeSimulator
+class KatakataIrb::TypeAnalyzer
   class DigTarget
     def initialize(parents, receiver, &block)
       @dig_ids = parents.to_h { [_1.__id__, true] }
@@ -174,7 +174,7 @@ class KatakataIrb::TypeSimulator
       when Prism::AssocSplatNode
         hash = evaluate assoc.value, scope
         unless hash.is_a?(KatakataIrb::Types::InstanceType) && hash.klass == Hash
-          hash = simulate_call hash, :to_hash, [], nil, nil, scope
+          hash = method_call hash, :to_hash, [], nil, nil, scope
         end
         if hash.is_a?(KatakataIrb::Types::InstanceType) && hash.klass == Hash
           keys << hash.params[:K] if hash.params[:K]
@@ -248,7 +248,7 @@ class KatakataIrb::TypeSimulator
         else
           call_block_proc = ->(block_args, _self_type) do
             block_receiver, *rest = block_args
-            block_receiver ? simulate_call(block_receiver || KatakataIrb::Types::OBJECT, block_sym, rest, nil, nil, scope) : KatakataIrb::Types::OBJECT
+            block_receiver ? method_call(block_receiver || KatakataIrb::Types::OBJECT, block_sym, rest, nil, nil, scope) : KatakataIrb::Types::OBJECT
           end
         end
       elsif node.block.is_a? Prism::BlockNode
@@ -280,7 +280,7 @@ class KatakataIrb::TypeSimulator
       elsif has_block
         call_block_proc = ->(_block_args, _self_type) { KatakataIrb::Types::OBJECT }
       end
-      simulate_call receiver_type, node.name, args_types, kwargs_types, call_block_proc, scope
+      method_call receiver_type, node.name, args_types, kwargs_types, call_block_proc, scope
     end
     if node.call_operator == '&.'
       result = scope.conditional { evaluate_method.call _1 }
@@ -316,13 +316,13 @@ class KatakataIrb::TypeSimulator
       block_sym = block_sym_node.value
       call_block_proc = ->(block_args, _self_type) do
         block_receiver, *rest = block_args
-        block_receiver ? simulate_call(block_receiver || KatakataIrb::Types::OBJECT, block_sym, rest, nil, nil, scope) : KatakataIrb::Types::OBJECT
+        block_receiver ? method_call(block_receiver || KatakataIrb::Types::OBJECT, block_sym, rest, nil, nil, scope) : KatakataIrb::Types::OBJECT
       end
     elsif has_block
       call_block_proc = ->(_block_args, _self_type) { KatakataIrb::Types::OBJECT }
     end
     method = node.write_name.to_s.delete_suffix('=')
-    left = simulate_call receiver_type, method, args_types, kwargs_types, call_block_proc, scope
+    left = method_call receiver_type, method, args_types, kwargs_types, call_block_proc, scope
     case operator
     when :and
       right = scope.conditional { evaluate node.value, _1 }
@@ -332,14 +332,14 @@ class KatakataIrb::TypeSimulator
       KatakataIrb::Types::UnionType[left, right]
     else
       right = evaluate node.value, scope
-      simulate_call left, node.operator, [right], nil, nil, scope, name_match: false
+      method_call left, node.operator, [right], nil, nil, scope, name_match: false
     end
   end
 
   def evaluate_variable_operator_write(node, scope)
     left = scope[node.name.to_s] || KatakataIrb::Types::OBJECT
     right = evaluate node.value, scope
-    scope[node.name.to_s] = simulate_call left, node.operator, [right], nil, nil, scope, name_match: false
+    scope[node.name.to_s] = method_call left, node.operator, [right], nil, nil, scope, name_match: false
   end
   alias evaluate_global_variable_operator_write_node evaluate_variable_operator_write
   alias evaluate_local_variable_operator_write_node evaluate_variable_operator_write
@@ -368,7 +368,7 @@ class KatakataIrb::TypeSimulator
   def evaluate_constant_operator_write_node(node, scope)
     left = scope[node.name.to_s] || KatakataIrb::Types::OBJECT
     right = evaluate node.value, scope
-    scope[node.name.to_s] = simulate_call left, node.operator, [right], nil, nil, scope, name_match: false
+    scope[node.name.to_s] = method_call left, node.operator, [right], nil, nil, scope, name_match: false
   end
 
   def evaluate_constant_and_write_node(node, scope)
@@ -385,7 +385,7 @@ class KatakataIrb::TypeSimulator
   def evaluate_constant_path_operator_write_node(node, scope)
     left, receiver, _parent_module, name = evaluate_constant_node_info node.target, scope
     right = evaluate node.value, scope
-    value = simulate_call left, node.operator, [right], nil, nil, scope, name_match: false
+    value = method_call left, node.operator, [right], nil, nil, scope, name_match: false
     const_path_write receiver, name, value, scope
     value
   end
@@ -675,7 +675,7 @@ class KatakataIrb::TypeSimulator
     node.statements
     collection = evaluate node.collection, scope
     inner_scope = KatakataIrb::Scope.new scope, { KatakataIrb::Scope::BREAK_RESULT => nil }
-    ary_type = simulate_call collection, :to_ary, [], nil, nil, nil, name_match: false
+    ary_type = method_call collection, :to_ary, [], nil, nil, nil, name_match: false
     element_types = ary_type.types.filter_map do |ary|
       ary.params[:Elem] if ary.is_a?(KatakataIrb::Types::InstanceType) && ary.klass == Array
     end
@@ -1089,7 +1089,7 @@ class KatakataIrb::TypeSimulator
   def partition_to_array(value, method)
     arrays, non_arrays = value.types.partition { _1.is_a?(KatakataIrb::Types::InstanceType) && _1.klass == Array }
     non_arrays.select! do |type|
-      to_array_result = simulate_call type, method, [], nil, nil, nil, name_match: false
+      to_array_result = method_call type, method, [], nil, nil, nil, name_match: false
       if to_array_result.is_a?(KatakataIrb::Types::InstanceType) && to_array_result.klass == Array
         arrays << to_array_result
         false
@@ -1102,7 +1102,7 @@ class KatakataIrb::TypeSimulator
     [array_elem, non_array]
   end
 
-  def simulate_call(receiver, method_name, args, kwargs, block, scope, name_match: true)
+  def method_call(receiver, method_name, args, kwargs, block, scope, name_match: true)
     methods = KatakataIrb::Types.rbs_methods receiver, method_name.to_sym, args, kwargs, !!block
     block_called = false
     type_breaks = methods.map do |method, given_params, method_params|
