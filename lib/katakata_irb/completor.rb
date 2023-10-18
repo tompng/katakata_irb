@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative 'type_simulator'
+require_relative 'type_analyzer'
 require 'irb'
 require 'prism'
 
@@ -221,8 +221,8 @@ module KatakataIrb::Completor
     *parents, target_node = find_target ast, code.bytesize - name.bytesize
     return unless target_node
 
-    calculate_scope = -> { KatakataIrb::TypeSimulator.calculate_target_type_scope(binding, parents, target_node).last }
-    calculate_type_scope = ->(node) { KatakataIrb::TypeSimulator.calculate_target_type_scope binding, [*parents, target_node], node }
+    calculate_scope = -> { KatakataIrb::TypeAnalyzer.calculate_target_type_scope(binding, parents, target_node).last }
+    calculate_type_scope = ->(node) { KatakataIrb::TypeAnalyzer.calculate_target_type_scope binding, [*parents, target_node], node }
 
     if target_node.is_a?(Prism::StringNode) || target_node.is_a?(Prism::InterpolatedStringNode)
       args_node = parents[-1]

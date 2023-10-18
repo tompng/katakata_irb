@@ -9,7 +9,7 @@ class TestKatakataIrb < Minitest::Test
   def test_analyze_does_not_raise_error
     verbose, $VERBOSE = $VERBOSE, nil
     original_output = KatakataIrb.log_output
-    KatakataIrb::TypeSimulator::DigTarget.class_eval do
+    KatakataIrb::TypeAnalyzer::DigTarget.class_eval do
       alias_method :original_dig?, :dig?
       def dig?(node) = !!node
     end
@@ -28,7 +28,7 @@ class TestKatakataIrb < Minitest::Test
   ensure
     $VERBOSE = verbose
     KatakataIrb.log_output = original_output
-    KatakataIrb::TypeSimulator::DigTarget.class_eval do
+    KatakataIrb::TypeAnalyzer::DigTarget.class_eval do
       undef_method :dig?
       alias_method :dig?, :original_dig?
     end
@@ -53,7 +53,7 @@ class TestKatakataIrb < Minitest::Test
   end
 
   def test_prism_node_names
-    files = %w[type_simulator.rb completor.rb]
+    files = %w[type_analyzer.rb completor.rb]
     codes = files.map do |file|
       File.read File.join(File.dirname(__FILE__), '../lib/katakata_irb', file)
     end
