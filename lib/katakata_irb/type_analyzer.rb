@@ -306,12 +306,20 @@ class KatakataIrb::TypeAnalyzer
     end
   end
 
-  def evaluate_call_operator_write_node(node, scope) = evaluate_call_write(node, scope, :operator)
-  def evaluate_call_and_write_node(node, scope) = evaluate_call_write(node, scope, :and)
-  def evaluate_call_or_write_node(node, scope) = evaluate_call_write(node, scope, :or)
-  def evaluate_call_write(node, scope, operator)
+  def evaluate_call_operator_write_node(node, scope) = evaluate_call_write(node, scope, :operator, node.write_name)
+  def evaluate_call_and_write_node(node, scope) = evaluate_call_write(node, scope, :and, node.write_name)
+  def evaluate_call_or_write_node(node, scope) = evaluate_call_write(node, scope, :or, node.write_name)
+  def evaluate_index_operator_write_node(node, scope) = evaluate_call_write(node, scope, :operator, :[]=)
+  def evaluate_index_and_write_node(node, scope) = evaluate_call_write(node, scope, :and, :[]=)
+  def evaluate_index_or_write_node(node, scope) = evaluate_call_write(node, scope, :or, :[]=)
+  def evaluate_call_write(node, scope, operator, write_name)
     receiver_type = evaluate node.receiver, scope
-    args_types, kwargs_types, block_sym_node, has_block = evaluate_call_node_arguments node, scope
+    if node.respond_to? :arguments
+      # Prism >= 0.15.0, Call{Operator,And,Or}WriteNode does not have arguments
+      args_types, kwargs_types, block_sym_node, has_block = evaluate_call_node_arguments node, scope
+    else
+      args_types = []
+    end
     if block_sym_node
       block_sym = block_sym_node.value
       call_block_proc = ->(block_args, _self_type) do
@@ -321,7 +329,7 @@ class KatakataIrb::TypeAnalyzer
     elsif has_block
       call_block_proc = ->(_block_args, _self_type) { KatakataIrb::Types::OBJECT }
     end
-    method = node.write_name.to_s.delete_suffix('=')
+    method = write_name.to_s.delete_suffix('=')
     left = method_call receiver_type, method, args_types, kwargs_types, call_block_proc, scope
     case operator
     when :and
