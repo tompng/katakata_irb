@@ -137,6 +137,7 @@ class TestTypeAnalyze < Minitest::Test
   end
 
   def test_local_variable_assign
+    assert_call('(a = 1).', include: Integer)
     assert_call('a = 1; a = ""; a.', include: String, exclude: Integer)
     assert_call('1 => a; a.', include: Integer)
   end
@@ -293,6 +294,7 @@ class TestTypeAnalyze < Minitest::Test
   end
 
   def test_massign
+    assert_call('(a,b,c=1).', include: Integer)
     assert_call('a,=[1,2]; a.', include: Integer, exclude: Array)
     assert_call('a,b=[1,2]; a.', include: Integer, exclude: Array)
     assert_call('a,b=[1,2]; b.', include: Integer, exclude: Array)
