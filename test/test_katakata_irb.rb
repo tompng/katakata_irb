@@ -57,7 +57,10 @@ class TestKatakataIrb < Minitest::Test
     codes = files.map do |file|
       File.read File.join(File.dirname(__FILE__), '../lib/katakata_irb', file)
     end
-    implemented_node_class_names = codes.join.scan(/Prism::[A-Za-z]+Node/).uniq.sort
+    implemented_node_class_names = [
+      *codes.join.scan(/evaluate_[a-z_]+/).grep(/_node$/).map { "Prism::#{_1[9..].split('_').map(&:capitalize).join}" },
+      *codes.join.scan(/Prism::[A-Za-z]+Node/)
+    ].uniq.sort
     ignore_class_names = ['Prism::BlockLocalVariableNode']
     all_node_class_names = Prism.constants.grep(/Node$/).map { "Prism::#{_1}" }.sort - ['Prism::Node'] - ignore_class_names
     assert_empty implemented_node_class_names - all_node_class_names
