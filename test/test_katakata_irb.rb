@@ -53,7 +53,7 @@ class TestKatakataIrb < Minitest::Test
   end
 
   def test_prism_node_names
-    files = %w[type_simulator.rb completor.rb]
+    files = %w[type_analyzer.rb completor.rb]
     codes = files.map do |file|
       File.read File.join(File.dirname(__FILE__), '../lib/katakata_irb', file)
     end

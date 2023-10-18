@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative 'type_simulator'
+require_relative 'type_analyzer'
 require 'irb'
 require 'prism'
 
