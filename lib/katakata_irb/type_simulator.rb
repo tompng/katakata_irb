@@ -454,6 +454,7 @@ class KatakataIrb::TypeSimulator
       end
     )
     evaluate_multi_write node, value, scope, evaluated_receivers
+    value
   end
 
   def evaluate_if_node(node, scope) = evaluate_if_unless(node, scope)
