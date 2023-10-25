@@ -330,6 +330,16 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('(a=1).b, a.', include: Integer)
   end
 
+  def test_field_assign
+    assert_call('(a.!=1).', exclude: Integer)
+    assert_call('(a.b=1).', include: Integer, exclude: NilClass)
+    assert_call('(a&.b=1).', include: Integer)
+    assert_call('(nil&.b=1).', include: NilClass)
+    assert_call('(a[]=1).', include: Integer)
+    assert_call('(a[b]=1).', include: Integer)
+    assert_call('(a.[]=1).', exclude: Integer)
+  end
+
   def test_def
     assert_call('def f; end.', include: Symbol)
     assert_call('s=""; def s.f; self.', include: String)
@@ -340,6 +350,7 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('def f(a,x:1); x.', include: Integer)
     assert_call('def f(a,x:,**); 1.', include: Integer)
     assert_call('def f(a,x:,**y); y.', include: Hash)
+    assert_call('def f((*a)); a.', include: Array)
     assert_call('def f(a,b=1,*c,d,x:0,y:,**z,&e); e.arity.', include: Integer)
     assert_call('def f(...); 1.', include: Integer)
     assert_call('def f(a,...); 1.', include: Integer)
@@ -487,6 +498,8 @@ class TestTypeAnalyze < Minitest::Test
   end
 
   def test_hash
+    assert_call('{}.', include: Hash)
+    assert_call('{**a}.', include: Hash)
     assert_call('{ rand: }.values.sample.', include: Float)
     assert_call('rand=""; { rand: }.values.sample.', include: String, exclude: Float)
     assert_call('{ 1 => 1.0 }.keys.sample.', include: Integer, exclude: Float)
@@ -636,6 +649,7 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('f(a,*b,c:(x=1),**d,&e); x.', include: Integer)
     assert_call('f(a,*b,c:1,**(x=1),&e); x.', include: Integer)
     assert_call('f(a,*b,c:1,**d,&(x=1)); x.', include: Integer)
+    assert_call('f((x=1)=>1); x.', include: Integer)
   end
 
   def test_block_args
