@@ -932,13 +932,7 @@ class KatakataIrb::TypeAnalyzer
     return if numbered_parameters.empty?
     max_num = numbered_parameters.map { _1[1].to_i }.max
     if max_num == 1
-      if args.size == 0
-        scope['_1'] = KatakataIrb::Types::NIL
-      elsif args.size == 1
-        scope['_1'] = args.first
-      else
-        scope['_1'] = KatakataIrb::Types.array_of(*args)
-      end
+      scope['_1'] = args.first || KatakataIrb::Types::NIL
     else
       args = sized_splat(args.first, :to_ary, max_num) if args.size == 1
       numbered_parameters.each do |name|

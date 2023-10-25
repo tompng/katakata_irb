@@ -518,9 +518,12 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('loop{_1.', include: NilClass)
     assert_call('1.tap{_1.', include: Integer)
     assert_call('1.tap{_3.', include: NilClass, exclude: Integer)
-    assert_call('[:a].each_with_index{_1.', include: Array)
-    assert_call('[:a].each_with_index{_2; _1.', include: Symbol)
-    assert_call('[:a].each_with_index{_2.', include: Integer)
+    assert_call('[:a,1].tap{_1.', include: Array, exclude: [Integer, Symbol])
+    assert_call('[:a,1].tap{_2.', include: [Symbol, Integer], exclude: Array)
+    assert_call('[:a,1].tap{_2; _1.', include: [Symbol, Integer], exclude: Array)
+    assert_call('[:a].each_with_index{_1.', include: Symbol, exclude: [Integer, Array])
+    assert_call('[:a].each_with_index{_2; _1.', include: Symbol, exclude: [Integer, Array])
+    assert_call('[:a].each_with_index{_2.', include: Integer, exclude: Symbol)
   end
 
   def test_if_unless
