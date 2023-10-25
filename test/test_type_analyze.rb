@@ -330,6 +330,16 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('(a=1).b, a.', include: Integer)
   end
 
+  def test_field_assign
+    assert_call('(a.!=1).', exclude: Integer)
+    assert_call('(a.b=1).', include: Integer, exclude: NilClass)
+    assert_call('(a&.b=1).', include: Integer)
+    assert_call('(nil&.b=1).', include: NilClass)
+    assert_call('(a[]=1).', include: Integer)
+    assert_call('(a[b]=1).', include: Integer)
+    assert_call('(a.[]=1).', exclude: Integer)
+  end
+
   def test_def
     assert_call('def f; end.', include: Symbol)
     assert_call('s=""; def s.f; self.', include: String)
