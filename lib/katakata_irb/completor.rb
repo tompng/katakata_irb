@@ -224,15 +224,18 @@ module KatakataIrb::Completor
     calculate_scope = -> { KatakataIrb::TypeAnalyzer.calculate_target_type_scope(binding, parents, target_node).last }
     calculate_type_scope = ->(node) { KatakataIrb::TypeAnalyzer.calculate_target_type_scope binding, [*parents, target_node], node }
 
-    if target_node.is_a?(Prism::StringNode) || target_node.is_a?(Prism::InterpolatedStringNode)
-      args_node = parents[-1]
-      call_node = parents[-2]
-      return unless args_node.is_a?(Prism::ArgumentsNode) && args_node.arguments.size == 1
-      return unless call_node.is_a?(Prism::CallNode) && call_node.receiver.nil? && (call_node.message == 'require' || call_node.message == 'require_relative')
-      return [call_node.message.to_sym, name.rstrip]
-    end
-
     case target_node
+    when Prism::StringNode, Prism::InterpolatedStringNode
+      call_node, args_node = parents.last(2)
+      return unless call_node.is_a?(Prism::CallNode) && call_node.receiver.nil?
+      return unless args_node.is_a?(Prism::ArgumentsNode) && args_node.arguments.size == 1
+
+      case call_node.name
+      when :require
+        [:require, name.rstrip]
+      when :require_relative
+        [:require_relative, name.rstrip]
+      end
     when Prism::SymbolNode
       if parents.last.is_a? Prism::BlockArgumentNode # method(&:target)
         receiver_type, _scope = calculate_type_scope.call target_node
