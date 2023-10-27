@@ -354,6 +354,8 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('def f(a,b=1,*c,d,x:0,y:,**z,&e); e.arity.', include: Integer)
     assert_call('def f(...); 1.', include: Integer)
     assert_call('def f(a,...); 1.', include: Integer)
+    assert_call('def f(...); g(...); 1.', include: Integer)
+    assert_call('def f(*,**,&); g(*,**,&); 1.', include: Integer)
     assert_call('class Array; def f; self.', include: Array)
   end
 
