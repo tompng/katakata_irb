@@ -797,7 +797,7 @@ class KatakataIrb::TypeAnalyzer
         # `f(a, ...)` treat like splat
         nil
       when Prism::SplatNode
-        evaluate arg.expression, scope
+        evaluate arg.expression, scope if arg.expression
         nil # TODO: splat
       else
         evaluate arg, scope
@@ -815,7 +815,7 @@ class KatakataIrb::TypeAnalyzer
             nil
           end
         when Prism::AssocSplatNode
-          evaluate arg.value, scope
+          evaluate arg.value, scope if arg.value
           nil
         end
       end.compact.to_h
