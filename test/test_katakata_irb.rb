@@ -60,8 +60,6 @@ class TestKatakataIrb < Minitest::Test
     ignore_class_names = [
       # Not traversed
       'Prism::BlockLocalVariableNode',
-      # Added in prism 0.15.0
-      'Prism::IndexAndWriteNode', 'Prism::IndexOperatorWriteNode', 'Prism::IndexOrWriteNode',
       # Removed in prism > 0.15.1
       'Prism::RequiredDestructuredParameterNode'
     ]

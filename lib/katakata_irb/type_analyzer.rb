@@ -319,8 +319,7 @@ class KatakataIrb::TypeAnalyzer
   def evaluate_index_or_write_node(node, scope) = evaluate_call_write(node, scope, :or, :[]=)
   def evaluate_call_write(node, scope, operator, write_name)
     receiver_type = evaluate node.receiver, scope
-    if node.respond_to? :arguments
-      # Prism >= 0.15.0, Call{Operator,And,Or}WriteNode does not have arguments
+    if write_name == :[]=
       args_types, kwargs_types, block_sym_node, has_block = evaluate_call_node_arguments node, scope
     else
       args_types = []
@@ -795,7 +794,7 @@ class KatakataIrb::TypeAnalyzer
   def evaluate_call_node_arguments(call_node, scope)
     # call_node.arguments is Prism::ArgumentsNode
     arguments = call_node.arguments&.arguments&.dup || []
-    block_arg = call_node.block.expression if call_node.respond_to?(:block) && call_node.block.is_a?(Prism::BlockArgumentNode)
+    block_arg = call_node.block.expression if call_node.block.is_a?(Prism::BlockArgumentNode)
     kwargs = arguments.pop.elements if arguments.last.is_a?(Prism::KeywordHashNode)
     args_types = arguments.map do |arg|
       case arg
