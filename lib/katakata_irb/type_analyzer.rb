@@ -753,6 +753,12 @@ class KatakataIrb::TypeAnalyzer
     KatakataIrb::Types::NIL
   end
 
+  def evaluate_splat_node(node, scope)
+    # Raw SplatNode, incomplete code like `*a.`
+    evaluate_multi_write_receiver node.expression, scope, nil if node.expression
+    KatakataIrb::Types::NIL
+  end
+
   def evaluate_implicit_node(node, scope)
     evaluate node.value, scope
   end
@@ -838,15 +844,21 @@ class KatakataIrb::TypeAnalyzer
   end
 
   def assign_required_parameter(node, value, scope)
-    case node
-    when Prism::RequiredParameterNode
+    case node.type
+    when :required_parameter_node
       scope[node.name.to_s] = value || KatakataIrb::Types::OBJECT
-    when Prism::RequiredDestructuredParameterNode
+    when :required_destructured_parameter_node # Revmoed in prism > 0.15.1
       values = value ? sized_splat(value, :to_ary, node.parameters.size) : []
       node.parameters.zip values do |n, v|
         assign_required_parameter n, v, scope
       end
-    when Prism::SplatNode
+    when :multi_target_node # Added to parameters in prism > 0.15.1
+      parameters = [*node.lefts, *node.rest, *node.rights]
+      values = value ? sized_splat(value, :to_ary, parameters.size) : []
+      parameters.zip values do |n, v|
+        assign_required_parameter n, v, scope
+      end
+    when :splat_node
       splat_value = value ? KatakataIrb::Types.array_of(value) : KatakataIrb::Types::ARRAY
       assign_required_parameter node.expression, splat_value, scope
     end
@@ -886,7 +898,7 @@ class KatakataIrb::TypeAnalyzer
     args = sized_splat(args.first, :to_ary, size) if size >= 2 && args.size == 1
     reqs = args.shift node.requireds.size
     if node.rest
-      # node.rest.class is Prism::RestParameterNode
+      # node.rest is Prism::RestParameterNode
       posts = []
       opts = args.shift node.optionals.size
       rest = args
@@ -975,7 +987,13 @@ class KatakataIrb::TypeAnalyzer
       KatakataIrb::Types::ARRAY
     when Prism::HashPatternNode
       # TODO
-      pattern.assocs.each { evaluate_match_pattern KatakataIrb::Types::OBJECT, _1, scope }
+      # assocs changed to elements in prism > 0.15.1
+      elements = pattern.respond_to?(:assocs) ? pattern.assocs : pattern.elements
+      elements.each { evaluate_match_pattern KatakataIrb::Types::OBJECT, _1, scope }
+      if pattern.respond_to?(:rest) && pattern.rest # prism > 0.15.1
+        # pattern.rest was included in pattern.assocs until prism <= 0.15.1
+        evaluate_match_pattern KatakataIrb::Types::OBJECT, pattern.rest, scope
+      end
       KatakataIrb::Types::HASH
     when Prism::AssocNode
       evaluate_match_pattern value, pattern.value, scope if pattern.value
@@ -1032,20 +1050,23 @@ class KatakataIrb::TypeAnalyzer
   end
 
   def evaluate_multi_write(node, values, scope, evaluated_receivers)
-    values = sized_splat values, :to_ary, node.targets.size unless values.is_a? Array
-    splat_index = node.targets.find_index { _1.is_a? Prism::SplatNode }
-    if splat_index
-      pre_targets = node.targets[0...splat_index]
-      splat_target = node.targets[splat_index]
-      post_targets = node.targets[splat_index + 1..]
-      pre_values = values.shift pre_targets.size
-      post_values = values.pop post_targets.size
-      splat_value = KatakataIrb::Types::UnionType[*values]
-      zips = pre_targets.zip(pre_values) + [[splat_target, splat_value]] + post_targets.zip(post_values)
-    else
-      zips = node.targets.zip(values)
+    if node.respond_to? :targets # prism <= 0.15.1
+      splat_index = node.targets.find_index { _1.is_a? Prism::SplatNode }
+      pre_targets = splat_index ? node.targets[0...splat_index] : node.targets
+      splat_target = node.targets[splat_index] if splat_index
+      post_targets = splat_index ? node.targets[splat_index + 1..] : []
+      size = node.targets.size
+    else # prism > 0.15.1
+      pre_targets = node.lefts
+      splat_target = node.rest
+      post_targets = node.rights
+      size = pre_targets.size + (splat_target ? 1 : 0) + post_targets.size
     end
-    zips.each do |target, value|
+    values = values.is_a?(Array) ? values.dup : sized_splat(values, :to_ary, size)
+    pre_pairs = pre_targets.zip(values.shift(pre_targets.size))
+    post_pairs = post_targets.zip(values.pop(post_targets.size))
+    splat_pairs = splat_target ? [[splat_target, KatakataIrb::Types::UnionType[*values]]] : []
+    (pre_pairs + splat_pairs + post_pairs).each do |target, value|
       evaluate_write target, value || KatakataIrb::Types::NIL, scope, evaluated_receivers
     end
   end
@@ -1053,7 +1074,9 @@ class KatakataIrb::TypeAnalyzer
   def evaluate_multi_write_receiver(node, scope, evaluated_receivers)
     case node
     when Prism::MultiWriteNode, Prism::MultiTargetNode
-      node.targets.each { evaluate_multi_write_receiver _1, scope, evaluated_receivers }
+      # prism <= 0.15.1 has targets, prism > 0.15.1 has lefts, rest, rights
+      targets = node.respond_to?(:targets) ? node.targets : [*node.lefts, *node.rest, *node.rights]
+      targets.each { evaluate_multi_write_receiver _1, scope, evaluated_receivers }
     when Prism::CallNode
       if node.receiver
         receiver = evaluate(node.receiver, scope)

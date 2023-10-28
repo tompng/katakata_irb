@@ -57,9 +57,17 @@ class TestKatakataIrb < Minitest::Test
     codes = files.map do |file|
       File.read File.join(File.dirname(__FILE__), '../lib/katakata_irb', file)
     end
-    ignore_class_names = ['Prism::BlockLocalVariableNode', 'Prism::IndexAndWriteNode', 'Prism::IndexOperatorWriteNode', 'Prism::IndexOrWriteNode']
+    ignore_class_names = [
+      # Not traversed
+      'Prism::BlockLocalVariableNode',
+      # Added in prism 0.15.0
+      'Prism::IndexAndWriteNode', 'Prism::IndexOperatorWriteNode', 'Prism::IndexOrWriteNode',
+      # Removed in prism > 0.15.1
+      'Prism::RequiredDestructuredParameterNode'
+    ]
     implemented_node_class_names = [
       *codes.join.scan(/evaluate_[a-z_]+/).grep(/_node$/).map { "Prism::#{_1[9..].split('_').map(&:capitalize).join}" },
+      *codes.join.scan(/:[a-z_]+_node/).map { "Prism::#{_1[1..].split('_').map(&:capitalize).join}" },
       *codes.join.scan(/Prism::[A-Za-z]+Node/)
     ].uniq.sort - ignore_class_names
     all_node_class_names = Prism.constants.grep(/Node$/).map { "Prism::#{_1}" }.sort - ['Prism::Node'] - ignore_class_names

@@ -346,7 +346,7 @@ class TestTypeAnalyze < Minitest::Test
     assert_call('def (a="").f; end; a.', include: String)
     assert_call('def f(a=1); a.', include: Integer)
     assert_call('def f(**nil); 1.', include: Integer)
-    assert_call('def f(a,*b); *b.', include: Array)
+    assert_call('def f(a,*b); b.', include: Array)
     assert_call('def f(a,x:1); x.', include: Integer)
     assert_call('def f(a,x:,**); 1.', include: Integer)
     assert_call('def f(a,x:,**y); y.', include: Hash)
