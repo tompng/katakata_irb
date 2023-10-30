@@ -102,8 +102,6 @@ module KatakataIrb::Completor
             return KatakataIrb::Types.class_name_of(t.module_or_class)
           when KatakataIrb::Types::InstanceType
             return KatakataIrb::Types.class_name_of(t.klass)
-          when KatakataIrb::Types::ProcType
-            return 'Proc'
           end
         end
         nil
@@ -290,8 +288,7 @@ module KatakataIrb::Completor
     )
     return [node] if location&.start_offset == position
 
-    node.child_nodes.each do |n|
-      next unless n.is_a? Prism::Node
+    node.compact_child_nodes.each do |n|
       match = find_target(n, position)
       next unless match
       match.unshift node

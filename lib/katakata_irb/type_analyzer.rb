@@ -434,7 +434,7 @@ class KatakataIrb::TypeAnalyzer
     end
     block_scope.merge_jumps
     scope.update block_scope
-    KatakataIrb::Types::ProcType.new
+    KatakataIrb::Types::PROC
   end
 
   def evaluate_reference_write(node, scope)
