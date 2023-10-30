@@ -337,6 +337,7 @@ class TestTypeAnalyze < Minitest::Test
     # incomplete massign
     assert_analyze_type('a,b', :lvar_or_method, 'b')
     assert_call('(a=1).b, a.', include: Integer)
+    assert_call('a=1; *a.', include: Integer)
   end
 
   def test_field_assign
