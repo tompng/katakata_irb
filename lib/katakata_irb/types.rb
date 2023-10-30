@@ -47,8 +47,6 @@ module KatakataIrb::Types
   def self.method_return_type(type, method_name)
     receivers = type.types.map do |t|
       case t
-      in ProcType
-        [t, Proc, false]
       in SingletonType
         [t, t.module_or_class, true]
       in InstanceType
@@ -70,8 +68,6 @@ module KatakataIrb::Types
 
     receivers = type.types.map do |t|
       case t
-      in ProcType
-        [t, Proc, false]
       in SingletonType
         [t, t.module_or_class, true]
       in InstanceType
@@ -125,7 +121,6 @@ module KatakataIrb::Types
   def self.intersect?(a, b)
     atypes = a.types.group_by(&:class)
     btypes = b.types.group_by(&:class)
-    return true if atypes[ProcType] && btypes[ProcType]
     if atypes[SingletonType] && btypes[SingletonType]
       aa, bb = [atypes, btypes].map {|types| types[SingletonType].map(&:module_or_class) }
       return true if (aa & bb).any?
@@ -233,23 +228,6 @@ module KatakataIrb::Types
     end
   end
 
-  class ProcType
-    attr_reader :params, :kwparams, :return_type
-    def initialize(params = [], kwparams = {}, return_type = NIL)
-      @params = params
-      @kwparams = kwparams
-      @return_type = return_type
-    end
-    def transform() = yield(self)
-    def methods() = Proc.instance_methods
-    def all_methods() = Proc.instance_methods | Proc.private_instance_methods
-    def constants() = []
-    def types() = [self]
-    def nillable?() = (@klass == NilClass)
-    def nonnillable() = self
-    def inspect() = 'Proc'
-  end
-
   NIL = InstanceType.new NilClass
   OBJECT = InstanceType.new Object
   TRUE = InstanceType.new TrueClass
@@ -266,7 +244,7 @@ module KatakataIrb::Types
   HASH = InstanceType.new Hash
   CLASS = InstanceType.new Class
   MODULE = InstanceType.new Module
-  PROC = ProcType.new
+  PROC = InstanceType.new Proc
 
   class UnionType
     attr_reader :types
@@ -275,7 +253,6 @@ module KatakataIrb::Types
       @types = []
       singletons = []
       instances = {}
-      procs = []
       collect = -> type do
         case type
         in UnionType
@@ -287,12 +264,10 @@ module KatakataIrb::Types
           end
         in SingletonType
           singletons << type
-        in ProcType
-          procs << type
         end
       end
       types.each(&collect)
-      @types = procs.uniq + singletons.uniq + instances.map do |klass, params|
+      @types = singletons.uniq + instances.map do |klass, params|
         InstanceType.new(klass, params.transform_values { |v| UnionType[*v] })
       end
     end
@@ -364,7 +339,7 @@ module KatakataIrb::Types
     when RBS::Types::Union
       UnionType[*return_type.types.map { from_rbs_type _1, self_type, extra_vars }]
     when RBS::Types::Proc
-      InstanceType.new Proc
+      PROC
     when RBS::Types::Tuple
       elem = UnionType[*return_type.types.map { from_rbs_type _1, self_type, extra_vars }]
       InstanceType.new Array, Elem: elem

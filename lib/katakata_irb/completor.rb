@@ -102,8 +102,6 @@ module KatakataIrb::Completor
             return KatakataIrb::Types.class_name_of(t.module_or_class)
           when KatakataIrb::Types::InstanceType
             return KatakataIrb::Types.class_name_of(t.klass)
-          when KatakataIrb::Types::ProcType
-            return 'Proc'
           end
         end
         nil
