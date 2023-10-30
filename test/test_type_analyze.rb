@@ -171,8 +171,15 @@ class TestTypeAnalyze < Minitest::Test
     RUBY
   end
 
+  def test_block
+    assert_call('nil.then{1}.', include: Integer, exclude: NilClass)
+    assert_call('nil.then(&:to_s).', include: String, exclude: NilClass)
+  end
+
   def test_block_break
     assert_call('1.tap{}.', include: [Integer], exclude: NilClass)
+    assert_call('1.tap{break :a}.', include: [Symbol, Integer], exclude: NilClass)
+    assert_call('1.tap{break :a, :b}[0].', include: Symbol)
     assert_call('1.tap{break :a; break "a"}.', include: [Symbol, Integer], exclude: [NilClass, String])
     assert_call('1.tap{break :a if b}.', include: [Symbol, Integer], exclude: NilClass)
     assert_call('1.tap{break :a; break "a" if b}.', include: [Symbol, Integer], exclude: [NilClass, String])
@@ -186,6 +193,8 @@ class TestTypeAnalyze < Minitest::Test
 
   def test_block_next
     assert_call('nil.then{1}.', include: Integer, exclude: [NilClass, Object])
+    assert_call('nil.then{next 1}.', include: Integer, exclude: [NilClass, Object])
+    assert_call('nil.then{next :a, :b}[0].', include: Symbol)
     assert_call('nil.then{next 1; 1.0}.', include: Integer, exclude: [Float, NilClass, Object])
     assert_call('nil.then{next 1; next 1.0}.', include: Integer, exclude: [Float, NilClass, Object])
     assert_call('nil.then{1 if cond}.', include: [Integer, NilClass], exclude: Object)
