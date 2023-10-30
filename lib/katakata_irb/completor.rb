@@ -290,8 +290,7 @@ module KatakataIrb::Completor
     )
     return [node] if location&.start_offset == position
 
-    node.child_nodes.each do |n|
-      next unless n.is_a? Prism::Node
+    node.compact_child_nodes.each do |n|
       match = find_target(n, position)
       next unless match
       match.unshift node
