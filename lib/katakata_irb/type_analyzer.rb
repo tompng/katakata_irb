@@ -918,10 +918,12 @@ class KatakataIrb::TypeAnalyzer
       scope[node.rest.name.to_s] = KatakataIrb::Types.array_of(*rest)
     end
     node.keywords.each do |n|
-      # n is Prism::KeywordParameterNode
+      # n is Prism::KeywordParameterNode (prism = 0.16.0)
+      # n is Prism::RequiredKeywordParameterNode | Prism::OptionalKeywordParameterNode (prism > 0.16.0)
       name = n.name.to_s.delete(':')
       values = [kwargs.delete(name)]
-      values << evaluate(n.value, scope) if n.value
+      # `respond_to?` is for prism > 0.16.0, `&& n.value` is for prism = 0.16.0
+      values << evaluate(n.value, scope) if n.respond_to?(:value) && n.value
       scope[name] = KatakataIrb::Types::UnionType[*values.compact]
     end
     # node.keyword_rest is Prism::KeywordRestParameterNode or Prism::ForwardingParameterNode or Prism::NoKeywordsParameterNode
