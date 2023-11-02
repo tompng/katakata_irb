@@ -172,6 +172,8 @@ class KatakataIrb::TypeAnalyzer
         keys << evaluate(assoc.key, scope)
         values << evaluate(assoc.value, scope)
       when Prism::AssocSplatNode
+        next unless assoc.value # def f(**); {**}
+
         hash = evaluate assoc.value, scope
         unless hash.is_a?(KatakataIrb::Types::InstanceType) && hash.klass == Hash
           hash = method_call hash, :to_hash, [], nil, nil, scope
@@ -461,7 +463,6 @@ class KatakataIrb::TypeAnalyzer
       elsif node.value
         evaluate node.value, scope
       else
-        # For syntax invalid code like `(*a).b`
         KatakataIrb::Types::NIL
       end
     )
@@ -854,7 +855,7 @@ class KatakataIrb::TypeAnalyzer
       end
     when :splat_node
       splat_value = value ? KatakataIrb::Types.array_of(value) : KatakataIrb::Types::ARRAY
-      assign_required_parameter node.expression, splat_value, scope
+      assign_required_parameter node.expression, splat_value, scope if node.expression
     end
   end
 
@@ -1032,7 +1033,7 @@ class KatakataIrb::TypeAnalyzer
     when Prism::CallNode
       evaluated_receivers&.[](node.receiver) || evaluate(node.receiver, scope) if node.receiver
     when Prism::SplatNode
-      evaluate_write node.expression, KatakataIrb::Types.array_of(value), scope, evaluated_receivers
+      evaluate_write node.expression, KatakataIrb::Types.array_of(value), scope, evaluated_receivers if node.expression
     when Prism::LocalVariableTargetNode, Prism::GlobalVariableTargetNode, Prism::InstanceVariableTargetNode, Prism::ClassVariableTargetNode, Prism::ConstantTargetNode
       scope[node.name.to_s] = value
     when Prism::ConstantPathTargetNode
@@ -1083,13 +1084,15 @@ class KatakataIrb::TypeAnalyzer
   def evaluate_list_splat_items(list, scope)
     items = list.flat_map do |node|
       if node.is_a? Prism::SplatNode
+        next unless node.expression # def f(*); [*]
+
         splat = evaluate node.expression, scope
         array_elem, non_array = partition_to_array splat.nonnillable, :to_a
         [*array_elem, *non_array]
       else
         evaluate node, scope
       end
-    end.uniq
+    end.compact.uniq
     KatakataIrb::Types::UnionType[*items]
   end
 
