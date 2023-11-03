@@ -59,11 +59,7 @@ class TestKatakataIrb < Minitest::Test
     end
     ignore_class_names = [
       # Not traversed
-      'Prism::BlockLocalVariableNode',
-      # Removed in prism > 0.16.0
-      'Prism::KeywordParameterNode',
-      # Added in prism > 0.16.0
-      'Prism::OptionalKeywordParameterNode', 'Prism::RequiredKeywordParameterNode'
+      'Prism::BlockLocalVariableNode'
     ]
     implemented_node_class_names = [
       *codes.join.scan(/evaluate_[a-z_]+/).grep(/_node$/).map { "Prism::#{_1[9..].split('_').map(&:capitalize).join}" },
