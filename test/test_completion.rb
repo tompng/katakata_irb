@@ -85,10 +85,10 @@ class TestCompletor < Minitest::Test
     bind = binding
     assert_completion('bo.f', binding: bind, include: 'foo')
     assert_completion('def bo.baz; self.', binding: bind, include: 'foo')
-    assert_completion('def bo.baz; @b', binding: bind, include: '@bar')
+    assert_completion('def bo.baz; @', binding: bind, include: '@bar')
     assert_completion('def bo.baz; @bar.', binding: bind, include: 'abs')
     bo_self_bind = bo.instance_eval { Kernel.binding }
-    assert_completion('@b', binding: bo_self_bind, include: '@bar')
+    assert_completion('@', binding: bo_self_bind, include: '@bar')
     assert_completion('@bar.', binding: bo_self_bind, include: 'abs')
   end
 end
