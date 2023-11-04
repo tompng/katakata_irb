@@ -79,9 +79,10 @@ module KatakataIrb::Completor
       name = input[/[a-zA-Z_0-9]*[!?=]?\z/]
       method_doc = -> type do
         type = type.types.find { _1.all_methods.include? name.to_sym }
-        if type.is_a? KatakataIrb::Types::SingletonType
+        case type
+        when KatakataIrb::Types::SingletonType
           "#{KatakataIrb::Types.class_name_of(type.module_or_class)}.#{name}"
-        elsif type.is_a? KatakataIrb::Types::InstanceType
+        when KatakataIrb::Types::InstanceType
           "#{KatakataIrb::Types.class_name_of(type.klass)}##{name}"
         end
       end

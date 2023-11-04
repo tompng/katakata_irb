@@ -77,4 +77,20 @@ class TestCompletor < Minitest::Test
     assert_completion('@@fuga = 1; @@', include: '@@fuga')
     assert_completion('@@fuga = 1; @@f', include: '@@fuga')
   end
+
+  def test_basic_object
+    bo = BasicObject.new
+    def bo.foo; end
+    bo.instance_eval { @bar = 1 }
+    bind = binding
+    assert_completion('bo.f', binding: bind, include: 'foo')
+    assert_completion('def bo.baz; self.', binding: bind, include: 'foo')
+    bo_self_bind = bo.instance_eval { Kernel.binding }
+    assert_completion('@', binding: bo_self_bind, include: '@bar')
+    assert_completion('@bar.', binding: bo_self_bind, include: 'abs')
+    if Class.method_defined? :attached_object
+      assert_completion('def bo.baz; @', binding: bind, include: '@bar')
+      assert_completion('def bo.baz; @bar.', binding: bind, include: 'abs')
+    end
+  end
 end

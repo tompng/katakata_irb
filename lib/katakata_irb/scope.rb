@@ -4,19 +4,19 @@ require 'set'
 require_relative 'types'
 
 module KatakataIrb
-  class BaseScope
-    BREAK_RESULT = '%break'
-    NEXT_RESULT = '%next'
-    RETURN_RESULT = '%return'
-    PATTERNMATCH_BREAK = '%match'
 
+  OBJECT_SINGLETON_CLASS_METHOD = Object.instance_method(:singleton_class)
+  OBJECT_INSTANCE_VARIABLES_METHOD = Object.instance_method(:instance_variables)
+  OBJECT_INSTANCE_VARIABLE_GET_METHOD = Object.instance_method(:instance_variable_get)
+
+  class RootScope
     attr_reader :module_nesting, :self_object
 
     def initialize(binding, self_object, local_variables)
       @binding = binding
       @self_object = self_object
       @cache = {}
-      modules = [*binding.eval('Module.nesting'), Object]
+      modules = [*binding.eval('::Module.nesting'), Object]
       @module_nesting = modules.map { [_1, []] }
       binding_local_variables = binding.local_variables
       uninitialized_locals = local_variables - binding_local_variables
@@ -60,15 +60,21 @@ module KatakataIrb
 
     def [](name)
       @cache[name] ||= (
-        fallback = KatakataIrb::Types::NIL
-        case BaseScope.type_by_name name
+        value = case RootScope.type_by_name name
         when :ivar
-          BaseScope.type_of(fallback: fallback) { @self_object.instance_variable_get name }
+          begin
+            OBJECT_INSTANCE_VARIABLE_GET_METHOD.bind_call(@self_object, name)
+          rescue NameError
+          end
         when :lvar
-          BaseScope.type_of(fallback: fallback) { @binding.local_variable_get(name) }
+          begin
+            @binding.local_variable_get(name)
+          rescue NameError
+          end
         when :gvar
-          BaseScope.type_of(fallback: fallback) { @binding.eval name if @global_variables.include? name }
+          @binding.eval name if @global_variables.include? name
         end
+        Types.type_from_object(value)
       )
     end
 
@@ -79,14 +85,6 @@ module KatakataIrb
     def local_variables() = @local_variables.to_a
 
     def global_variables() = @global_variables.to_a
-
-    def self.type_of(fallback: KatakataIrb::Types::OBJECT)
-      begin
-        KatakataIrb::Types.type_from_object yield
-      rescue
-        fallback
-      end
-    end
 
     def self.type_by_name(name)
       if name.start_with? '@@'
@@ -107,10 +105,15 @@ module KatakataIrb
     end
   end
 
-  class Scope < BaseScope
+  class Scope
+    BREAK_RESULT = '%break'
+    NEXT_RESULT = '%next'
+    RETURN_RESULT = '%return'
+    PATTERNMATCH_BREAK = '%match'
+
     attr_reader :parent, :mergeable_changes, :level, :module_nesting
 
-    def self.from_binding(binding, locals) = new(BaseScope.new(binding, binding.eval('self'), locals))
+    def self.from_binding(binding, locals) = new(RootScope.new(binding, binding.receiver, locals))
 
     def initialize(parent, table = {}, trace_ivar: true, trace_lvar: true, self_type: nil, nesting: nil)
       @parent = parent
@@ -154,7 +157,7 @@ module KatakataIrb
 
     def trace?(name)
       return false unless @parent
-      type = BaseScope.type_by_name(name)
+      type = RootScope.type_by_name(name)
       type == :ivar ? @trace_ivar : type == :lvar ? @trace_lvar : true
     end
 
@@ -182,7 +185,7 @@ module KatakataIrb
     end
 
     def [](name)
-      type = BaseScope.type_by_name(name)
+      type = RootScope.type_by_name(name)
       if type == :const
         return get_const(nil, nil, name) || KatakataIrb::Types::NIL if name.include?('::')
 
@@ -218,7 +221,7 @@ module KatakataIrb
     end
 
     def []=(name, value)
-      type = BaseScope.type_by_name(name)
+      type = RootScope.type_by_name(name)
       if type == :const
         if name.include?('::')
           @table[name] = [0, value]
@@ -246,14 +249,14 @@ module KatakataIrb
 
     def global_variables
       gvar_keys = @table.keys.select do |name|
-        BaseScope.type_by_name(name) == :gvar
+        RootScope.type_by_name(name) == :gvar
       end
       gvar_keys | @parent.global_variables
     end
 
     def local_variables
       lvar_keys = @table.keys.select do |name|
-        BaseScope.type_by_name(name) == :lvar
+        RootScope.type_by_name(name) == :lvar
       end
       lvar_keys |= @parent.local_variables if @trace_lvar
       lvar_keys
@@ -280,7 +283,7 @@ module KatakataIrb
     end
 
     def table_instance_variables
-      ivars = @table.keys.select { BaseScope.type_by_name(_1) == :ivar }
+      ivars = @table.keys.select { RootScope.type_by_name(_1) == :ivar }
       ivars |= @parent.table_instance_variables if @parent.mutable? && @trace_ivar
       ivars
     end
@@ -291,9 +294,9 @@ module KatakataIrb
       base_self = base_scope.self_object
       self_instance_variables = singleton_classes.flat_map do |singleton_class|
         if singleton_class.respond_to? :attached_object
-          singleton_class.attached_object.instance_variables.map(&:to_s)
-        elsif singleton_class == base_self.singleton_class
-          base_self.instance_variables.map(&:to_s)
+          OBJECT_INSTANCE_VARIABLES_METHOD.bind_call(singleton_class.attached_object).map(&:to_s)
+        elsif singleton_class == OBJECT_SINGLETON_CLASS_METHOD.bind_call(base_self)
+          OBJECT_INSTANCE_VARIABLES_METHOD.bind_call(base_self).map(&:to_s)
         else
           []
         end
@@ -317,13 +320,17 @@ module KatakataIrb
         end
       end
       types = self_objects.map do |object|
-        BaseScope.type_of(fallback: KatakataIrb::Types::NIL) { object.instance_variable_get name }
+        value = begin
+          OBJECT_INSTANCE_VARIABLE_GET_METHOD.bind_call(object, name)
+        rescue NameError
+        end
+        Types.type_from_object value
       end
       KatakataIrb::Types::UnionType[*types]
     end
 
     def table_class_variables
-      cvars = @table.keys.filter_map { _1.split('::', 2).first if BaseScope.type_by_name(_1) == :cvar }
+      cvars = @table.keys.filter_map { _1.split('::', 2).first if RootScope.type_by_name(_1) == :cvar }
       cvars |= @parent.table_class_variables if @parent.mutable?
       cvars
     end
