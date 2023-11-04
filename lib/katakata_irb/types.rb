@@ -23,12 +23,8 @@ module KatakataIrb::Types
     nil
   end
 
-  Splat = Struct.new :item
-
   OBJECT_CLASS_METHOD = Object.instance_method(:class)
   OBJECT_SINGLETON_CLASS_METHOD = Object.instance_method(:singleton_class)
-  CLASS_SUPERCLASS_METHOD = Class.instance_method(:superclass)
-  CLASS_IS_SINGLETON_CLASS_METHOD = Class.instance_method(:singleton_class?)
   MODULE_NAME_METHOD = Module.instance_method(:name)
 
   def self.class_name_of(klass)
@@ -78,7 +74,7 @@ module KatakataIrb::Types
         [t, t.klass, false]
       end
     end
-    has_splat = args_types.any? { _1.is_a? Splat }
+    has_splat = args_types.include?(nil)
     methods_with_score = receivers.flat_map do |receiver_type, klass, singleton|
       method = rbs_search_method klass, method_name, singleton
       next [] unless method
@@ -98,7 +94,7 @@ module KatakataIrb::Types
           args += [InstanceType.new(Hash, K: SYMBOL, V: kw_value_type)]
         end
         if has_splat
-          score += 1 if args.count { !(_1.is_a? Splat) } <= reqs.size + opts.size + trailings.size
+          score += 1 if args.count(&:itself) <= reqs.size + opts.size + trailings.size
         elsif reqs.size + trailings.size <= args.size && (rest || args.size <= reqs.size + opts.size + trailings.size)
           score += 2
           centers = args[reqs.size...-trailings.size]
