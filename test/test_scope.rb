@@ -4,7 +4,7 @@ require 'test_helper'
 
 class TestScope < Minitest::Test
   Types = KatakataIrb::Types
-  BaseScope = KatakataIrb::BaseScope
+  RootScope = KatakataIrb::RootScope
   Scope = KatakataIrb::Scope
   NIL = Types::NIL
   A, B, C, D, E, F, G, H, I, J, K = ('A'..'K').map do |name|
@@ -22,7 +22,7 @@ class TestScope < Minitest::Test
   end
 
   def base_scope
-    BaseScope.new(binding, Object.new, [])
+    RootScope.new(binding, Object.new, [])
   end
 
   def test_lvar
