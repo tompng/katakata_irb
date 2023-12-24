@@ -1,3 +1,9 @@
+# Important: Switch to gem repl_type_completor
+IRB now supports type based completion with [ruby/repl_type_completor](https://github.com/ruby/repl_type_completor/).
+
+See [IRB's README](https://github.com/ruby/irb?tab=readme-ov-file#type-based-completion) for more information.
+
+
 # KatakataIrb: IRB with Kata(型 Type) completion
 
 KatakataIrb might provide a better autocompletion based on type analysis to irb.
